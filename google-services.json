@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "37810808180",
+    "firebase_url": "https://bunk-mates-beccc-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "bunk-mates-beccc",
+    "storage_bucket": "bunk-mates-beccc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:37810808180:android:169376d3c46cf08926f821",
+        "android_client_info": {
+          "package_name": "com.bm.bunkmates"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "37810808180-lr4iuo391nht023j3eh7b6e6925m7ma4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.bm.bunkmates",
+            "certificate_hash": "65ef72bd4f094d5274b84e0c3cdd452077a11b46"
+          }
+        },
+        {
+          "client_id": "37810808180-4su0afr7ht944vfpf4naiptfh9ldbfqs.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD8X80eOol95VkcF9bJK76YveGHz2DL2gI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "37810808180-4su0afr7ht944vfpf4naiptfh9ldbfqs.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
