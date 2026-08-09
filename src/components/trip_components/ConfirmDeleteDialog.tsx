@@ -13,19 +13,38 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 
 interface Props {
-  confirmDeleteOpen: boolean;
-  setConfirmDeleteOpen: (value: boolean) => void;
-  handleDeleteTrip: () => Promise<void> | void; // allow async
-  mode: "light" | "dark";
+  confirmDeleteOpen?: boolean;
+  setConfirmDeleteOpen?: (value: boolean) => void;
+  visible?: boolean;
+  onClose?: () => void;
+  handleDeleteTrip?: () => Promise<void> | void;
+  onConfirm?: () => Promise<void> | void;
+  tripName?: string;
+  mode?: "light" | "dark";
 }
 
 const ConfirmDeleteDialog: React.FC<Props> = ({
   confirmDeleteOpen,
   setConfirmDeleteOpen,
+  visible,
+  onClose,
   handleDeleteTrip,
-  mode,
+  onConfirm,
+  tripName,
+  mode = "dark",
 }) => {
   const isDark = mode === "dark";
+  const isOpen = visible !== undefined ? visible : !!confirmDeleteOpen;
+
+  const handleClose = () => {
+    if (onClose) {
+      onClose();
+    } else if (setConfirmDeleteOpen) {
+      setConfirmDeleteOpen(false);
+    }
+  };
+
+  const handleAction = onConfirm || handleDeleteTrip;
 
   const [loading, setLoading] = useState(false);
 
@@ -34,7 +53,7 @@ const ConfirmDeleteDialog: React.FC<Props> = ({
   const iconScale = useRef(new Animated.Value(0.8)).current;
 
   useEffect(() => {
-    if (confirmDeleteOpen) {
+    if (isOpen) {
       Animated.parallel([
         Animated.timing(opacityAnim, {
           toValue: 1,
@@ -58,16 +77,14 @@ const ConfirmDeleteDialog: React.FC<Props> = ({
       opacityAnim.setValue(0);
       iconScale.setValue(0.8);
     }
-  }, [confirmDeleteOpen]);
+  }, [isOpen]);
 
-  // ✅ HANDLE DELETE
   const onDeletePress = async () => {
+    if (!handleAction) return;
     try {
       setLoading(true);
-
-      await handleDeleteTrip(); // delete from firebase
-
-      setConfirmDeleteOpen(false); // close modal
+      await handleAction();
+      handleClose();
     } catch (error) {
       console.log("Delete Error:", error);
     } finally {
@@ -77,10 +94,10 @@ const ConfirmDeleteDialog: React.FC<Props> = ({
 
   return (
     <Modal
-      visible={confirmDeleteOpen}
+      visible={isOpen}
       transparent
       animationType="fade"
-      onRequestClose={() => setConfirmDeleteOpen(false)}
+      onRequestClose={handleClose}
     >
       <BlurView
         intensity={40}
@@ -89,7 +106,7 @@ const ConfirmDeleteDialog: React.FC<Props> = ({
       >
         <TouchableOpacity
           style={{ flex: 1 }}
-          onPress={() => setConfirmDeleteOpen(false)}
+          onPress={handleClose}
         />
       </BlurView>
 
@@ -106,7 +123,7 @@ const ConfirmDeleteDialog: React.FC<Props> = ({
           <LinearGradient
             colors={
               isDark
-                ? ["rgba(20,20,20,0.9)", "rgba(40,40,40,0.85)"]
+                ? ["rgba(20,20,20,0.95)", "rgba(40,40,40,0.9)"]
                 : ["rgba(255,255,255,0.95)", "rgba(240,240,240,0.9)"]
             }
             style={styles.gradient}
@@ -144,7 +161,9 @@ const ConfirmDeleteDialog: React.FC<Props> = ({
                 { color: isDark ? "#ccc" : "#555" },
               ]}
             >
-              Are you sure you want to permanently delete this trip?
+              {tripName
+                ? `Are you sure you want to permanently delete "${tripName}"?`
+                : "Are you sure you want to permanently delete this trip?"}
             </Text>
 
             <Text style={styles.warningText}>
@@ -154,7 +173,7 @@ const ConfirmDeleteDialog: React.FC<Props> = ({
             <View style={styles.buttonRow}>
               <TouchableOpacity
                 disabled={loading}
-                onPress={() => setConfirmDeleteOpen(false)}
+                onPress={handleClose}
                 style={[
                   styles.cancelButton,
                   { borderColor: isDark ? "#888" : "#aaa" },
@@ -197,81 +216,75 @@ export default ConfirmDeleteDialog;
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.45)'
+    backgroundColor: "rgba(0,0,0,0.6)",
   },
   centerContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
   },
   dialog: {
-    width: '100%',
-    maxWidth: 420,
-    borderRadius: 14,
-    overflow: 'hidden',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
+    width: "100%",
+    maxWidth: 320,
+    borderRadius: 24,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
   },
   gradient: {
-    padding: 20,
-    alignItems: 'center',
+    padding: 22,
+    alignItems: "center",
   },
   iconContainer: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
   },
   title: {
-    fontSize: 20,
-    fontWeight: '700',
-    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: "800",
+    marginBottom: 8,
   },
   message: {
-    textAlign: 'center',
-    marginTop: 8,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 18,
+    marginBottom: 6,
   },
   warningText: {
-    marginTop: 10,
-    color: '#ff6666',
-    fontSize: 13,
-    textAlign: 'center',
+    color: "#ff4444",
+    fontSize: 11,
+    fontWeight: "700",
+    marginBottom: 20,
   },
   buttonRow: {
-    flexDirection: 'row',
-    marginTop: 18,
-    width: '100%',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
   },
   cancelButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 10,
+    flex: 1,
+    height: 42,
+    borderRadius: 12,
     borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   deleteButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+    flex: 1,
+    minWidth: 110,
+    height: 42,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
   },
   deleteText: {
-    color: '#fff',
-    fontWeight: '700',
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "800",
   },
 });

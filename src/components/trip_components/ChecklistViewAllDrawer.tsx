@@ -4,14 +4,14 @@ import {
   Text,
   Modal,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
 import { BlurView } from "expo-blur";
-import Checkbox from "@react-native-community/checkbox";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 
 interface ChecklistItem {
   id: string;
@@ -24,7 +24,7 @@ interface Props {
   setChecklistViewAllOpen: (value: boolean) => void;
   checklist: ChecklistItem[];
   toggleTask: (task: ChecklistItem) => void;
-  mode: "light" | "dark";
+  mode?: "light" | "dark";
 }
 
 const ChecklistViewAllDrawer: React.FC<Props> = ({
@@ -32,7 +32,7 @@ const ChecklistViewAllDrawer: React.FC<Props> = ({
   setChecklistViewAllOpen,
   checklist,
   toggleTask,
-  mode,
+  mode = "dark",
 }) => {
   const isDark = mode === "dark";
 
@@ -44,109 +44,67 @@ const ChecklistViewAllDrawer: React.FC<Props> = ({
       onRequestClose={() => setChecklistViewAllOpen(false)}
     >
       {/* Blur Backdrop */}
-      <BlurView
-        intensity={25}
-        tint={isDark ? "dark" : "light"}
-        style={styles.backdrop}
-      >
-        <TouchableOpacity
-          style={{ flex: 1 }}
-          onPress={() => setChecklistViewAllOpen(false)}
-        />
+      <BlurView intensity={25} tint={isDark ? "dark" : "light"} style={styles.backdrop}>
+        <TouchableOpacity style={{ flex: 1 }} onPress={() => setChecklistViewAllOpen(false)} />
       </BlurView>
 
       {/* Drawer */}
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
-        style={[
-          styles.drawer,
-          { backgroundColor: isDark ? "#000" : "#fff" },
-        ]}
+        style={[styles.drawer, { backgroundColor: isDark ? "#0e0e10" : "#fff" }]}
       >
         {/* Drag Indicator */}
         <View style={styles.handle} />
 
         {/* Header */}
         <View style={styles.header}>
-          <Text
-            style={[
-              styles.title,
-              { color: isDark ? "#fff" : "#000" },
-            ]}
-          >
+          <Text style={[styles.title, { color: isDark ? "#fff" : "#000" }]}>
             Full Checklist
           </Text>
-
-          <TouchableOpacity
-            onPress={() => setChecklistViewAllOpen(false)}
-            style={styles.closeButton}
-          >
-            <MaterialCommunityIcons
-              name="close"
-              size={20}
-              color={isDark ? "#fff" : "#000"}
-            />
+          <TouchableOpacity onPress={() => setChecklistViewAllOpen(false)} style={styles.closeButton}>
+            <Ionicons name="close" size={20} color={isDark ? "#fff" : "#000"} />
           </TouchableOpacity>
         </View>
 
         {/* Checklist List */}
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          style={{ maxHeight: "80%" }}
-        >
+        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: "80%" }}>
           {checklist.map((task) => (
-            <TouchableOpacity
+            <Pressable
               key={task.id}
               onPress={() => toggleTask(task)}
               style={[
                 styles.listItem,
                 {
                   backgroundColor: task.completed
-                    ? isDark
-                      ? "#00000011"
-                      : "transparent"
-                    : isDark
-                    ? "#f1f1f111"
-                    : "#0000000d",
+                    ? isDark ? "rgba(255,255,255,0.03)" : "transparent"
+                    : isDark ? "#1c1c1c" : "#f0f0f0",
                 },
               ]}
             >
-              <Checkbox
-                value={task.completed}
-                onValueChange={() => toggleTask(task)}
-                tintColors={{
-                  true: "#4caf50",
-                  false: "#999",
-                }}
+              {/* Custom checkbox using Ionicons */}
+              <Ionicons
+                name={task.completed ? "checkbox" : "square-outline"}
+                size={22}
+                color={task.completed ? "#4caf50" : isDark ? "#888" : "#999"}
+                style={{ marginRight: 10 }}
               />
 
               <Text
                 style={[
                   styles.taskText,
                   {
-                    textDecorationLine: task.completed
-                      ? "line-through"
-                      : "none",
-                    color: task.completed
-                      ? "#888"
-                      : isDark
-                      ? "#fff"
-                      : "#000",
+                    textDecorationLine: task.completed ? "line-through" : "none",
+                    color: task.completed ? "#888" : isDark ? "#fff" : "#000",
                   },
                 ]}
               >
                 {task.text}
               </Text>
-            </TouchableOpacity>
+            </Pressable>
           ))}
 
           {checklist.length === 0 && (
-            <Text
-              style={[
-                styles.emptyText,
-                { color: isDark ? "#888" : "#666" },
-              ]}
-            >
+            <Text style={[styles.emptyText, { color: isDark ? "#888" : "#666" }]}>
               No checklist items yet.
             </Text>
           )}
@@ -167,28 +125,30 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: "100%",
     padding: 20,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     maxHeight: "85%",
+    borderTopWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
   handle: {
     width: 40,
-    height: 5,
+    height: 4,
     backgroundColor: "#888",
     opacity: 0.5,
-    borderRadius: 2.5,
+    borderRadius: 2,
     alignSelf: "center",
-    marginBottom: 10,
+    marginBottom: 12,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: 12,
   },
   title: {
     fontSize: 18,
-    fontWeight: "bold",
+    fontWeight: "700",
   },
   closeButton: {
     padding: 6,
@@ -197,12 +157,12 @@ const styles = StyleSheet.create({
   listItem: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 6,
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 8,
   },
   taskText: {
-    marginLeft: 8,
+    marginLeft: 4,
     flex: 1,
     fontSize: 15,
   },

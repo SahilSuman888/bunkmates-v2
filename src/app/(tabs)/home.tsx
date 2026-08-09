@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useMemo } from "react";
-import Animated from "../reanimatedShim";
 import {
   View,
   ScrollView,
@@ -9,18 +8,21 @@ import {
   Image,
   Text,
   StatusBar,
-  Dimensions,
   ImageBackground,
   FlatList,
+  useWindowDimensions,
 } from "react-native";
+
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+
 import { useUser } from "../../contexts/UserContext";
 import { db } from "../../lib/firebase";
-import { 
-  collection, 
-  query, 
+
+import {
+  collection,
+  query,
   where,
   onSnapshot,
   updateDoc,
@@ -32,28 +34,32 @@ import {
   doc,
   getDocs,
 } from "firebase/firestore";
-import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+
+import {
+  Ionicons,
+  Feather,
+  MaterialCommunityIcons,
+} from "@expo/vector-icons";
+
 import NotificationBell from "../../components/NotificationBell";
+
 import * as Location from "expo-location";
-import * as Notifications from "expo-notifications";
-import * as Device from "expo-device";
-import Constants from "expo-constants";
 
-
-
-// Components
 import { fetchCurrentWeather } from "../../lib/WeatherService";
 import WeatherDetailsSheet from "./Weather/WeatherDetailsSheet";
+import AQIDetailsSheet from "./Weather/AQIDetailsSheet";
 
-// Import the JSON data
 import placesData from "../data/data.json";
 
-const { width } = Dimensions.get("window");
+
+// ============================================================
+// PLACE DATA
+// ============================================================
 
 const generateAllPlaces = () =>
-  placesData.states.flatMap(state =>
-    state.districts.flatMap(district =>
-      district.places.map(place => ({
+  placesData.states.flatMap((state) =>
+    state.districts.flatMap((district) =>
+      district.places.map((place) => ({
         ...place,
         districtName: district.name,
         stateName: state.name,
@@ -62,39 +68,136 @@ const generateAllPlaces = () =>
     )
   );
 
+
+// ============================================================
+// HOME
+// ============================================================
+
 export default function Home() {
   const router = useRouter();
-  const { user, loading: authLoading, userData } = useUser();
+
+  const { width, height } = useWindowDimensions();
+
+  const {
+    user,
+    loading: authLoading,
+    userData,
+  } = useUser();
+
+
+  // ==========================================================
+  // RESPONSIVE SIZING
+  // ==========================================================
+
+  /*
+   * Base design is optimized around a normal 390px phone.
+   *
+   * Scaling is intentionally limited.
+   * This prevents the UI from becoming huge on larger phones.
+   */
+
+  const scale = Math.min(
+    Math.max(width / 390, 0.94),
+    1.02
+  );
+
+  const horizontalPadding = Math.min(
+    Math.max(width * 0.045, 18),
+    22
+  );
+
+  const tripCardWidth =
+    width - horizontalPadding * 2;
+
+  const tripCardHeight = Math.min(
+    Math.max(width * 0.42, 165),
+    190
+  );
+
+  const reminderWidth = Math.min(
+    Math.max(width * 0.72, 270),
+    320
+  );
+
+  const placeCardWidth =
+    width - horizontalPadding * 2;
+
+  const placeImageHeight = Math.min(
+    Math.max(placeCardWidth * 0.58, 190),
+    260
+  );
+
+
+  // ==========================================================
+  // STATES
+  // ==========================================================
 
   const [loading, setLoading] = useState(true);
-  const [weather, setWeather] = useState<any>(null);
-  const [aqiValue, setAqiValue] = useState<number>(70);
-  
-  // Firestore Data States
-  const [trips, setTrips] = useState<any[]>([]);
-  const [reminders, setReminders] = useState<any[]>([]);
-  const [likesData, setLikesData] = useState<any>({});
-  const [unreadCount, setUnreadCount] = useState(0); // Track unread notification count
 
-  // UI States
-  const [showWeatherDetails, setShowWeatherDetails] = useState(false);
-  const [activeTripIndex, setActiveTripIndex] = useState(0);
+  const [weather, setWeather] =
+    useState<any>(null);
 
-  const allPlaces = useMemo(() => generateAllPlaces(), []);
-  const featuredPlace = useMemo(() => allPlaces[0], [allPlaces]);
+  const [aqiValue, setAqiValue] =
+    useState<number | null>(null);
+
+  const [aqiData, setAqiData] =
+    useState<any>(null);
+
+  const [showAqiDetails, setShowAqiDetails] =
+    useState(false);
+
+  const [locationAvailable, setLocationAvailable] =
+    useState(false);
+
+  const [trips, setTrips] =
+    useState<any[]>([]);
+
+  const [reminders, setReminders] =
+    useState<any[]>([]);
+
+  const [likesData, setLikesData] =
+    useState<any>({});
+
+  const [unreadCount, setUnreadCount] =
+    useState(0);
+
+  const [showWeatherDetails, setShowWeatherDetails] =
+    useState(false);
+
+  const [activeTripIndex, setActiveTripIndex] =
+    useState(0);
+
+
+  // ==========================================================
+  // PLACES
+  // ==========================================================
+
+  const allPlaces = useMemo(
+    () => generateAllPlaces(),
+    []
+  );
+
+
+  // ==========================================================
+  // AUTH
+  // ==========================================================
 
   useEffect(() => {
     if (authLoading) return;
+
     if (!user) {
-      router.replace("/login");
+      router.replace("/login" as any);
       return;
     }
+
     setLoading(false);
   }, [user, authLoading]);
 
-  // ...existing code...
 
-  /* ================= FIRESTORE REAL-TIME DATA ================= */
+  // ==========================================================
+  // FIRESTORE TRIPS + REMINDERS
+  // ==========================================================
+
   useEffect(() => {
     if (!user) return;
 
@@ -103,63 +206,127 @@ export default function Home() {
       where("members", "array-contains", user.uid)
     );
 
-    const unsubTrips = onSnapshot(tripsQuery, (snapshot) => {
-      const tripList = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as any[];
+    const unsubTrips = onSnapshot(
+      tripsQuery,
+      (snapshot) => {
+        const tripList = snapshot.docs.map((item) => ({
+          id: item.id,
+          ...item.data(),
+        })) as any[];
 
-      tripList.sort((a, b) => {
-        const dateA = new Date(a.startDate || 0).getTime();
-        const dateB = new Date(b.startDate || 0).getTime();
-        return dateB - dateA;
-      });
+        tripList.sort((a, b) => {
+          const dateA = new Date(
+            a.startDate || 0
+          ).getTime();
 
-      // enrich with groupChat iconURL if available
-      (async () => {
-        try {
-          const enriched = await Promise.all(
-            tripList.map(async (t) => {
-              try {
-                const q = query(collection(db, "groupChats"), where("tripId", "==", t.id));
-                const snap = await getDocs(q);
-                if (!snap.empty) {
-                  const g = snap.docs[0].data();
-                  return { ...t, iconURL: g.iconURL || t.iconURL };
-                }
-              } catch (e) {
-                console.error("groupChat lookup failed", e);
-              }
-              return t;
-            })
-          );
-          setTrips(enriched);
-        } catch (e) {
-          console.error(e);
-          setTrips(tripList);
-        }
-      })();
-    });
+          const dateB = new Date(
+            b.startDate || 0
+          ).getTime();
+
+          return dateB - dateA;
+        });
+
+
+        // ------------------------------------------------------
+        // Get group chat image
+        // ------------------------------------------------------
+
+        (async () => {
+          try {
+            const enriched =
+              await Promise.all(
+                tripList.map(async (trip) => {
+                  try {
+                    const groupQuery =
+                      query(
+                        collection(
+                          db,
+                          "groupChats"
+                        ),
+                        where(
+                          "tripId",
+                          "==",
+                          trip.id
+                        )
+                      );
+
+                    const groupSnapshot =
+                      await getDocs(
+                        groupQuery
+                      );
+
+                    if (
+                      !groupSnapshot.empty
+                    ) {
+                      const group =
+                        groupSnapshot.docs[0].data();
+
+                      return {
+                        ...trip,
+                        iconURL:
+                          group.iconURL ||
+                          trip.iconURL,
+                      };
+                    }
+                  } catch (error) {
+                    console.error(
+                      "groupChat lookup failed:",
+                      error
+                    );
+                  }
+
+                  return trip;
+                })
+              );
+
+            setTrips(enriched);
+          } catch (error) {
+            console.error(
+              "Trip enrichment error:",
+              error
+            );
+
+            setTrips(tripList);
+          }
+        })();
+      }
+    );
+
+
+    // ----------------------------------------------------------
+    // REMINDERS
+    // ----------------------------------------------------------
 
     const remindersQuery = query(
       collection(db, "reminders"),
       where("uid", "==", user.uid)
     );
 
-    const unsubReminders = onSnapshot(remindersQuery, (snapshot) => {
-      const reminderList = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as any[];
+    const unsubReminders = onSnapshot(
+      remindersQuery,
+      (snapshot) => {
+        const reminderList =
+          snapshot.docs.map((item) => ({
+            id: item.id,
+            ...item.data(),
+          })) as any[];
 
-      reminderList.sort((a, b) => {
-        const dateA = new Date(a.date || 0).getTime();
-        const dateB = new Date(b.date || 0).getTime();
-        return dateA - dateB;
-      });
+        reminderList.sort((a, b) => {
+          const dateA = new Date(
+            a.date || 0
+          ).getTime();
 
-      setReminders(reminderList);
-    });
+          const dateB = new Date(
+            b.date || 0
+          ).getTime();
+
+          return dateA - dateB;
+        });
+
+        setReminders(reminderList);
+      }
+    );
+
 
     return () => {
       unsubTrips();
@@ -167,385 +334,2154 @@ export default function Home() {
     };
   }, [user]);
 
+
+  // ==========================================================
+  // PLACE LIKES
+  // ==========================================================
+
   useEffect(() => {
     if (!user || !allPlaces.length) return;
+
     const unsubscribes: any[] = [];
+
     allPlaces.forEach((place) => {
-      const ref = doc(db, "places", place.placeId);
-      const unsub = onSnapshot(ref, (snap) => {
-        if (snap.exists()) {
-          setLikesData((prev: any) => ({ ...prev, [place.placeId]: snap.data() }));
-        } else {
-          setLikesData((prev: any) => ({ ...prev, [place.placeId]: { likesCount: 0, likedBy: [] } }));
+      const placeRef = doc(
+        db,
+        "places",
+        place.placeId
+      );
+
+      const unsubscribe = onSnapshot(
+        placeRef,
+        (snapshot) => {
+          if (snapshot.exists()) {
+            setLikesData((previous: any) => ({
+              ...previous,
+              [place.placeId]:
+                snapshot.data(),
+            }));
+          } else {
+            setLikesData((previous: any) => ({
+              ...previous,
+              [place.placeId]: {
+                likesCount: 0,
+                likedBy: [],
+              },
+            }));
+          }
         }
-      });
-      unsubscribes.push(unsub);
+      );
+
+      unsubscribes.push(unsubscribe);
     });
-    return () => unsubscribes.forEach((u) => u());
+
+    return () =>
+      unsubscribes.forEach(
+        (unsubscribe) =>
+          unsubscribe()
+      );
   }, [user, allPlaces]);
 
-  const handleLike = async (place: any) => {
+
+  // ==========================================================
+  // LIKE HANDLER
+  // ==========================================================
+
+  const handleLike = async (
+    place: any
+  ) => {
     if (!user) return;
-    const ref = doc(db, "places", place.placeId);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      await setDoc(ref, { likesCount: 1, likedBy: [user.uid], updatedAt: new Date() });
-      return;
-    }
-    const data = snap.data();
-    const alreadyLiked = data.likedBy?.includes(user.uid);
-    if (alreadyLiked) {
-      await updateDoc(ref, { likesCount: increment(-1), likedBy: arrayRemove(user.uid) });
-    } else {
-      await updateDoc(ref, { likesCount: increment(1), likedBy: arrayUnion(user.uid) });
+
+    try {
+      const placeRef = doc(
+        db,
+        "places",
+        place.placeId
+      );
+
+      const snapshot =
+        await getDoc(placeRef);
+
+      if (!snapshot.exists()) {
+        await setDoc(placeRef, {
+          likesCount: 1,
+          likedBy: [user.uid],
+          updatedAt: new Date(),
+        });
+
+        return;
+      }
+
+      const data = snapshot.data();
+
+      const alreadyLiked =
+        data.likedBy?.includes(
+          user.uid
+        );
+
+      if (alreadyLiked) {
+        await updateDoc(
+          placeRef,
+          {
+            likesCount:
+              increment(-1),
+            likedBy:
+              arrayRemove(user.uid),
+          }
+        );
+      } else {
+        await updateDoc(
+          placeRef,
+          {
+            likesCount:
+              increment(1),
+            likedBy:
+              arrayUnion(user.uid),
+          }
+        );
+      }
+    } catch (error) {
+      console.error(
+        "Like error:",
+        error
+      );
     }
   };
 
+
+  // ==========================================================
+  // LOCATION + WEATHER + AQI
+  // ==========================================================
+
   useEffect(() => {
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") return;
-      const loc = await Location.getCurrentPositionAsync({});
-      const data = await fetchCurrentWeather(loc.coords.latitude, loc.coords.longitude);
-      setWeather(data);
-      try {
-        const res = await fetch("https://api.data.gov.in/resource/3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69?api-key=579b464db66ec23bdd0000011c04ccafb50742ba6a0a7d5e22aa498e&format=json&limit=1");
-        const json = await res.json();
-        if (json.records?.length > 0) {
-           setAqiValue(parseInt(json.records[0].avg_value) || 70);
+    let mounted = true;
+
+    const loadLocationAndWeather =
+      async () => {
+        try {
+          const permission =
+            await Location.requestForegroundPermissionsAsync();
+
+          if (
+            permission.status !==
+            "granted"
+          ) {
+            if (mounted) {
+              setLocationAvailable(
+                false
+              );
+              setWeather(null);
+            }
+
+            return;
+          }
+
+          const location =
+            await Location.getCurrentPositionAsync(
+              {
+                accuracy:
+                  Location.Accuracy.Balanced,
+              }
+            );
+
+          if (!mounted) return;
+
+          setLocationAvailable(true);
+
+          // ----------------------------------------------------
+          // WEATHER
+          // ----------------------------------------------------
+
+          try {
+            const weatherData =
+              await fetchCurrentWeather(
+                location.coords.latitude,
+                location.coords.longitude
+              );
+
+            if (mounted) {
+              setWeather(
+                weatherData || null
+              );
+            }
+          } catch (error) {
+            console.log(
+              "Weather fetch error:",
+              error
+            );
+
+            if (mounted) {
+              setWeather(null);
+            }
+          }
+
+
+          // ----------------------------------------------------
+          // AQI
+          // ----------------------------------------------------
+
+          try {
+            const response =
+              await fetch(
+                "https://api.data.gov.in/resource/3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69?api-key=579b464db66ec23bdd0000011c04ccafb50742ba6a0a7d5e22aa498e&format=json&limit=1"
+              );
+
+            const json =
+              await response.json();
+
+            if (
+              mounted &&
+              json.records?.length
+            ) {
+              const rec = json.records[0];
+              setAqiData(rec);
+              const value = parseInt(
+                rec.avg_value
+              );
+
+              if (
+                !Number.isNaN(value)
+              ) {
+                setAqiValue(value);
+              }
+            }
+          } catch (error) {
+            console.log(
+              "AQI fetch error:",
+              error
+            );
+          }
+        } catch (error) {
+          console.log(
+            "Location error:",
+            error
+          );
+
+          if (mounted) {
+            setLocationAvailable(
+              false
+            );
+            setWeather(null);
+          }
         }
-      } catch (e) { console.log("AQI Fetch error", e) }
-    })();
+      };
+
+    loadLocationAndWeather();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const handleScroll = (event: any) => {
-    const slide = Math.ceil(event.nativeEvent.contentOffset.x / event.nativeEvent.layoutMeasurement.width);
-    if (slide !== activeTripIndex) {
+
+  // ==========================================================
+  // TRIP PAGINATION
+  // ==========================================================
+
+  const handleTripScroll = (
+    event: any
+  ) => {
+    const offsetX =
+      event.nativeEvent.contentOffset.x;
+
+    const pageWidth =
+      event.nativeEvent.layoutMeasurement
+        .width;
+
+    if (!pageWidth) return;
+
+    const slide = Math.round(
+      offsetX / pageWidth
+    );
+
+    if (
+      slide !== activeTripIndex
+    ) {
       setActiveTripIndex(slide);
     }
   };
 
-  if (authLoading || loading) {
+
+  // ==========================================================
+  // LOADING
+  // ==========================================================
+
+  if (
+    authLoading ||
+    loading
+  ) {
     return (
-      <View style={[styles.container, styles.center]}>
-        <ActivityIndicator size="large" color="#00f721" />
+      <View
+        style={[
+          styles.container,
+          styles.center,
+        ]}
+      >
+        <ActivityIndicator
+          size="large"
+          color="#ffffff"
+        />
       </View>
     );
   }
 
+
+  // ==========================================================
+  // DISPLAY VALUES
+  // ==========================================================
+
+  const userName =
+    userData?.name ||
+    user?.displayName ||
+    "Mohit Sharma";
+
+  const weatherTemperature =
+    weather?.main?.temp != null
+      ? `${Math.round(
+          weather.main.temp
+        )}°C`
+      : "--";
+
+  const weatherDescription =
+    weather?.weather?.[0]
+      ?.description ||
+    "";
+
+  const weatherLocation =
+    locationAvailable &&
+    weather?.name
+      ? weather.name
+      : "Location currently unavailable";
+
+  const weatherIcon =
+    weather?.weather?.[0]?.icon;
+
+  const getWeatherIcon =
+    () => {
+      if (
+        weatherIcon?.startsWith(
+          "09"
+        ) ||
+        weatherIcon?.startsWith(
+          "10"
+        )
+      ) {
+        return "weather-rainy";
+      }
+
+      if (
+        weatherIcon?.startsWith(
+          "11"
+        )
+      ) {
+        return "weather-lightning";
+      }
+
+      if (
+        weatherIcon?.startsWith(
+          "13"
+        )
+      ) {
+        return "weather-snowy";
+      }
+
+      if (
+        weatherIcon?.startsWith(
+          "50"
+        )
+      ) {
+        return "weather-fog";
+      }
+
+      if (
+        weatherIcon?.startsWith(
+          "01"
+        )
+      ) {
+        return "weather-sunny";
+      }
+
+      if (
+        weatherIcon?.startsWith(
+          "02"
+        ) ||
+        weatherIcon?.startsWith(
+          "03"
+        ) ||
+        weatherIcon?.startsWith(
+          "04"
+        )
+      ) {
+        return "weather-partly-cloudy";
+      }
+
+      return "weather-cloudy";
+    };
+
+
+  // ==========================================================
+  // RENDER
+  // ==========================================================
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" />
-      <View style={styles.container}>
-        
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 140 }}>
-          
-          {/* 1. HEADER */}
-          <View style={styles.header}>
+    <SafeAreaView
+      style={styles.safeArea}
+    >
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="#000000"
+      />
+
+      <View
+        style={[
+          styles.container,
+          {
+            backgroundColor:
+              "#000000",
+          },
+        ]}
+      >
+
+        <ScrollView
+          showsVerticalScrollIndicator={
+            false
+          }
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingBottom:
+                130 * scale,
+            },
+          ]}
+        >
+
+          {/* ==================================================
+              HEADER
+          ================================================== */}
+
+          <View
+            style={[
+              styles.header,
+              {
+                paddingHorizontal:
+                  horizontalPadding,
+              },
+            ]}
+          >
             <View>
-              <Text style={styles.greeting}>Good Night,</Text>
-              <Text style={styles.name}>{userData?.name || user?.displayName || "Mohit Sharma"}</Text>
+              <Text
+                style={[
+                  styles.greeting,
+                  {
+                    fontSize:
+                      15 * scale,
+                  },
+                ]}
+              >
+                Good Evening,
+              </Text>
+
+              <Text
+                style={[
+                  styles.name,
+                  {
+                    fontSize:
+                      24 * scale,
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {userName}
+              </Text>
             </View>
+
             <NotificationBell />
           </View>
 
-          {/* 2. WEATHER & AQI ROW */}
-          <View style={styles.weatherAqiRow}>
-            <Pressable style={styles.weatherInfo} onPress={() => setShowWeatherDetails(true)}>
-              <MaterialCommunityIcons name="white-balance-sunny" size={32} color="#FFD700" />
-              <View style={{ marginLeft: 12 }}>
-                <Text style={styles.tempText}>{Math.round(weather?.main?.temp || 22)}°C - {weather?.name || "Chittaurgarh"}</Text>
-                <Text style={styles.subText}>{weather?.weather[0]?.description || "clear sky"}</Text>
+
+          {/* ==================================================
+              WEATHER + AQI
+          ================================================== */}
+
+          <View
+            style={[
+              styles.weatherAqiRow,
+              {
+                paddingHorizontal:
+                  horizontalPadding,
+                marginTop:
+                  58 * scale,
+              },
+            ]}
+          >
+
+            <Pressable
+              style={styles.weatherInfo}
+              onPress={() => {
+                if (weather) {
+                  setShowWeatherDetails(
+                    true
+                  );
+                }
+              }}
+            >
+
+              <MaterialCommunityIcons
+                name={
+                  getWeatherIcon() as any
+                }
+                size={
+                  40 * scale
+                }
+                color="#ffffff"
+              />
+
+              <View
+                style={{
+                  marginLeft:
+                    12 * scale,
+                  flexShrink: 1,
+                }}
+              >
+
+                <Text
+                  style={[
+                    styles.tempText,
+                    {
+                      fontSize:
+                        20 * scale,
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {weatherTemperature}
+                  {"  "}
+                  {locationAvailable &&
+                  weather?.name
+                    ? "•"
+                    : ""}
+                  {"  "}
+                  {weatherLocation}
+                </Text>
+
+                {weatherDescription ? (
+                  <Text
+                    style={[
+                      styles.subText,
+                      {
+                        fontSize:
+                          13 * scale,
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {weatherDescription}
+                  </Text>
+                ) : null}
+
               </View>
             </Pressable>
 
-            <Pressable style={styles.aqiBadge} onPress={() => router.push("/(tabs)/aqi")}>
-               <Text style={styles.aqiNumber}>{aqiValue}</Text>
-               <Text style={styles.aqiLabel}>AQI • Moderate</Text>
-               <Feather name="info" size={10} color="#fff" style={styles.infoIcon} />
+
+            {/* AQI */}
+
+            <Pressable
+              style={[
+                styles.aqiBadge,
+                {
+                  width:
+                    Math.min(
+                      132 * scale,
+                      145
+                    ),
+                  height:
+                    Math.min(
+                      132 * scale,
+                      145
+                    ),
+                },
+              ]}
+              onPress={() => setShowAqiDetails(true)}
+            >
+
+              <Feather
+                name="info"
+                size={
+                  14 * scale
+                }
+                color="#999"
+                style={
+                  styles.infoIcon
+                }
+              />
+
+              <Text
+                style={[
+                  styles.aqiNumber,
+                  {
+                    fontSize:
+                      40 * scale,
+                  },
+                ]}
+              >
+                {aqiValue ??
+                  "—"}
+              </Text>
+
+              <Text
+                style={[
+                  styles.aqiLabel,
+                  {
+                    fontSize:
+                      11 * scale,
+                  },
+                ]}
+              >
+                AQI •{" "}
+                {aqiValue == null
+                  ? "Unavailable"
+                  : aqiValue <= 50
+                  ? "Good"
+                  : aqiValue <= 100
+                  ? "Moderate"
+                  : "Poor"}
+              </Text>
+
             </Pressable>
+
           </View>
 
-          {/* 3. SEARCH BAR */}
-          <Pressable 
-            style={styles.searchBar}
-            onPress={() => router.push("/search")}
+
+          {/* ==================================================
+              SEARCH
+          ================================================== */}
+
+          <Pressable
+            style={[
+              styles.searchBar,
+              {
+                marginHorizontal:
+                  horizontalPadding,
+                marginTop:
+                  28 * scale,
+                height:
+                  48 * scale,
+              },
+            ]}
+            onPress={() =>
+              router.push(
+                "/search" as any
+              )
+            }
           >
-            <Ionicons name="search-outline" size={20} color="#fff" />
-            <Text style={styles.searchText}>Search Exploration</Text>
+            <Ionicons
+              name="search-outline"
+              size={
+                20 * scale
+              }
+              color="#ffffff"
+            />
+
+            <Text
+              style={[
+                styles.searchText,
+                {
+                  fontSize:
+                    13 * scale,
+                },
+              ]}
+            >
+              Search Exploration
+            </Text>
           </Pressable>
 
-          {/* 4. YOUR TRIPS */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Your Trips</Text>
-            <Pressable onPress={() => router.push("/(tabs)/trips")}>
-                <Text style={styles.viewAll}>View all</Text>
+
+          {/* ==================================================
+              YOUR TRIPS
+          ================================================== */}
+
+          <View
+            style={[
+              styles.sectionHeader,
+              {
+                paddingHorizontal:
+                  horizontalPadding,
+                marginTop: 55,
+                marginBottom:
+                  15 * scale,
+              },
+            ]}
+          >
+
+            <Text
+              style={[
+                styles.sectionTitle,
+                {
+                  fontSize:
+                    22 * scale,
+                },
+              ]}
+            >
+              Your Trips
+            </Text>
+
+            <Pressable
+              onPress={() =>
+                router.push(
+                  "/(tabs)/trips" as any
+                )
+              }
+            >
+              <Text
+                style={[
+                  styles.viewAll,
+                  {
+                    fontSize:
+                      13 * scale,
+                  },
+                ]}
+              >
+                View all
+              </Text>
             </Pressable>
+
           </View>
-          
-          <View>
-            <FlatList
+
+
+          {trips.length > 0 ? (
+            <View>
+
+              <FlatList
                 data={trips}
                 horizontal
                 pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                onScroll={handleScroll}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                    <Pressable 
-                      onPress={() => router.push({ pathname: "/(tabs)/trips", params: { tripId: item.id } })}
-                        style={styles.tripCardContainer}
+                showsHorizontalScrollIndicator={
+                  false
+                }
+                onScroll={
+                  handleTripScroll
+                }
+                scrollEventThrottle={
+                  16
+                }
+                keyExtractor={(item) =>
+                  item.id
+                }
+                getItemLayout={(
+                  _data,
+                  index
+                ) => ({
+                  length:
+                    tripCardWidth,
+                  offset:
+                    tripCardWidth *
+                    index,
+                  index,
+                })}
+                renderItem={({
+                  item,
+                }) => (
+                  <Pressable
+                    onPress={() =>
+                      router.push({
+                        pathname:
+                          "/(tabs)/trips" as any,
+                        params: {
+                          tripId:
+                            item.id,
+                        },
+                      })
+                    }
+                    style={[
+                      styles.tripCardContainer,
+                      {
+                        width:
+                          tripCardWidth,
+                        paddingHorizontal:
+                          0,
+                      },
+                    ]}
+                  >
+
+                    <ImageBackground
+                      source={{
+                        uri:
+                          item.iconURL ||
+                          "https://images.unsplash.com/photo-1506461883276-594a12b11cf3",
+                      }}
+                      style={[
+                        styles.tripCard,
+                        {
+                          height:
+                            tripCardHeight,
+                          borderRadius:
+                            22 * scale,
+                        },
+                      ]}
+                      imageStyle={{
+                        borderRadius:
+                          22 * scale,
+                      }}
                     >
-                      <ImageBackground 
-                        source={{ uri: item.iconURL || 'https://images.unsplash.com/photo-1506461883276-594a12b11cf3' }} 
-                            style={styles.tripCard}
-                            imageStyle={{ borderRadius: 20 }}
+
+                      <LinearGradient
+                        colors={[
+                          "transparent",
+                          "rgba(0,0,0,0.88)",
+                        ]}
+                        style={
+                          styles.tripGradient
+                        }
+                      >
+
+                        <View
+                          style={[
+                            styles.tripContent,
+                            {
+                              padding:
+                                16 *
+                                scale,
+                            },
+                          ]}
                         >
-                          <Pressable
-                            style={styles.likeButton}
-                            onPress={() => handleLike(item)}
+
+                          <View
+                            style={
+                              styles.tripMainRow
+                            }
+                          >
+
+                            <Text
+                              style={[
+                                styles.tripTitle,
+                                {
+                                  fontSize:
+                                    20 *
+                                    scale,
+                                },
+                              ]}
+                              numberOfLines={
+                                1
+                              }
+                            >
+                              {item.name ||
+                                "Trip"}
+                            </Text>
+
+                            <View
+                              style={
+                                styles.avatarGroup
+                              }
+                            >
+
+                              <Image
+                                source={{
+                                  uri:
+                                    userData?.photoURL ||
+                                    user?.photoURL ||
+                                    "https://i.pravatar.cc/150?img=11",
+                                }}
+                                style={[
+                                  styles.miniAvatar,
+                                  {
+                                    width:
+                                      36 *
+                                      scale,
+                                    height:
+                                      36 *
+                                      scale,
+                                    borderRadius:
+                                      18 *
+                                      scale,
+                                  },
+                                ]}
+                              />
+
+                            </View>
+
+                          </View>
+
+
+                          <Text
+                            style={[
+                              styles.tripSub,
+                              {
+                                fontSize:
+                                  13 *
+                                  scale,
+                              },
+                            ]}
+                            numberOfLines={
+                              1
+                            }
                           >
                             <Ionicons
-                              name={
-                                likesData[item.id]?.likedBy?.includes(user?.uid)
-                                  ? "heart"
-                                  : "heart-outline"
+                              name="location-sharp"
+                              size={
+                                15 *
+                                scale
                               }
-                              size={18}
-                              color="#fff"
-                            />
-                            <Text style={styles.likeText}>
-                              {likesData[item.id]?.likesCount || 0}
-                            </Text>
-                          </Pressable>
-                            <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.tripGradient}>
-                                <View style={styles.tripContent}>
-                                    <View style={styles.tripMainRow}>
-                                        <Text style={styles.tripTitle}>{item.name}</Text>
-                                        <View style={styles.avatarGroup}>
-                                            <View style={[styles.miniAvatar, { backgroundColor: '#d1a3ff' }]} />
-                                            <Image source={{ uri: userData?.photoURL || user?.photoURL || "https://i.pravatar.cc/150?img=11" }} style={styles.miniAvatar} />
-                                        </View>
-                                    </View>
-                                    <Text style={styles.tripSub}><Ionicons name="location-sharp" size={12} /> {item.from} → {item.location}</Text>
-                                    <Text style={styles.tripSub}><Ionicons name="time-outline" size={12} /> {item.startDate} → {item.endDate || '?'}</Text>
-                                    <Text style={styles.progressText}>Timeline Progress: 0 / 1 complete</Text>
-                                    <View style={styles.progressBarBg}><View style={styles.progressBarFill} /></View>
-                                </View>
-                            </LinearGradient>
-                        </ImageBackground>
-                    </Pressable>
+                            />{" "}
+                            {item.from ||
+                              "—"}{" "}
+                            →{" "}
+                            {item.location ||
+                              "—"}
+                          </Text>
+
+
+                          <Text
+                            style={[
+                              styles.tripSub,
+                              {
+                                fontSize:
+                                  13 *
+                                  scale,
+                              },
+                            ]}
+                            numberOfLines={
+                              1
+                            }
+                          >
+                            <Ionicons
+                              name="time-outline"
+                              size={
+                                15 *
+                                scale
+                              }
+                            />{" "}
+                            {item.startDate ||
+                              "—"}{" "}
+                            →{" "}
+                            {item.endDate ||
+                              "?"}
+                          </Text>
+
+                        </View>
+
+                      </LinearGradient>
+
+                    </ImageBackground>
+
+                  </Pressable>
                 )}
-            />
-            <View style={styles.paginationDots}>
-                {trips.map((_, index) => (
-                    <View 
-                        key={index} 
-                        style={[
-                            styles.dot, 
-                            { backgroundColor: activeTripIndex === index ? '#fff' : 'rgba(255,255,255,0.3)' }
-                        ]} 
+              />
+
+
+              {/* Trip dots */}
+
+              <View
+                style={[
+                  styles.paginationDots,
+                  {
+                    marginTop:
+                      12 * scale,
+                  },
+                ]}
+              >
+                {trips.map(
+                  (_, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.dot,
+                        {
+                          width:
+                            activeTripIndex ===
+                            index
+                              ? 58 *
+                                scale
+                              : 12 *
+                                scale,
+                          height:
+                            6 *
+                            scale,
+                          backgroundColor:
+                            activeTripIndex ===
+                            index
+                              ? "#ffffff"
+                              : "rgba(255,255,255,0.25)",
+                        },
+                      ]}
                     />
-                ))}
+                  )
+                )}
+              </View>
+
             </View>
+          ) : (
+            <View
+              style={[
+                styles.emptyTrip,
+                {
+                  marginHorizontal:
+                    horizontalPadding,
+                },
+              ]}
+            >
+              <Ionicons
+                name="airplane-outline"
+                size={
+                  28 * scale
+                }
+                color="#666"
+              />
+
+              <Text
+                style={[
+                  styles.emptyText,
+                  {
+                    fontSize:
+                      13 * scale,
+                  },
+                ]}
+              >
+                No trips yet
+              </Text>
+            </View>
+          )}
+
+
+          {/* ==================================================
+              REMINDERS
+          ================================================== */}
+
+          <View
+            style={[
+              styles.sectionHeader,
+              {
+                paddingHorizontal:
+                  horizontalPadding,
+                marginTop: 48,
+                marginBottom:
+                  15 * scale,
+              },
+            ]}
+          >
+
+            <Text
+              style={[
+                styles.sectionTitle,
+                {
+                  fontSize:
+                    22 * scale,
+                },
+              ]}
+            >
+              Reminders
+            </Text>
+
+            <Pressable
+              onPress={() =>
+                router.push(
+                  "/(tabs)/reminders" as any
+                )
+              }
+            >
+              <Text
+                style={[
+                  styles.viewAll,
+                  {
+                    fontSize:
+                      13 * scale,
+                  },
+                ]}
+              >
+                View all
+              </Text>
+            </Pressable>
+
           </View>
 
-          {/* 5. REMINDERS */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Reminders</Text>
-            <Pressable onPress={() => router.push("/(tabs)/reminders")}>
-              <Text style={styles.viewAll}>View all</Text>
-            </Pressable>
-          </View>
-          
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingLeft: 20 }}>
-            {reminders.length > 0 ? reminders.map((item) => (
-              <ReminderCard 
-                key={item.id}
-                title={item.text} 
-                date={`${item.date} • ${item.time}`} 
-                color={item.completed ? "#00f721" : "#3b82f6"} 
-                completed={item.completed} 
-              />
-            )) : (
-              <Text style={{ color: '#aaa' }}>No reminders found.</Text>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={
+              false
+            }
+            contentContainerStyle={{
+              paddingLeft:
+                horizontalPadding,
+              paddingRight:
+                horizontalPadding,
+            }}
+          >
+
+            {reminders.length >
+            0 ? (
+              reminders.map(
+                (item) => (
+                  <ReminderCard
+                    key={item.id}
+                    title={
+                      item.text ||
+                      "Reminder"
+                    }
+                    date={`${item.date || ""} • ${
+                      item.time || ""
+                    }`}
+                    color={
+                      item.completed
+                        ? "#00e676"
+                        : "#3b82f6"
+                    }
+                    completed={
+                      item.completed
+                    }
+                    width={
+                      reminderWidth
+                    }
+                    scale={scale}
+                  />
+                )
+              )
+            ) : (
+              <View
+                style={[
+                  styles.noReminderCard,
+                  {
+                    width:
+                      reminderWidth,
+                    height:
+                      125 * scale,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.noReminderText,
+                    {
+                      fontSize:
+                        13 * scale,
+                    },
+                  ]}
+                >
+                  No reminders found.
+                </Text>
+              </View>
             )}
+
           </ScrollView>
 
-          {/* 6. FEATURED PLACES */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Featured Places</Text>
+
+          {/* ==================================================
+              FEATURED PLACES
+          ================================================== */}
+
+          <View
+            style={[
+              styles.sectionHeader,
+              {
+                paddingHorizontal:
+                  horizontalPadding,
+                marginTop: 48,
+                marginBottom:
+                  15 * scale,
+              },
+            ]}
+          >
+
+            <Text
+              style={[
+                styles.sectionTitle,
+                {
+                  fontSize:
+                    22 * scale,
+                },
+              ]}
+            >
+              Featured Places
+            </Text>
+
           </View>
-          {allPlaces && allPlaces.length > 0 ? (
+
+
+          {allPlaces.length >
+          0 ? (
             <FlatList
-              data={allPlaces.slice(0, 6)}
+              data={allPlaces.slice(
+                0,
+                1
+              )}
               horizontal
-              showsHorizontalScrollIndicator={false}
-              keyExtractor={(item) => item.placeId}
-              contentContainerStyle={{ paddingLeft: 20 }}
-              renderItem={({ item }) => (
+              showsHorizontalScrollIndicator={
+                false
+              }
+              keyExtractor={(item) =>
+                item.placeId
+              }
+              contentContainerStyle={{
+                paddingHorizontal:
+                  horizontalPadding,
+              }}
+              renderItem={({
+                item,
+              }) => (
                 <PlaceCard
                   place={item}
-                  isLiked={likesData[item.placeId]?.likedBy?.includes(user?.uid)}
-                  likesCount={likesData[item.placeId]?.likesCount || 0}
-                  onLike={() => handleLike(item)}
-                  onPress={() => router.push({ pathname: "/(tabs)/place-details", params: { placeId: item.placeId } })}
+                  width={
+                    placeCardWidth
+                  }
+                  imageHeight={
+                    placeImageHeight
+                  }
+                  scale={scale}
+                  isLiked={likesData[
+                    item.placeId
+                  ]?.likedBy?.includes(
+                    user?.uid
+                  )}
+                  likesCount={
+                    likesData[
+                      item.placeId
+                    ]?.likesCount || 0
+                  }
+                  onLike={() =>
+                    handleLike(item)
+                  }
+                  onPress={() =>
+                    router.push({
+                      pathname:
+                        "/(tabs)/place-details" as any,
+                      params: {
+                        placeId:
+                          item.placeId,
+                      },
+                    })
+                  }
                 />
               )}
             />
           ) : (
-            <Text style={{ color: '#aaa', paddingHorizontal: 20 }}>No featured places available.</Text>
+            <Text
+              style={[
+                styles.noDataText,
+                {
+                  paddingHorizontal:
+                    horizontalPadding,
+                  fontSize:
+                    13 * scale,
+                },
+              ]}
+            >
+              No featured places
+              available.
+            </Text>
           )}
 
-          {/* 7. MORE PLACES */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>More Places</Text>
+
+          {/* ==================================================
+              MORE PLACES
+          ================================================== */}
+
+          <View
+            style={[
+              styles.sectionHeader,
+              {
+                paddingHorizontal:
+                  horizontalPadding,
+                marginTop: 48,
+                marginBottom:
+                  15 * scale,
+              },
+            ]}
+          >
+
+            <Text
+              style={[
+                styles.sectionTitle,
+                {
+                  fontSize:
+                    22 * scale,
+                },
+              ]}
+            >
+              More Places
+            </Text>
+
           </View>
-            <FlatList
-            data={allPlaces.slice(1)}
-            scrollEnabled={false}
-            keyExtractor={(item) => item.placeId}
-            renderItem={({ item }) => (
-              <PlaceCard 
-                place={item}
-                isLiked={likesData[item.placeId]?.likedBy?.includes(user?.uid)}
-                likesCount={likesData[item.placeId]?.likesCount || 0}
-                onLike={() => handleLike(item)}
-                onPress={() => router.push({ pathname: "/(tabs)/place-details", params: { placeId: item.placeId } })}
-              />
-            )}
-          />
+
+
+          <View
+            style={{
+              paddingHorizontal:
+                horizontalPadding,
+            }}
+          >
+
+            {allPlaces
+              .slice(1)
+              .map((item) => (
+                <PlaceCard
+                  key={
+                    item.placeId
+                  }
+                  place={item}
+                  width={
+                    placeCardWidth
+                  }
+                  imageHeight={
+                    placeImageHeight
+                  }
+                  scale={scale}
+                  isLiked={likesData[
+                    item.placeId
+                  ]?.likedBy?.includes(
+                    user?.uid
+                  )}
+                  likesCount={
+                    likesData[
+                      item.placeId
+                    ]?.likesCount || 0
+                  }
+                  onLike={() =>
+                    handleLike(item)
+                  }
+                  onPress={() =>
+                    router.push({
+                      pathname:
+                        "/(tabs)/place-details" as any,
+                      params: {
+                        placeId:
+                          item.placeId,
+                      },
+                    })
+                  }
+                />
+              ))}
+
+          </View>
+
+
+          {/* ==================================================
+              FOOTER
+          ================================================== */}
+
+          <Text
+            style={[
+              styles.footer,
+              {
+                fontSize:
+                  10 * scale,
+                marginTop:
+                  35 * scale,
+              },
+            ]}
+          >
+            BunkMate vBeta_3.0.08.100
+            {"  —  "}
+            Made with ❤️
+          </Text>
 
         </ScrollView>
 
-        <WeatherDetailsSheet 
-          weather={weather} 
-          visible={showWeatherDetails} 
-          onClose={() => setShowWeatherDetails(false)} 
+
+        {/* ====================================================
+            WEATHER DETAILS
+        ==================================================== */}
+
+        <WeatherDetailsSheet
+          weather={weather}
+          aqiValue={aqiValue}
+          visible={
+            showWeatherDetails
+          }
+          onClose={() =>
+            setShowWeatherDetails(
+              false
+            )
+          }
         />
+
+        <AQIDetailsSheet
+          aqiValue={aqiValue}
+          aqiData={aqiData}
+          visible={
+            showAqiDetails
+          }
+          onClose={() =>
+            setShowAqiDetails(
+              false
+            )
+          }
+        />
+
       </View>
     </SafeAreaView>
   );
 }
 
-function PlaceCard({ place, isLiked, likesCount, onLike, onPress }: any) {
+
+// ============================================================
+// PLACE CARD
+// ============================================================
+
+function PlaceCard({
+  place,
+  isLiked,
+  likesCount,
+  onLike,
+  onPress,
+  width,
+  imageHeight,
+  scale,
+}: any) {
   const router = useRouter();
 
   return (
-    <Pressable style={[styles.placeCard, { width: 260, marginRight: 12 }]} onPress={onPress}>
+    <Pressable
+      style={[
+        styles.placeCard,
+        {
+          width,
+          marginBottom:
+            20 * scale,
+          borderRadius:
+            20 * scale,
+        },
+      ]}
+      onPress={onPress}
+    >
+
+      {/* Image */}
+
       <ImageBackground
-        source={{ uri: place.images[0] }}
-        style={styles.placeCardImage}
-        imageStyle={{ borderRadius: 16 }}
+        source={{
+          uri:
+            place.images?.[0],
+        }}
+        style={[
+          styles.placeCardImage,
+          {
+            height:
+              imageHeight,
+          },
+        ]}
+        imageStyle={{
+          borderRadius:
+            17 * scale,
+        }}
       >
+
+        {/* Like */}
+
         <Pressable
-          style={styles.placeLikeButton}
-          onPress={(e) => {
-            e.stopPropagation();
+          style={[
+            styles.placeLikeButton,
+            {
+              top:
+                12 * scale,
+              right:
+                12 * scale,
+              paddingHorizontal:
+                12 * scale,
+              paddingVertical:
+                9 * scale,
+              borderRadius:
+                18 * scale,
+            },
+          ]}
+          onPress={(event) => {
+            event.stopPropagation();
             onLike();
           }}
         >
+
           <Ionicons
-            name={isLiked ? "heart" : "heart-outline"}
-            size={20}
+            name={
+              isLiked
+                ? "heart"
+                : "heart-outline"
+            }
+            size={
+              24 * scale
+            }
             color="#fff"
           />
-          <Text style={styles.placeCardLikeCount}>{likesCount}</Text>
+
+          <Text
+            style={[
+              styles.placeCardLikeCount,
+              {
+                fontSize:
+                  14 * scale,
+              },
+            ]}
+          >
+            {likesCount}
+          </Text>
+
         </Pressable>
 
+
+        {/* Bookmark / Plan */}
+
         <Pressable
-          style={styles.createTripButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            router.push({ pathname: "/(tabs)/trips", params: { createFromPlace: place.placeId } });
+          style={[
+            styles.bookmarkButton,
+            {
+              top:
+                62 * scale,
+              right:
+                12 * scale,
+            },
+          ]}
+          onPress={(event) => {
+            event.stopPropagation();
+
+            router.push({
+              pathname:
+                "/(tabs)/trips" as any,
+              params: {
+                createFromPlace:
+                  place.placeId,
+              },
+            });
           }}
         >
-          <Text style={styles.createTripText}>PLAN THIS TRIP</Text>
+          <Ionicons
+            name="bookmark-outline"
+            size={
+              23 * scale
+            }
+            color="#fff"
+          />
         </Pressable>
+
       </ImageBackground>
-      <View style={styles.placeInfoContainer}>
-        <Text style={styles.placeTitle}>{place.name}</Text>
-        <Text style={styles.placeDistrict}>{place.districtName}, {place.stateName}</Text>
-        <Text style={styles.placeDescription} numberOfLines={2}>{place.description}</Text>
+
+
+      {/* Place information */}
+
+<View
+  style={[
+    styles.placeInfoContainer,
+    {
+      padding: 14 * scale,
+    },
+  ]}
+>
+  <Text
+    style={[
+      styles.placeTitle,
+      {
+        fontSize: 19 * scale,
+      },
+    ]}
+    numberOfLines={1}
+  >
+    {place.name}
+  </Text>
+
+
+        <Text
+          style={[
+            styles.placeDistrict,
+            {
+              fontSize:
+                13 * scale,
+            },
+          ]}
+          numberOfLines={1}
+        >
+          {place.districtName},{" "}
+          {place.stateName}
+        </Text>
+
+
+        <Text
+          style={[
+            styles.placeDescription,
+            {
+              fontSize:
+                14 * scale,
+              lineHeight:
+                21 * scale,
+            },
+          ]}
+          numberOfLines={3}
+        >
+          {place.description}
+        </Text>
+
       </View>
+
     </Pressable>
   );
 }
 
-function ReminderCard({ title, date, color, completed }: any) {
+
+// ============================================================
+// REMINDER CARD
+// ============================================================
+
+function ReminderCard({
+  title,
+  date,
+  color,
+  completed,
+  width,
+  scale,
+}: any) {
   return (
-    <View style={styles.remCard}>
-      <View style={styles.remHeader}>
-        <View style={[styles.remDot, { borderColor: color }]} />
-        {completed && <Ionicons name="checkmark-circle" size={18} color="#00f721" />}
+    <View
+      style={[
+        styles.remCard,
+        {
+          width,
+          height:
+            145 * scale,
+          padding:
+            16 * scale,
+          borderRadius:
+            20 * scale,
+          marginRight:
+            14 * scale,
+        },
+      ]}
+    >
+
+      <View
+        style={
+          styles.remHeader
+        }
+      >
+
+        <View
+          style={[
+            styles.remDot,
+            {
+              width:
+                15 * scale,
+              height:
+                15 * scale,
+              borderRadius:
+                7.5 * scale,
+              borderColor:
+                color,
+              borderWidth:
+                3,
+            },
+          ]}
+        />
+
+        {completed && (
+          <View
+            style={[
+              styles.completeCircle,
+              {
+                width:
+                  38 * scale,
+                height:
+                  38 * scale,
+                borderRadius:
+                  19 * scale,
+              },
+            ]}
+          >
+            <Ionicons
+              name="checkmark"
+              size={
+                22 * scale
+              }
+              color="#00e676"
+            />
+          </View>
+        )}
+
       </View>
-      <Text style={styles.remTitle} numberOfLines={1}>{title}</Text>
-      <Text style={styles.remDate}>{date}</Text>
-      <MaterialCommunityIcons name="calendar-blank-outline" size={40} color="rgba(255,255,255,0.05)" style={styles.remIconBg} />
+
+
+      <Text
+        style={[
+          styles.remTitle,
+          {
+            fontSize:
+              18 * scale,
+          },
+        ]}
+        numberOfLines={1}
+      >
+        {title}
+      </Text>
+
+
+      <Text
+        style={[
+          styles.remDate,
+          {
+            fontSize:
+              13 * scale,
+          },
+        ]}
+        numberOfLines={1}
+      >
+        {date}
+      </Text>
+
+
+      <MaterialCommunityIcons
+        name="calendar-blank-outline"
+        size={
+          62 * scale
+        }
+        color="rgba(255,255,255,0.035)"
+        style={
+          styles.remIconBg
+        }
+      />
+
     </View>
   );
 }
 
+
+// ============================================================
+// STYLES
+// ============================================================
+
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#080910" },
-  container: { flex: 1, backgroundColor: "#080910" },
-  center: { justifyContent: "center", alignItems: "center" },
-  header: { paddingHorizontal: 20, paddingTop: 20, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  greeting: { color: "#fff", opacity: 0.8, fontSize: 15 },
-  name: { color: "#fff", fontSize: 22, fontWeight: "bold" },
-  bell: { padding: 8, backgroundColor: "#1c1c1e", borderRadius: 20 },
-  notificationDot: { position: 'absolute', top: 8, right: 8, minWidth: 18, height: 18, backgroundColor: '#ff4d4d', borderRadius: 9, borderWidth: 1, borderColor: '#000', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 3 },
-  notificationCount: { color: '#fff', fontSize: 10, fontWeight: 'bold' },
-  weatherAqiRow: { flexDirection: 'row', paddingHorizontal: 20, marginTop: 25, justifyContent: 'space-between', alignItems: 'center' },
-  weatherInfo: { flexDirection: 'row', alignItems: 'center' },
-  tempText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  subText: { color: '#aaa', fontSize: 12 },
-  aqiBadge: { backgroundColor: 'rgba(0, 150, 100, 0.2)', padding: 10, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(0, 255, 150, 0.3)', alignItems: 'center' },
-  aqiNumber: { color: '#00f7a5', fontSize: 24, fontWeight: 'bold' },
-  aqiLabel: { color: '#00f7a5', fontSize: 9, fontWeight: 'bold' },
-  infoIcon: { position: 'absolute', top: 4, right: 4 },
-  searchBar: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)', margin: 20, padding: 12, borderRadius: 25, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  searchText: { color: '#fff', marginLeft: 10, opacity: 0.8 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, marginTop: 20, marginBottom: 15 },
-  sectionTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  viewAll: { color: '#ff9f43', fontSize: 12 },
-  tripCardContainer: { width: width, paddingHorizontal: 20 },
-  tripCard: { height: 200, borderRadius: 20, overflow: 'hidden' },
-  tripGradient: { flex: 1, justifyContent: 'flex-end', padding: 15 },
-  tripTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  tripMainRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  avatarGroup: { flexDirection: 'row' },
-  miniAvatar: { width: 24, height: 24, borderRadius: 12, marginLeft: -8, borderWidth: 1, borderColor: '#000' },
-  tripSub: { color: '#ccc', fontSize: 11, marginTop: 2 },
-  progressText: { color: '#fff', fontSize: 10, marginTop: 15, opacity: 0.8 },
-  progressBarBg: { height: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 2, marginTop: 5 },
-  progressBarFill: { width: '30%', height: '100%', backgroundColor: '#fff', borderRadius: 2 },
-  paginationDots: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 12 },
-  dot: { width: 16, height: 4, borderRadius: 2, marginHorizontal: 3 },
-  tripContent: { flex: 1, justifyContent: 'flex-end', padding: 15 },
-  likeButton: { position: 'absolute', top: 15, right: 15, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, gap: 6 },
-  likeText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  remCard: { width: 140, backgroundColor: 'rgba(255,255,255,0.05)', padding: 15, borderRadius: 15, marginRight: 15, overflow: 'hidden' },
-  remHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  remDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
-  remTitle: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-  remDate: { color: '#888', fontSize: 10, marginTop: 4 },
-  remIconBg: { position: 'absolute', bottom: -5, right: -5 },
-  featuredCard: { marginHorizontal: 20, borderRadius: 20, backgroundColor: '#1c1c1e', overflow: 'hidden' },
-  featuredImg: { width: '100%', height: 200 },
-  featuredLikeButton: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, gap: 6, justifyContent: 'center' },
-  likeCountText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
-  featuredTextContainer: { padding: 15 },
-  featuredTitle: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
-  featuredDesc: { color: '#aaa', fontSize: 11, marginTop: 5 },
-  placeCard: { marginHorizontal: 20, marginBottom: 20, borderRadius: 16, overflow: 'hidden', backgroundColor: '#1c1c1e' },
-  placeCardImage: { width: '100%', height: 180 },
-  placeLikeButton: { position: 'absolute', bottom: 12, right: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, gap: 4, justifyContent: 'center' },
-  placeCardLikeCount: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  placeInfoContainer: { padding: 12 },
-  placeTitle: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
-  placeDistrict: { color: '#aaa', fontSize: 11, marginTop: 2 },
-  placeDescription: { color: '#888', fontSize: 10, marginTop: 4 },
-  createTripButton: { position: 'absolute', bottom: 14, left: 14, backgroundColor: '#ff9f43', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
-  createTripText: { color: '#000', fontWeight: '700', fontSize: 12 },
+
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#000000",
+  },
+
+  container: {
+    flex: 1,
+    backgroundColor: "#000000",
+  },
+
+  center: {
+    justifyContent:
+      "center",
+    alignItems:
+      "center",
+  },
+
+  scrollContent: {
+    paddingTop: 8,
+  },
+
+
+  // ==========================================================
+  // HEADER
+  // ==========================================================
+
+  header: {
+    paddingTop: 20,
+    flexDirection:
+      "row",
+    justifyContent:
+      "space-between",
+    alignItems:
+      "center",
+  },
+
+  greeting: {
+    color: "#ffffff",
+    opacity: 0.78,
+    fontWeight:
+      "400",
+  },
+
+  name: {
+    color: "#ffffff",
+    fontWeight:
+      "800",
+    marginTop: 2,
+  },
+
+
+  // ==========================================================
+  // WEATHER
+  // ==========================================================
+
+  weatherAqiRow: {
+    flexDirection:
+      "row",
+    justifyContent:
+      "space-between",
+    alignItems:
+      "center",
+  },
+
+  weatherInfo: {
+    flexDirection:
+      "row",
+    alignItems:
+      "center",
+    flex: 1,
+    marginRight: 12,
+  },
+
+  tempText: {
+    color: "#ffffff",
+    fontWeight:
+      "700",
+  },
+
+  subText: {
+    color: "#aaaaaa",
+    marginTop: 4,
+    textTransform:
+      "capitalize",
+  },
+
+
+  // ==========================================================
+  // AQI
+  // ==========================================================
+
+  aqiBadge: {
+    backgroundColor:
+      "rgba(0,0,0,0.2)",
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor:
+      "rgba(255,255,255,0.12)",
+    justifyContent:
+      "center",
+    alignItems:
+      "center",
+  },
+
+  aqiNumber: {
+    color: "#ffffff",
+    fontWeight:
+      "800",
+  },
+
+  aqiLabel: {
+    color: "#cccccc",
+    marginTop: 2,
+  },
+
+  infoIcon: {
+    position:
+      "absolute",
+    top: 10,
+    right: 10,
+  },
+
+
+  // ==========================================================
+  // SEARCH
+  // ==========================================================
+
+  searchBar: {
+    flexDirection:
+      "row",
+    backgroundColor:
+      "rgba(255,255,255,0.045)",
+    borderRadius: 25,
+    alignItems:
+      "center",
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor:
+      "rgba(255,255,255,0.09)",
+  },
+
+  searchText: {
+    color: "#ffffff",
+    marginLeft: 10,
+    opacity: 0.75,
+  },
+
+
+  // ==========================================================
+  // SECTION
+  // ==========================================================
+
+  sectionHeader: {
+    flexDirection:
+      "row",
+    justifyContent:
+      "space-between",
+    alignItems:
+      "center",
+  },
+
+  sectionTitle: {
+    color: "#ffffff",
+    fontWeight:
+      "800",
+  },
+
+  viewAll: {
+    color: "#f0a040",
+    fontWeight:
+      "700",
+  },
+
+
+  // ==========================================================
+  // TRIPS
+  // ==========================================================
+
+  tripCardContainer: {
+    overflow:
+      "hidden",
+  },
+
+  tripCard: {
+    width: "100%",
+    overflow:
+      "hidden",
+    backgroundColor:
+      "#161616",
+  },
+
+  tripGradient: {
+    flex: 1,
+    justifyContent:
+      "flex-end",
+  },
+
+  tripContent: {
+    justifyContent:
+      "flex-end",
+  },
+
+  tripMainRow: {
+    flexDirection:
+      "row",
+    justifyContent:
+      "space-between",
+    alignItems:
+      "center",
+  },
+
+  tripTitle: {
+    color: "#ffffff",
+    fontWeight:
+      "800",
+    flex: 1,
+    marginRight: 10,
+  },
+
+  avatarGroup: {
+    flexDirection:
+      "row",
+    alignItems:
+      "center",
+  },
+
+  miniAvatar: {
+    borderWidth: 2,
+    borderColor:
+      "#000000",
+  },
+
+  tripSub: {
+    color: "#eeeeee",
+    marginTop: 7,
+  },
+
+  paginationDots: {
+    flexDirection:
+      "row",
+    justifyContent:
+      "center",
+    alignItems:
+      "center",
+  },
+
+  dot: {
+    borderRadius: 10,
+    marginHorizontal: 3,
+  },
+
+  emptyTrip: {
+    height: 130,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor:
+      "rgba(255,255,255,0.08)",
+    justifyContent:
+      "center",
+    alignItems:
+      "center",
+    backgroundColor:
+      "rgba(255,255,255,0.025)",
+  },
+
+  emptyText: {
+    color: "#777777",
+    marginTop: 8,
+  },
+
+
+  // ==========================================================
+  // REMINDERS
+  // ==========================================================
+
+  remCard: {
+    backgroundColor:
+      "#0d0d0d",
+    borderWidth: 1,
+    borderColor:
+      "rgba(255,255,255,0.12)",
+    overflow:
+      "hidden",
+  },
+
+  remHeader: {
+    flexDirection:
+      "row",
+    justifyContent:
+      "space-between",
+    alignItems:
+      "center",
+    marginBottom: 18,
+  },
+
+  remDot: {
+    backgroundColor:
+      "transparent",
+  },
+
+  completeCircle: {
+    borderWidth: 1,
+    borderColor:
+      "rgba(0,230,118,0.4)",
+    backgroundColor:
+      "rgba(0,230,118,0.05)",
+    justifyContent:
+      "center",
+    alignItems:
+      "center",
+  },
+
+  remTitle: {
+    color: "#ffffff",
+    fontWeight:
+      "800",
+  },
+
+  remDate: {
+    color: "#777777",
+    marginTop: 8,
+  },
+
+  remIconBg: {
+    position:
+      "absolute",
+    bottom: -8,
+    right: -5,
+  },
+
+  noReminderCard: {
+    backgroundColor:
+      "#0d0d0d",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor:
+      "rgba(255,255,255,0.08)",
+    justifyContent:
+      "center",
+    alignItems:
+      "center",
+  },
+
+  noReminderText: {
+    color: "#777777",
+  },
+
+
+  // ==========================================================
+  // PLACE CARD
+  // ==========================================================
+
+  placeCard: {
+    backgroundColor:
+      "#111111",
+    overflow:
+      "hidden",
+    borderWidth: 1,
+    borderColor:
+      "rgba(255,255,255,0.06)",
+  },
+
+  placeCardImage: {
+    width: "100%",
+    overflow:
+      "hidden",
+  },
+
+  placeLikeButton: {
+    position:
+      "absolute",
+    flexDirection:
+      "row",
+    alignItems:
+      "center",
+    justifyContent:
+      "center",
+    backgroundColor:
+      "rgba(40,40,40,0.65)",
+    gap: 5,
+  },
+
+  bookmarkButton: {
+    position:
+      "absolute",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor:
+      "rgba(40,40,40,0.65)",
+    justifyContent:
+      "center",
+    alignItems:
+      "center",
+  },
+
+  placeCardLikeCount: {
+    color: "#ffffff",
+    fontWeight:
+      "700",
+  },
+
+  placeInfoContainer: {
+    backgroundColor:
+      "#111111",
+  },
+
+  placeTitle: {
+    color: "#ffffff",
+    fontWeight:
+      "800",
+  },
+
+  placeDistrict: {
+    color: "#999999",
+    marginTop: 4,
+  },
+
+  placeDescription: {
+    color: "#aaaaaa",
+    marginTop: 8,
+  },
+
+
+  // ==========================================================
+  // EMPTY / FOOTER
+  // ==========================================================
+
+  noDataText: {
+    color: "#777777",
+  },
+
+  footer: {
+    color: "#555555",
+    textAlign:
+      "center",
+    fontWeight:
+      "700",
+    letterSpacing: 1,
+    marginBottom: 20,
+  },
+
 });

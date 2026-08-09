@@ -8,7 +8,6 @@ import {
   Text,
   TextInput,
   Image,
-  Platform,
   StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -17,8 +16,8 @@ import { useUser } from "../../contexts/UserContext";
 import { useUserChats } from "../../hooks/useUserChats";
 import { useUserGroups } from "../../hooks/useUserGroups";
 import { useFriendRequests } from "../../hooks/useFriendRequests";
-import { MaterialCommunityIcons, Feather, Ionicons } from "@expo/vector-icons";
-import NotificationBell from '../../components/NotificationBell';
+import { Feather, Ionicons } from "@expo/vector-icons";
+import NotificationBell from "../../components/NotificationBell";
 import GroupChatScreen from "../../components/group_chat/GroupChatScreen";
 
 export default function ChatsScreen() {
@@ -38,40 +37,41 @@ export default function ChatsScreen() {
   const [activeTab, setActiveTab] =
     useState<"all" | "chats" | "groups" | "requests">("all");
 
-  /* ================= ALWAYS DEFINE MEMOS ================= */
-
   const filteredChats = useMemo(() => {
     return chats.filter((chat: any) =>
-      chat?.name?.toLowerCase().includes(searchText.toLowerCase())
+      (chat?.name || "").toLowerCase().includes(searchText.toLowerCase().trim())
     );
   }, [chats, searchText]);
 
   const filteredGroups = useMemo(() => {
     return groups.filter((group: any) =>
-      group?.name?.toLowerCase().includes(searchText.toLowerCase())
+      (group?.name || "").toLowerCase().includes(searchText.toLowerCase().trim())
     );
   }, [groups, searchText]);
 
   const combinedList = useMemo(() => {
-    // merge chats and groups into a single feed; normalize fields
     const normalizedChats = (filteredChats || []).map((c: any) => ({
       id: c.id,
       type: "chat",
-      title: c.name,
-      subtitle: c.lastMessage,
-      avatar: c.avatar,
+      title: c.name || "BunkMate Traveler",
+      subtitle: c.lastMessage || "Start a conversation...",
+      avatar: c.avatar || "https://i.pravatar.cc/150?img=11",
       timestamp: c.lastTimestamp || 0,
       unreadCount: c.unreadCount || 0,
+      isOnline: true,
     }));
 
     const normalizedGroups = (filteredGroups || []).map((g: any) => ({
       id: g.id,
       type: "group",
-      title: g.name,
-      subtitle: g.lastMessage || (g.description || `${g.members?.length || 0} members`),
-      avatar: g.iconURL,
+      title: g.name || "Trip Group Chat",
+      subtitle:
+        g.lastMessage ||
+        (g.description || `${g.members?.length || 0} members`),
+      avatar: g.iconURL || "https://i.pravatar.cc/150?img=32",
       timestamp: g.lastTimestamp || g.updatedAt || 0,
       unreadCount: g.unreadCounts?.current || 0,
+      isOnline: false,
     }));
 
     return [...normalizedChats, ...normalizedGroups].sort(
@@ -79,47 +79,51 @@ export default function ChatsScreen() {
     );
   }, [filteredChats, filteredGroups]);
 
-  /* ================= SAFE LOADING ================= */
-
   const loading =
     authLoading || chatsLoading || groupsLoading || requestsLoading;
 
-  /* ================= UI ================= */
-
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#0e0e0e" />
+      <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#b36a22" />
+          <ActivityIndicator size="large" color="#00e6b0" />
         </View>
       ) : (
         <View style={styles.container}>
           {/* HEADER */}
           <View style={styles.header}>
+            <View>
               <Text style={styles.headerTitle}>Chats</Text>
-              <NotificationBell />
+              <Text style={styles.headerSub}>Connect with your bunkmates</Text>
+            </View>
+            <NotificationBell />
           </View>
 
           {/* SEARCH */}
           <View style={styles.searchContainer}>
-            <Feather name="search" size={18} color="#888" />
+            <Feather name="search" size={17} color="#888" />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search..."
-              placeholderTextColor="#888"
+              placeholder="Search conversations..."
+              placeholderTextColor="#666"
               value={searchText}
               onChangeText={setSearchText}
             />
+            {searchText ? (
+              <Pressable onPress={() => setSearchText("")}>
+                <Ionicons name="close-circle" size={16} color="#888" />
+              </Pressable>
+            ) : null}
           </View>
 
-          {/* TABS */}
+          {/* SEGMENTED TAB BUTTONS */}
           <View style={styles.tabRow}>
-            {["all", "chats", "groups", "requests"].map((tab) => (
+            {(["all", "chats", "groups", "requests"] as const).map((tab) => (
               <Pressable
                 key={tab}
-                onPress={() => setActiveTab(tab as any)}
+                onPress={() => setActiveTab(tab)}
                 style={[
                   styles.tabButton,
                   activeTab === tab && styles.tabActive,
@@ -144,7 +148,7 @@ export default function ChatsScreen() {
           </View>
 
           <ScrollView
-            contentContainerStyle={{ paddingBottom: 120 }}
+            contentContainerStyle={{ paddingBottom: 110 }}
             showsVerticalScrollIndicator={false}
           >
             {activeTab === "all" &&
@@ -159,22 +163,44 @@ export default function ChatsScreen() {
                     }
                     style={styles.card}
                   >
-                    <Image
-                      source={{ uri: item.avatar || "https://i.pravatar.cc/150" }}
-                      style={styles.avatar}
-                    />
-                    <View style={styles.cardMiddle}>
-                      <Text style={styles.cardTitle}>{item.title}</Text>
-                      <Text style={styles.cardSub} numberOfLines={1}>{item.subtitle}</Text>
+                    <View style={{ position: "relative" }}>
+                      <Image
+                        source={{ uri: item.avatar }}
+                        style={styles.avatar}
+                      />
+                      {item.isOnline && <View style={styles.onlineDot} />}
                     </View>
+
+                    <View style={styles.cardMiddle}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <Text style={styles.cardTitle}>{item.title}</Text>
+                        {item.type === "group" && (
+                          <View style={styles.groupBadge}>
+                            <Text style={styles.groupBadgeText}>GROUP</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.cardSub} numberOfLines={1}>
+                        {item.subtitle}
+                      </Text>
+                    </View>
+
                     <View style={styles.cardRight}>
-                      <Text style={styles.tsText}>{formatTime(item.timestamp)}</Text>
-                      {item.unreadCount > 0 && <View style={styles.unreadDot} />}
+                      <Text style={styles.tsText}>
+                        {formatTime(item.timestamp)}
+                      </Text>
+                      {item.unreadCount > 0 ? (
+                        <View style={styles.unreadBadge}>
+                          <Text style={styles.unreadText}>
+                            {item.unreadCount}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
                   </Pressable>
                 ))
               ) : (
-                <Empty text="No conversations yet" />
+                <Empty text="No conversations found" />
               ))}
 
             {activeTab === "chats" &&
@@ -185,22 +211,41 @@ export default function ChatsScreen() {
                     onPress={() => router.push(`/chat/${chat.id}` as any)}
                     style={styles.card}
                   >
-                    <Image
-                      source={{ uri: chat.avatar || "https://i.pravatar.cc/150?img=11" }}
-                      style={styles.avatar}
-                    />
-                    <View style={styles.cardMiddle}>
-                      <Text style={styles.cardTitle}>{chat.name}</Text>
-                      <Text style={styles.cardSub}>{chat.lastMessage}</Text>
+                    <View style={{ position: "relative" }}>
+                      <Image
+                        source={{
+                          uri: chat.avatar || "https://i.pravatar.cc/150?img=11",
+                        }}
+                        style={styles.avatar}
+                      />
+                      <View style={styles.onlineDot} />
                     </View>
+
+                    <View style={styles.cardMiddle}>
+                      <Text style={styles.cardTitle}>
+                        {chat.name || "BunkMate User"}
+                      </Text>
+                      <Text style={styles.cardSub} numberOfLines={1}>
+                        {chat.lastMessage || "Tap to chat"}
+                      </Text>
+                    </View>
+
                     <View style={styles.cardRight}>
-                      <Text style={styles.tsText}>{formatTime(chat.lastTimestamp)}</Text>
-                      {chat.unreadCount > 0 && <View style={styles.unreadDot} />}
+                      <Text style={styles.tsText}>
+                        {formatTime(chat.lastTimestamp)}
+                      </Text>
+                      {chat.unreadCount > 0 ? (
+                        <View style={styles.unreadBadge}>
+                          <Text style={styles.unreadText}>
+                            {chat.unreadCount}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
                   </Pressable>
                 ))
               ) : (
-                <Empty text="No chats yet" />
+                <Empty text="No direct chats yet" />
               ))}
 
             {activeTab === "requests" &&
@@ -208,17 +253,22 @@ export default function ChatsScreen() {
                 requests.map((req: any) => (
                   <View key={req.id} style={styles.card}>
                     <Image
-                      source={{ uri: req.fromUserAvatar || "https://i.pravatar.cc/150?img=5" }}
+                      source={{
+                        uri:
+                          req.fromUserAvatar || "https://i.pravatar.cc/150?img=5",
+                      }}
                       style={styles.avatar}
                     />
                     <View style={styles.cardMiddle}>
-                      <Text style={styles.cardTitle}>{req.fromUserName}</Text>
-                      <Text style={styles.cardSub}>Wants to connect</Text>
+                      <Text style={styles.cardTitle}>
+                        {req.fromUserName || "Traveler"}
+                      </Text>
+                      <Text style={styles.cardSub}>Wants to connect with you</Text>
                     </View>
                   </View>
                 ))
               ) : (
-                <Empty text="No requests" />
+                <Empty text="No pending connection requests" />
               ))}
           </ScrollView>
 
@@ -229,7 +279,6 @@ export default function ChatsScreen() {
               onRefresh={() => {}}
             />
           )}
-
         </View>
       )}
     </SafeAreaView>
@@ -239,92 +288,174 @@ export default function ChatsScreen() {
 function Empty({ text }: { text: string }) {
   return (
     <View style={styles.empty}>
-      <Text style={{ color: "#888" }}>{text}</Text>
+      <Ionicons name="chatbubbles-outline" size={32} color="#555555" />
+      <Text style={{ color: "#888888", fontSize: 13, marginTop: 8 }}>{text}</Text>
     </View>
   );
 }
 
 function formatTime(ts: number) {
   if (!ts) return "";
-  // ts might be a Firestore seconds value or millis
   const t = ts > 1e12 ? new Date(ts) : new Date(ts * 1000);
   const now = new Date();
   if (t.toDateString() === now.toDateString()) {
     return t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
-  return t.toLocaleDateString();
+  return t.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#0e0e0e" },
-  container: { flex: 1 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#000000",
+  },
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  container: {
+    flex: 1,
+    paddingHorizontal: 18,
+    paddingTop: 8,
+  },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === "android" ? 20 : 10,
-    marginBottom: 20,
+    alignItems: "center",
+    marginBottom: 14,
   },
   headerTitle: {
-    fontSize: 26,
-    fontWeight: "bold",
-    color: "#fff",
+    color: "#ffffff",
+    fontSize: 24,
+    fontWeight: "900",
   },
-
+  headerSub: {
+    color: "#888888",
+    fontSize: 12,
+    marginTop: 2,
+  },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginHorizontal: 16,
-    marginBottom: 16,
-    backgroundColor: "#1c1c1e",
+    backgroundColor: "#121214",
     borderRadius: 12,
     paddingHorizontal: 12,
     height: 44,
+    borderWidth: 1,
+    borderColor: "#1e1e24",
+    marginBottom: 14,
+    gap: 8,
   },
-  searchInput: { flex: 1, color: "#fff", marginLeft: 8 },
-
+  searchInput: {
+    flex: 1,
+    color: "#ffffff",
+    fontSize: 13,
+  },
   tabRow: {
     flexDirection: "row",
-    paddingHorizontal: 16,
+    gap: 8,
     marginBottom: 16,
   },
-  tabButton: { flex: 1, paddingVertical: 8, alignItems: "center" },
-  tabActive: {
-    borderBottomWidth: 2,
-    borderBottomColor: "#00f721",
+  tabButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: "#141416",
+    borderWidth: 1,
+    borderColor: "#222228",
   },
-  tabText: { color: "#888", fontWeight: "600" },
-  tabTextActive: { color: "#00f721" },
-
+  tabActive: {
+    backgroundColor: "rgba(0,230,176,0.14)",
+    borderColor: "#00e6b0",
+  },
+  tabText: {
+    color: "#888888",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  tabTextActive: {
+    color: "#00e6b0",
+    fontWeight: "800",
+  },
   card: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    backgroundColor: "#121214",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#1e1e24",
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#333",
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#222228",
   },
-  groupAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#333",
-    justifyContent: "center",
+  onlineDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#00e6b0",
+    borderWidth: 2,
+    borderColor: "#121214",
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+  },
+  cardMiddle: {
+    flex: 1,
+    marginLeft: 12,
+    marginRight: 8,
+  },
+  cardTitle: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  cardSub: {
+    color: "#888888",
+    fontSize: 12,
+    marginTop: 3,
+  },
+  groupBadge: {
+    backgroundColor: "rgba(0,230,176,0.12)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  groupBadgeText: {
+    color: "#00e6b0",
+    fontSize: 8.5,
+    fontWeight: "800",
+  },
+  cardRight: {
+    alignItems: "flex-end",
+  },
+  tsText: {
+    color: "#777777",
+    fontSize: 10.5,
+  },
+  unreadBadge: {
+    backgroundColor: "#00e6b0",
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
     alignItems: "center",
+    justifyContent: "center",
+    marginTop: 5,
+    paddingHorizontal: 5,
   },
-  cardMiddle: { marginLeft: 14, flex: 1 },
-  cardTitle: { color: "#fff", fontWeight: "bold" },
-  cardSub: { color: "#888", fontSize: 13 },
-
-  empty: { padding: 40, alignItems: "center" },
-  cardRight: { width: 60, alignItems: "flex-end", marginLeft: 8 },
-  tsText: { color: "#666", fontSize: 11 },
-  unreadDot: { width: 10, height: 10, borderRadius: 6, backgroundColor: "#ff6b3d", marginTop: 6 },
-
+  unreadText: {
+    color: "#00140f",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  empty: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 50,
+  },
 });

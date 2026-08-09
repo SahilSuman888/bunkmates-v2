@@ -1,9 +1,23 @@
-import React from 'react';
-import { useNotifications } from '../hooks/useNotifications';
+import { useEffect } from "react";
+import { Platform } from "react-native";
+import { router } from "expo-router";
 
 export default function NotificationsHandler() {
-  const { expoPushToken, notification } = useNotifications();
+  useEffect(() => {
+    // Push notifications are intentionally disabled for now.
+    // OneSignal / remote push will be enabled later
+    // in a development/production build.
 
-  // could send token somewhere or display local notifications
+    if (Platform.OS !== "android") {
+      return;
+    }
+
+    console.log(
+      "Push notifications disabled temporarily."
+    );
+
+    return () => {};
+  }, []);
+
   return null;
 }

@@ -17,6 +17,9 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
+import { useSessionGradient, AuthRadialBackground } from "../../contexts/GradientContext";
+
+import { Ionicons } from "@expo/vector-icons";
 import {
   createUserWithEmailAndPassword,
   updateProfile,
@@ -42,14 +45,6 @@ const getGradientAvatar = (seed?: string) => {
   )}&backgroundType=gradientLinear&radius=50&size=150`;
 };
 
-/* ---------------- Gradient Variants ---------------- */
-
-const GRADIENT_VARIANTS = [
-  ["#ff8d1a", "#ff0000", "#000000"],
-  ["#a848ec", "#8402ff", "#000000"],
-  ["#22d3ee", "#3b83f6", "#000000"],
-  ["#fbbf24", "#f97316", "#000000"],
-];
 
 /* ---------------- Password Rules Check ---------------- */
 
@@ -74,6 +69,7 @@ const getPasswordStrength = (password: string) => {
 };
 
 export default function Signup() {
+  const { gradient: bgGradient } = useSessionGradient();
   const [formData, setFormData] = useState({
     name: "",
     username: "",
@@ -88,17 +84,7 @@ export default function Signup() {
   const [checkingUsername, setCheckingUsername] = useState(false);
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
   const [openDialog, setOpenDialog] = useState(false);
-  const [bgGradient, setBgGradient] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-
-  /* Random gradient on mount */
-  useEffect(() => {
-    const random =
-      GRADIENT_VARIANTS[
-        Math.floor(Math.random() * GRADIENT_VARIANTS.length)
-      ];
-    setBgGradient(random);
-  }, []);
 
   /* Username availability check */
   const handleUsernameChange = async (value: string) => {
@@ -205,22 +191,16 @@ export default function Signup() {
     Object.values(passwordRules).filter(Boolean).length >= 3;
 
   return (
-    <View 
-      style={{ flex: 1, backgroundColor: "#000" }}
-    >
-      {/* GRADIENT BACKGROUND - TOUCHABLE TO DISMISS KEYBOARD */}
-      <TouchableOpacity 
+    <View style={{ flex: 1, backgroundColor: "#000000" }}>
+      {/* RADIAL BACKGROUND (Matches bunk-mates-master) */}
+      <AuthRadialBackground />
+
+      {/* INVISIBLE TOUCHABLE - dismiss keyboard when tapping background */}
+      <TouchableOpacity
         style={StyleSheet.absoluteFillObject}
         activeOpacity={1}
         onPress={() => Keyboard.dismiss()}
-      >
-        <LinearGradient
-          colors={bgGradient.length > 0 ? bgGradient : ["#000", "#000"] as any}
-          start={{ x: 0.7, y: 0.1 }}
-          end={{ x: 0, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
-        />
-      </TouchableOpacity>
+      />
 
       <KeyboardAvoidingView
         behavior="padding"
@@ -246,8 +226,8 @@ export default function Signup() {
             <View style={styles.formSection}>
               {/* Name Field */}
               <TextInput
-                placeholder="Name"
-                placeholderTextColor="rgba(170,170,170,0.8)"
+                placeholder="Name*"
+                placeholderTextColor="rgba(255,255,255,0.4)"
                 style={styles.input}
                 value={formData.name}
                 onChangeText={(text) =>
@@ -257,8 +237,8 @@ export default function Signup() {
 
               {/* Mobile Field */}
               <TextInput
-                placeholder="Mobile"
-                placeholderTextColor="rgba(170,170,170,0.8)"
+                placeholder="Mobile*"
+                placeholderTextColor="rgba(255,255,255,0.4)"
                 style={styles.input}
                 keyboardType="phone-pad"
                 value={formData.mobile}
@@ -269,8 +249,8 @@ export default function Signup() {
 
               {/* Email Field */}
               <TextInput
-                placeholder="Email"
-                placeholderTextColor="rgba(170,170,170,0.8)"
+                placeholder="Email*"
+                placeholderTextColor="rgba(255,255,255,0.4)"
                 style={styles.input}
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -283,8 +263,8 @@ export default function Signup() {
               {/* Username Field with Availability Check */}
               <View style={styles.usernameContainer}>
                 <TextInput
-                  placeholder="Username"
-                  placeholderTextColor="rgba(170,170,170,0.8)"
+                  placeholder="Username*"
+                  placeholderTextColor="rgba(255,255,255,0.4)"
                   style={styles.input}
                   autoCapitalize="none"
                   value={formData.username}
@@ -325,8 +305,8 @@ export default function Signup() {
               {/* Password Field */}
               <View style={styles.passwordContainer}>
                 <TextInput
-                  placeholder="Password"
-                  placeholderTextColor="rgba(170,170,170,0.8)"
+                  placeholder="Password*"
+                  placeholderTextColor="rgba(255,255,255,0.4)"
                   style={styles.passwordInput}
                   secureTextEntry={!showPassword}
                   value={formData.password}
@@ -338,9 +318,11 @@ export default function Signup() {
                   onPress={() => setShowPassword(!showPassword)}
                   style={styles.passwordToggle}
                 >
-                  <Text style={styles.passwordToggleText}>
-                    {showPassword ? "Hide" : "Show"}
-                  </Text>
+                  <Ionicons
+                    name={showPassword ? "eye-outline" : "eye-off-outline"}
+                    size={20}
+                    color="rgba(255,255,255,0.7)"
+                  />
                 </TouchableOpacity>
               </View>
 
@@ -398,8 +380,8 @@ export default function Signup() {
               {/* Confirm Password Field */}
               <View style={styles.passwordContainer}>
                 <TextInput
-                  placeholder="Confirm Password"
-                  placeholderTextColor="rgba(170,170,170,0.8)"
+                  placeholder="Confirm Password*"
+                  placeholderTextColor="rgba(255,255,255,0.4)"
                   style={styles.passwordInput}
                   secureTextEntry={!showConfirm}
                   value={formData.confirmPassword}
@@ -411,9 +393,11 @@ export default function Signup() {
                   onPress={() => setShowConfirm(!showConfirm)}
                   style={styles.passwordToggle}
                 >
-                  <Text style={styles.passwordToggleText}>
-                    {showConfirm ? "Hide" : "Show"}
-                  </Text>
+                  <Ionicons
+                    name={showConfirm ? "eye-outline" : "eye-off-outline"}
+                    size={20}
+                    color="rgba(255,255,255,0.7)"
+                  />
                 </TouchableOpacity>
               </View>
 
@@ -439,7 +423,7 @@ export default function Signup() {
                 {loading ? (
                   <ActivityIndicator color="#000" />
                 ) : (
-                  <Text style={styles.signupButtonText}>Sign Up</Text>
+                  <Text style={styles.signupButtonText}>SIGN UP</Text>
                 )}
               </TouchableOpacity>
 
@@ -506,82 +490,91 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flexGrow: 1,
     justifyContent: "center",
-    paddingVertical: 40,
+    paddingVertical: 48,
   },
   container: {
     paddingHorizontal: 24,
     paddingVertical: 20,
   },
   headerSection: {
-    marginBottom: 32,
+    marginBottom: 28,
   },
   title: {
-    fontSize: 24,
-    fontWeight: "600",
+    fontSize: 26,
+    fontWeight: "800",
     color: "#fff",
-    marginBottom: 8,
+    marginBottom: 6,
+    letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 14,
-    color: "rgba(255,255,255,0.65)",
+    color: "rgba(255,255,255,0.5)",
     lineHeight: 20,
+    fontWeight: "400",
   },
   formSection: {
-    marginBottom: 20,
+    marginBottom: 12,
   },
   input: {
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderRadius: 4,
-    padding: 14,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
     color: "#fff",
-    marginBottom: 16,
+    marginBottom: 12,
     fontSize: 15,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: "rgba(255,255,255,0.1)",
+    fontWeight: "400",
   },
   usernameContainer: {
     position: "relative",
-    marginBottom: 8,
+    marginBottom: 6,
   },
   usernameLoader: {
     position: "absolute",
     right: 14,
-    top: 14,
+    top: 16,
   },
   usernameStatus: {
     fontSize: 12,
     marginBottom: 12,
     marginLeft: 4,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   passwordContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderRadius: 4,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: "rgba(255,255,255,0.1)",
     marginBottom: 12,
   },
   passwordInput: {
     flex: 1,
-    padding: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
     color: "#fff",
     fontSize: 15,
   },
   passwordToggle: {
-    paddingRight: 12,
+    paddingRight: 14,
+    paddingLeft: 4,
   },
   passwordToggleText: {
-    color: "rgba(255,255,255,0.7)",
+    color: "rgba(255,255,255,0.5)",
     fontSize: 12,
-    fontWeight: "500",
+    fontWeight: "600",
+    letterSpacing: 0.3,
   },
   rulesContainer: {
-    backgroundColor: "rgba(255,255,255,0.02)",
-    borderRadius: 4,
-    padding: 12,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderRadius: 12,
+    padding: 14,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
   },
   ruleRow: {
     flexDirection: "row",
@@ -589,108 +582,117 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   ruleIcon: {
-    fontSize: 14,
-    marginRight: 8,
+    fontSize: 13,
+    marginRight: 9,
+    width: 16,
   },
   ruleText: {
     fontSize: 12,
+    fontWeight: "500",
   },
   strengthSection: {
-    marginBottom: 16,
+    marginBottom: 14,
   },
   strengthBar: {
-    height: 6,
-    backgroundColor: "rgba(255,255,255,0.15)",
+    height: 4,
+    backgroundColor: "rgba(255,255,255,0.1)",
     borderRadius: 10,
     overflow: "hidden",
-    marginBottom: 8,
+    marginBottom: 6,
   },
   strengthFill: {
     height: "100%",
     borderRadius: 10,
   },
   errorText: {
-    color: "#ef4444",
+    color: "#ff6b6b",
     fontSize: 12,
     marginBottom: 12,
     marginLeft: 4,
+    fontWeight: "500",
   },
   signupButton: {
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 14,
+    backgroundColor: "#ffffff",
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     marginVertical: 12,
   },
   signupButtonText: {
-    color: "#000",
+    color: "#000000",
     fontWeight: "700",
-    fontSize: 16,
+    fontSize: 13,
+    letterSpacing: 0.8,
   },
   loginLinkContainer: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 12,
+    marginTop: 14,
   },
   loginLinkText: {
-    color: "#fff",
+    color: "rgba(255,255,255,0.5)",
     fontSize: 14,
   },
   loginLink: {
-    color: "#00BFA6",
+    color: "#22d3ee",
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   dialogOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
+    backgroundColor: "rgba(0,0,0,0.75)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 16,
+    padding: 20,
   },
   dialogContent: {
-    backgroundColor: "#1a1a1a",
-    borderRadius: 12,
-    padding: 20,
+    backgroundColor: "#111115",
+    borderRadius: 20,
+    padding: 24,
     width: "100%",
     maxWidth: 320,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
   dialogTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: "700",
     color: "#fff",
-    marginBottom: 12,
+    marginBottom: 10,
+    letterSpacing: -0.2,
   },
   dialogMessage: {
     fontSize: 14,
-    color: "rgba(255,255,255,0.7)",
-    marginBottom: 16,
+    color: "rgba(255,255,255,0.55)",
+    marginBottom: 18,
+    lineHeight: 20,
   },
   dialogInput: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 12,
+    padding: 13,
     color: "#fff",
-    marginBottom: 16,
+    marginBottom: 18,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
+    borderColor: "rgba(255,255,255,0.1)",
+    fontSize: 15,
   },
   dialogActions: {
     flexDirection: "row",
     justifyContent: "flex-end",
-    gap: 8,
+    gap: 10,
   },
   dialogButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
+    borderColor: "rgba(255,255,255,0.18)",
   },
   dialogButtonText: {
-    color: "#fff",
+    color: "rgba(255,255,255,0.75)",
     fontSize: 14,
     fontWeight: "500",
   },
@@ -703,4 +705,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-});
+});

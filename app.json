@@ -8,9 +8,11 @@
     "scheme": "bunkmates",
     "owner": "mohithac",
     "userInterfaceStyle": "automatic",
+
     "ios": {
       "icon": "./assets/expo.icon"
     },
+
     "android": {
       "package": "com.bm.bunkmates",
       "googleServicesFile": "./google-services.json",
@@ -18,21 +20,27 @@
         "NOTIFICATIONS"
       ]
     },
+
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
+
     "plugins": [
       "expo-router",
       "expo-web-browser",
       "expo-sharing",
       "expo-notifications",
-      "@react-native-google-signin/google-signin"
+      "@react-native-google-signin/google-signin",
+      "expo-image",
+      "expo-splash-screen"
     ],
+
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
+
     "extra": {
       "router": {},
       "eas": {

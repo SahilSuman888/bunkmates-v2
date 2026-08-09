@@ -36,6 +36,7 @@ import * as ImagePicker from "expo-image-picker";
 import { getStorage, ref, uploadString, getDownloadURL } from "firebase/storage";
 import { SafeAreaView as SafeAreaViewContext } from "react-native-safe-area-context";
 import GroupInfoDrawer from "../../../components/group_chat/GroupInfoDrawer";
+import UserProfileModal from "../../../components/UserProfileModal";
 
 
 export default function GroupChatroom() {
@@ -50,8 +51,10 @@ export default function GroupChatroom() {
   const [uploading, setUploading] = useState(false);
   const [replyTo, setReplyTo] = useState<any>(null);
   const [pendingImage, setPendingImage] = useState<{ uri: string; base64: string } | null>(null);
-    const [showGroupInfo, setShowGroupInfo] = useState(false);
-    const [memberDetailsMap, setMemberDetailsMap] = useState<{ [key: string]: any }>({});
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
+  const [memberDetailsMap, setMemberDetailsMap] = useState<{ [key: string]: any }>({});
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   
   const flatListRef = useRef<any>(null);
 
@@ -154,10 +157,17 @@ export default function GroupChatroom() {
         ]}
       >
         {!isOwnMessage && (
-          <Image
-            source={{ uri: item.senderAvatar || "https://via.placeholder.com/40" }}
-            style={styles.avatar}
-          />
+          <Pressable
+            onPress={() => {
+              setSelectedProfileId(item.senderId);
+              setShowProfileModal(true);
+            }}
+          >
+            <Image
+              source={{ uri: item.senderAvatar || "https://via.placeholder.com/40" }}
+              style={styles.avatar}
+            />
+          </Pressable>
         )}
         
         <Pressable
@@ -173,7 +183,14 @@ export default function GroupChatroom() {
           style={[styles.messageBubble, isOwnMessage ? styles.ownBubble : styles.otherBubble]}
         >
           {!isOwnMessage && (
-            <Text style={styles.senderName}>{item.senderName}</Text>
+            <Pressable
+              onPress={() => {
+                setSelectedProfileId(item.senderId);
+                setShowProfileModal(true);
+              }}
+            >
+              <Text style={styles.senderName}>{item.senderName}</Text>
+            </Pressable>
           )}
 
           {item.replyTo && (
@@ -320,12 +337,22 @@ export default function GroupChatroom() {
             </Pressable>
 
             <GroupInfoDrawer
-  visible={showGroupInfo}
-  onClose={() => setShowGroupInfo(false)}
-  groupId={groupId}
-  currentUser={user}
-  memberInfo={memberDetailsMap}
-/>
+              visible={showGroupInfo}
+              onClose={() => setShowGroupInfo(false)}
+              groupId={groupId as string}
+              currentUser={user}
+              memberInfo={memberDetailsMap}
+            />
+
+            <UserProfileModal
+              userId={selectedProfileId}
+              visible={showProfileModal}
+              onClose={() => setShowProfileModal(false)}
+              onStartChat={(id) => {
+                setShowProfileModal(false);
+                router.push(`/chat/${id}` as any);
+              }}
+            />
           </View>
         </View>
       </KeyboardAvoidingView>

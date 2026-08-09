@@ -1,6 +1,6 @@
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { GoogleAuthProvider, signInWithCredential, signInWithEmailAndPassword } from "firebase/auth";
+import { GoogleAuthProvider, signInWithCredential, signInWithEmailAndPassword, signInWithPopup } from "firebase/auth";
 import {
   doc,
   getDoc,
@@ -23,8 +23,11 @@ import {
 } from "react-native";
 import { auth } from "../../lib/firebase";
 
+import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { db } from "../../lib/firebase";
+import { useSessionGradient, AuthRadialBackground } from "../../contexts/GradientContext";
+
 
 let GoogleSignin: any = null;
 try {
@@ -101,12 +104,6 @@ const ctaOptions = [
   "Ready, Set, Trip",
 ];
 
-const GRADIENT_VARIANTS = [
-  ["#ff8d1a", "#ff0000", "#000000"],
-  ["#a848ec", "#8402ff", "#000000"],
-  ["#22d3ee", "#3b83f6", "#000000"],
-  ["#fbbf24", "#f97316", "#000000"],
-];
 
 const getGradientAvatar = (seed: string) => {
   const s = seed || Math.random().toString(36).substring(2, 10);
@@ -138,6 +135,7 @@ const useTypewriter = (text: string, speed = 40) => {
 
 export default function Login() {
   const router = useRouter();
+  const { gradient: bgGradient } = useSessionGradient();
 
   const ctaText = useMemo(() => {
     return ctaOptions[Math.floor(Math.random() * ctaOptions.length)];
@@ -158,8 +156,6 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
 
-  const [bgGradient, setBgGradient] = useState<string[]>([]);
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -176,15 +172,6 @@ export default function Login() {
       offlineAccess: true,
       forceCodeForRefreshToken: true,
     });
-  }, []);
-
-  /* RANDOM GRADIENT */
-  useEffect(() => {
-    const random =
-      GRADIENT_VARIANTS[
-        Math.floor(Math.random() * GRADIENT_VARIANTS.length)
-      ];
-    setBgGradient(random);
   }, []);
 
   /* ROTATING SLOGAN */
@@ -236,25 +223,32 @@ export default function Login() {
       setLoading(true);
       setError("");
 
-      if (!GoogleSignin || typeof GoogleSignin.hasPlayServices !== "function" || typeof GoogleSignin.signIn !== "function") {
-        throw new Error("Google Sign-In is not available in this environment");
+      let userCredential: any;
+
+      if (Platform.OS === "web") {
+        const provider = new GoogleAuthProvider();
+        userCredential = await signInWithPopup(auth, provider);
+      } else {
+        if (!GoogleSignin || typeof GoogleSignin.hasPlayServices !== "function" || typeof GoogleSignin.signIn !== "function") {
+          throw new Error("Google Sign-In is not available in this environment");
+        }
+
+        await GoogleSignin.hasPlayServices({
+          showPlayServicesUpdateDialog: true,
+        });
+        const response = await GoogleSignin.signIn();
+
+        const idToken =
+          response.idToken ??
+          response.data?.idToken;
+
+        if (!idToken) {
+          throw new Error("No ID Token received");
+        }
+
+        const credential = GoogleAuthProvider.credential(idToken);
+        userCredential = await signInWithCredential(auth, credential);
       }
-
-      await GoogleSignin.hasPlayServices({
-        showPlayServicesUpdateDialog: true,
-      });
-      const response = await GoogleSignin.signIn();
-
-      const idToken =
-        response.idToken ??
-        response.data?.idToken;
-
-      if (!idToken) {
-        throw new Error("No ID Token received");
-      }
-
-      const credential = GoogleAuthProvider.credential(idToken);
-      const userCredential = await signInWithCredential(auth, credential);
 
       const userRef = doc(db, "users", userCredential.user.uid);
       const snap = await getDoc(userRef);
@@ -272,7 +266,7 @@ export default function Login() {
 
       setCurrentUser(userCredential.user);
       setSuccess(true);
-    } catch (e) {
+    } catch (e: any) {
       console.log(e);
       setError("Google Sign-In failed");
     } finally {
@@ -281,22 +275,16 @@ export default function Login() {
   };
 
   return (
-    <View 
-      style={{ flex: 1, backgroundColor: "#000" }}
-    >
-      {/* GRADIENT BACKGROUND - TOUCHABLE TO DISMISS KEYBOARD */}
-      <TouchableOpacity 
+    <View style={{ flex: 1, backgroundColor: "#000000" }}>
+      {/* RADIAL BACKGROUND (Matches bunk-mates-master) */}
+      <AuthRadialBackground />
+
+      {/* INVISIBLE TOUCHABLE - dismiss keyboard when tapping background */}
+      <TouchableOpacity
         style={StyleSheet.absoluteFillObject}
         activeOpacity={1}
         onPress={() => Keyboard.dismiss()}
-      >
-        <LinearGradient
-          colors={bgGradient.length > 0 ? bgGradient : ["#000", "#000"] as any}
-          start={{ x: 0.7, y: 0.1 }}
-          end={{ x: 0, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
-        />
-      </TouchableOpacity>
+      />
 
       {/* TYPEWRITER TEXT */}
       <View style={styles.topTextContainer}>
@@ -320,7 +308,7 @@ export default function Login() {
           {!success && page === "main" && (
             <>
               <View style={styles.headerSection}>
-                <Text style={styles.subtitle}>Welcome to</Text>
+                <Text style={styles.subtitle}>WELCOME TO</Text>
                 <Text style={styles.brand}>BunkMates</Text>
               </View>
 
@@ -328,18 +316,23 @@ export default function Login() {
                 style={styles.primaryButton}
                 onPress={() => setPage("email")}
               >
-                <Text style={styles.primaryText}>
-                  Continue with Email
-                </Text>
+                <View style={styles.buttonRow}>
+                  <Ionicons name="mail-outline" size={18} color="#000000" style={{ marginRight: 10 }} />
+                  <Text style={styles.primaryText}>CONTINUE WITH EMAIL</Text>
+                </View>
               </TouchableOpacity>
 
-              {/* Google Sign-in */}
               <TouchableOpacity
-                style={[styles.primaryButton, { backgroundColor: "#fff", marginTop: 8 }]}
+                style={[styles.primaryButton, { marginTop: 10 }]}
                 onPress={handleGoogleLogin}
                 disabled={loading}
               >
-                <Text style={[styles.primaryText, { color: "#000" }]}>Continue with Google</Text>
+                <View style={styles.buttonRow}>
+                  <Ionicons name="logo-google" size={18} color="#000000" style={{ marginRight: 10 }} />
+                  <Text style={styles.primaryText}>
+                    {loading ? "SIGNING IN..." : "SIGN IN WITH GOOGLE"}
+                  </Text>
+                </View>
               </TouchableOpacity>
 
               <View style={styles.divider} />
@@ -348,9 +341,10 @@ export default function Login() {
                 style={styles.secondaryButton}
                 onPress={() => router.push("/signup")}
               >
-                <Text style={styles.secondaryText}>
-                  Create New Account
-                </Text>
+                <View style={styles.buttonRow}>
+                  <Ionicons name="mail-outline" size={18} color="#ffffff" style={{ marginRight: 10 }} />
+                  <Text style={styles.secondaryText}>CREATE NEW ACCOUNT</Text>
+                </View>
               </TouchableOpacity>
             </>
           )}
@@ -361,8 +355,8 @@ export default function Login() {
               <Text style={styles.loginTitle}>Login to BunkMates</Text>
 
               <TextInput
-                placeholder="Email"
-                placeholderTextColor="#aaa"
+                placeholder="Email*"
+                placeholderTextColor="rgba(255,255,255,0.4)"
                 style={styles.input}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -371,8 +365,8 @@ export default function Login() {
 
               <View style={styles.passwordContainer}>
                 <TextInput
-                  placeholder="Password"
-                  placeholderTextColor="#aaa"
+                  placeholder="Password*"
+                  placeholderTextColor="rgba(255,255,255,0.4)"
                   style={styles.passwordInput}
                   secureTextEntry={!showPassword}
                   onChangeText={setPassword}
@@ -381,13 +375,18 @@ export default function Login() {
                   onPress={() => setShowPassword(!showPassword)}
                   style={styles.passwordToggle}
                 >
-                  <Text style={styles.passwordToggleText}>
-                    {showPassword ? "Hide" : "Show"}
-                  </Text>
+                  <Ionicons
+                    name={showPassword ? "eye-outline" : "eye-off-outline"}
+                    size={20}
+                    color="rgba(255,255,255,0.7)"
+                  />
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity style={styles.forgotLink}>
+              <TouchableOpacity
+                style={styles.forgotLink}
+                onPress={() => router.push("/(auth)/forgot-password")}
+              >
                 <Text style={styles.forgotText}>Forgot password?</Text>
               </TouchableOpacity>
 
@@ -399,7 +398,7 @@ export default function Login() {
                 {loading ? (
                   <ActivityIndicator color="#000" size="small" />
                 ) : (
-                  <Text style={styles.primaryText}>Login</Text>
+                  <Text style={styles.primaryText}>LOGIN</Text>
                 )}
               </TouchableOpacity>
 
@@ -413,7 +412,7 @@ export default function Login() {
                   setError("");
                 }}
               >
-                <Text style={styles.backText}>Back</Text>
+                <Text style={styles.backText}>BACK</Text>
               </TouchableOpacity>
             </>
           )}
@@ -474,164 +473,201 @@ export default function Login() {
 const styles = StyleSheet.create({
   topTextContainer: {
     position: "absolute",
-    top: height * 0.3,
-    left: 40,
-    right: 40,
+    top: height * 0.24,
+    left: 28,
+    right: 28,
     zIndex: 5,
   },
   topText: {
-    fontSize: 40,
+    fontSize: 34,
     fontWeight: "800",
-    color: "rgba(255,255,255,0.85)",
-    lineHeight: 48,
+    color: "rgba(255,255,255,0.92)",
+    lineHeight: 44,
+    letterSpacing: -0.3,
   },
   card: {
-    backgroundColor: "rgba(0,0,0,0.6)",
-    padding: 24,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingBottom: 40,
+    backgroundColor: "rgba(0,0,0,0.85)",
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingBottom: 44,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
   headerSection: {
-    marginBottom: 28,
+    marginBottom: 24,
   },
   subtitle: {
-    fontSize: 18,
-    fontWeight: "500",
-    color: "rgba(255,255,255,0.65)",
+    fontSize: 11,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.5)",
     letterSpacing: 2,
     textTransform: "uppercase",
-    marginBottom: 8,
+    marginBottom: 4,
   },
   brand: {
-    fontSize: 42,
-    fontWeight: "900",
+    fontSize: 38,
+    fontWeight: "800",
     color: "#fff",
+    letterSpacing: -0.5,
+  },
+  buttonRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
   },
   divider: {
     height: 1,
-    backgroundColor: "rgba(255,255,255,0.15)",
-    marginVertical: 15,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    marginVertical: 14,
   },
   loginTitle: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "800",
     color: "#fff",
     marginBottom: 20,
+    letterSpacing: -0.3,
   },
   input: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 14,
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
     color: "#fff",
-    marginBottom: 16,
-    fontSize: 16,
+    marginBottom: 12,
+    fontSize: 15,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(255,255,255,0.15)",
+    fontWeight: "400",
   },
   passwordContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    marginBottom: 16,
+    borderColor: "rgba(255,255,255,0.15)",
+    marginBottom: 10,
   },
   passwordInput: {
     flex: 1,
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
     color: "#fff",
-    fontSize: 16,
+    fontSize: 15,
   },
   passwordToggle: {
-    paddingRight: 12,
+    paddingRight: 14,
+    paddingLeft: 4,
   },
   passwordToggleText: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 13,
-    fontWeight: "500",
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0.3,
   },
   forgotLink: {
     alignItems: "flex-end",
-    marginBottom: 16,
+    marginBottom: 18,
+    marginTop: 4,
   },
   forgotText: {
-    color: "rgba(255,255,255,0.7)",
+    color: "rgba(255,255,255,0.55)",
     fontSize: 13,
+    fontWeight: "500",
   },
   primaryButton: {
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 14,
+    backgroundColor: "#ffffff",
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    marginVertical: 10,
+    marginVertical: 4,
   },
   primaryText: {
-    color: "#000",
+    color: "#000000",
     fontWeight: "700",
-    fontSize: 16,
+    fontSize: 13,
+    letterSpacing: 0.8,
   },
   secondaryButton: {
-    marginVertical: 10,
+    marginVertical: 4,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.35)",
-    padding: 14,
-    borderRadius: 14,
+    borderColor: "rgba(255,255,255,0.3)",
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: "center",
+    justifyContent: "center",
   },
   secondaryText: {
-    color: "#fff",
+    color: "#ffffff",
     fontWeight: "600",
-    fontSize: 16,
+    fontSize: 13,
+    letterSpacing: 0.8,
   },
   errorText: {
     color: "#ff6b6b",
     textAlign: "center",
-    marginVertical: 12,
-    fontSize: 14,
+    marginVertical: 10,
+    fontSize: 13,
+    fontWeight: "500",
   },
   backText: {
-    color: "rgba(255,255,255,0.7)",
+    color: "rgba(255,255,255,0.5)",
     textAlign: "center",
-    marginTop: 15,
-    fontSize: 14,
+    marginTop: 18,
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 1,
   },
   successContainer: {
     alignItems: "center",
   },
   avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: 84,
+    height: 84,
+    borderRadius: 42,
     marginBottom: 20,
-    borderWidth: 3,
-    borderColor: "rgba(255,255,255,0.4)",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.3)",
   },
   greetingSection: {
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 14,
   },
   greetingTitle: {
     fontSize: 22,
     fontWeight: "800",
     color: "#fff",
-    marginBottom: 8,
+    marginBottom: 6,
+    letterSpacing: -0.3,
   },
   greetingSubtitle: {
     fontSize: 14,
-    color: "rgba(255,255,255,0.7)",
+    color: "rgba(255,255,255,0.6)",
     textAlign: "center",
+    lineHeight: 20,
   },
   userDetailsSection: {
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: 22,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.07)",
   },
   userDetailsLabel: {
-    fontSize: 13,
-    color: "rgba(255,255,255,0.6)",
+    fontSize: 10,
+    color: "rgba(255,255,255,0.4)",
     marginBottom: 4,
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
+    fontWeight: "600",
   },
   userEmail: {
     fontSize: 14,
@@ -640,8 +676,9 @@ const styles = StyleSheet.create({
   },
   microCopy: {
     fontSize: 12,
-    color: "rgba(255,255,255,0.5)",
+    color: "rgba(255,255,255,0.4)",
     textAlign: "center",
-    marginTop: 16,
+    marginTop: 18,
+    fontStyle: "italic",
   },
 });

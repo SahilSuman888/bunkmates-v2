@@ -36,6 +36,7 @@ import { getStorage, ref, uploadString, getDownloadURL } from "firebase/storage"
 import { db } from "../../lib/firebase"; 
 import { useUser } from "../../contexts/UserContext"; 
 import { MaterialCommunityIcons, Ionicons, Feather } from "@expo/vector-icons";
+import UserProfileModal from "../../components/UserProfileModal";
 
 export default function ChatRoom() {
   const { friendId: rawId } = useLocalSearchParams();
@@ -50,6 +51,8 @@ export default function ChatRoom() {
   const [uploading, setUploading] = useState(false);
   
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   
   // FIXED: Now stores both URI for preview and Base64 for uploading
   const [pendingImage, setPendingImage] = useState<{uri: string, base64: string} | null>(null);
@@ -284,7 +287,13 @@ export default function ChatRoom() {
           <Pressable style={styles.circleBtn} onPress={() => router.back()}>
             <MaterialCommunityIcons name="arrow-left" size={22} color="white" />
           </Pressable>
-          <Pressable style={styles.userPill} onPress={() => router.push({ pathname: "/profile/[id]", params: { id: friendId } })}>
+          <Pressable
+            style={styles.userPill}
+            onPress={() => {
+              setSelectedProfileId(friendId);
+              setShowProfileModal(true);
+            }}
+          >
             <Image source={{ uri: friendData?.photoURL || "https://i.pravatar.cc/150" }} style={styles.avatar} />
             <View style={{ flex: 1 }}>
               <Text style={styles.userName} numberOfLines={1}>{friendData?.name || friendData?.username || "User"}</Text>
@@ -373,6 +382,18 @@ export default function ChatRoom() {
         </View>
       </Modal>
 
+      <UserProfileModal
+        userId={selectedProfileId || friendId}
+        userData={selectedProfileId === friendId ? friendData : null}
+        visible={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        onStartChat={(id) => {
+          setShowProfileModal(false);
+          if (id !== friendId) {
+            router.push(`/chat/${id}` as any);
+          }
+        }}
+      />
     </ImageBackground>
   );
 }
