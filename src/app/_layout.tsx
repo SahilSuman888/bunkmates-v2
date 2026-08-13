@@ -16,13 +16,11 @@ import {
 import { ChatSettingsProvider } from "../contexts/ChatSettingsContext";
 
 import NotificationsHandler from "../components/NotificationsHandler";
-
+import IncomingCallHandler from "../components/IncomingCallHandler";
 import { GradientProvider } from "../contexts/GradientContext";
 
-
 function LayoutContent() {
-  const { themeColors } =
-    useThemeToggle();
+  const { themeColors } = useThemeToggle();
 
   return (
     <View
@@ -37,6 +35,7 @@ function LayoutContent() {
 
             {/* Push notifications disabled temporarily */}
             <NotificationsHandler />
+            <IncomingCallHandler />
 
             <Stack
               screenOptions={{

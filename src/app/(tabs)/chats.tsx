@@ -9,6 +9,7 @@ import {
   TextInput,
   Image,
   StatusBar,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -18,7 +19,11 @@ import { useUserGroups } from "../../hooks/useUserGroups";
 import { useFriendRequests } from "../../hooks/useFriendRequests";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import NotificationBell from "../../components/NotificationBell";
-import GroupChatScreen from "../../components/group_chat/GroupChatScreen";
+import UserProfileModal from "../../components/UserProfileModal";
+import AddFriendModal from "../../components/chat/AddFriendModal";
+import CreateGroupModal from "../../components/chat/CreateGroupModal";
+import { updateDoc, doc, arrayUnion, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../../lib/firebase";
 
 export default function ChatsScreen() {
   const router = useRouter();
@@ -34,8 +39,13 @@ export default function ChatsScreen() {
     useFriendRequests(user?.uid || null) || {};
 
   const [searchText, setSearchText] = useState("");
-  const [activeTab, setActiveTab] =
-    useState<"all" | "chats" | "groups" | "requests">("all");
+
+  // Modal States
+  const [selectedProfileUid, setSelectedProfileUid] = useState<string | null>(null);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [addFriendModalVisible, setAddFriendModalVisible] = useState(false);
+  const [createGroupModalVisible, setCreateGroupModalVisible] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   const filteredChats = useMemo(() => {
     return chats.filter((chat: any) =>
@@ -53,34 +63,40 @@ export default function ChatsScreen() {
     const normalizedChats = (filteredChats || []).map((c: any) => ({
       id: c.id,
       type: "chat",
-      title: c.name || "BunkMate Traveler",
-      subtitle: c.lastMessage || "Start a conversation...",
-      avatar: c.avatar || "https://i.pravatar.cc/150?img=11",
-      timestamp: c.lastTimestamp || 0,
+      title: c.name || c.displayName || "BunkMate Traveler",
+      subtitle: c.lastMessage || "No messages yet",
+      avatar: c.avatar || c.photoURL || "https://i.pravatar.cc/150?img=11",
+      timestamp: c.lastTimestamp || c.updatedAt || 0,
       unreadCount: c.unreadCount || 0,
-      isOnline: true,
+      badge: null,
+      rawItem: c,
     }));
 
     const normalizedGroups = (filteredGroups || []).map((g: any) => ({
       id: g.id,
       type: "group",
       title: g.name || "Trip Group Chat",
-      subtitle:
-        g.lastMessage ||
-        (g.description || `${g.members?.length || 0} members`),
+      subtitle: g.lastMessage || "No messages yet",
       avatar: g.iconURL || "https://i.pravatar.cc/150?img=32",
       timestamp: g.lastTimestamp || g.updatedAt || 0,
       unreadCount: g.unreadCounts?.current || 0,
-      isOnline: false,
+      badge: g.name?.includes("Dev") ? "🧪 Dev Beta" : null,
+      rawItem: g,
     }));
 
     return [...normalizedChats, ...normalizedGroups].sort(
-      (a, b) => (b.timestamp || 0) - (a.timestamp || 0)
+      (a, b) => (b.timestamp?.seconds || b.timestamp || 0) - (a.timestamp?.seconds || a.timestamp || 0)
     );
   }, [filteredChats, filteredGroups]);
 
-  const loading =
-    authLoading || chatsLoading || groupsLoading || requestsLoading;
+  const handleAvatarPress = (uid: string, e?: any) => {
+    if (e) e.stopPropagation();
+    if (!uid) return;
+    setSelectedProfileUid(uid);
+    setProfileModalVisible(true);
+  };
+
+  const loading = authLoading || chatsLoading || groupsLoading || requestsLoading;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -88,197 +104,131 @@ export default function ChatsScreen() {
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#00e6b0" />
+          <ActivityIndicator size="large" color="#ffffff" />
         </View>
       ) : (
         <View style={styles.container}>
-          {/* HEADER */}
+          {/* HEADER matching Screenshot */}
           <View style={styles.header}>
-            <View>
-              <Text style={styles.headerTitle}>Chats</Text>
-              <Text style={styles.headerSub}>Connect with your bunkmates</Text>
-            </View>
+            <Text style={styles.headerTitle}>Chats</Text>
             <NotificationBell />
           </View>
 
-          {/* SEARCH */}
+          {/* SEARCH BAR matching Screenshot */}
           <View style={styles.searchContainer}>
-            <Feather name="search" size={17} color="#888" />
+            <Feather name="search" size={18} color="#777777" />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search conversations..."
-              placeholderTextColor="#666"
+              placeholder="Search users or groups..."
+              placeholderTextColor="#777777"
               value={searchText}
               onChangeText={setSearchText}
             />
             {searchText ? (
               <Pressable onPress={() => setSearchText("")}>
-                <Ionicons name="close-circle" size={16} color="#888" />
+                <Ionicons name="close-circle" size={18} color="#777777" />
               </Pressable>
             ) : null}
           </View>
 
-          {/* SEGMENTED TAB BUTTONS */}
-          <View style={styles.tabRow}>
-            {(["all", "chats", "groups", "requests"] as const).map((tab) => (
-              <Pressable
-                key={tab}
-                onPress={() => setActiveTab(tab)}
-                style={[
-                  styles.tabButton,
-                  activeTab === tab && styles.tabActive,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.tabText,
-                    activeTab === tab && styles.tabTextActive,
-                  ]}
-                >
-                  {tab === "requests"
-                    ? `Requests (${requests.length})`
-                    : tab === "groups"
-                    ? "Groups"
-                    : tab === "chats"
-                    ? "Chats"
-                    : "All"}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
+          {/* CHAT LIST matching Screenshot */}
           <ScrollView
             contentContainerStyle={{ paddingBottom: 110 }}
             showsVerticalScrollIndicator={false}
           >
-            {activeTab === "all" &&
-              (combinedList.length > 0 ? (
-                combinedList.map((item: any) => (
+            {combinedList.length > 0 ? (
+              combinedList.map((item: any) => (
+                <Pressable
+                  key={`${item.type}-${item.id}`}
+                  onPress={() =>
+                    item.type === "chat"
+                      ? router.push(`/chat/${item.id}` as any)
+                      : router.push(`/(tabs)/group-chatroom/${item.id}` as any)
+                  }
+                  style={styles.card}
+                >
                   <Pressable
-                    key={`${item.type}-${item.id}`}
-                    onPress={() =>
+                    onPress={(e) =>
                       item.type === "chat"
-                        ? router.push(`/chat/${item.id}` as any)
-                        : router.push(`/(tabs)/group-chatroom/${item.id}` as any)
+                        ? handleAvatarPress(item.rawItem?.uid || item.id, e)
+                        : null
                     }
-                    style={styles.card}
                   >
-                    <View style={{ position: "relative" }}>
-                      <Image
-                        source={{ uri: item.avatar }}
-                        style={styles.avatar}
-                      />
-                      {item.isOnline && <View style={styles.onlineDot} />}
-                    </View>
-
-                    <View style={styles.cardMiddle}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                        <Text style={styles.cardTitle}>{item.title}</Text>
-                        {item.type === "group" && (
-                          <View style={styles.groupBadge}>
-                            <Text style={styles.groupBadgeText}>GROUP</Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text style={styles.cardSub} numberOfLines={1}>
-                        {item.subtitle}
-                      </Text>
-                    </View>
-
-                    <View style={styles.cardRight}>
-                      <Text style={styles.tsText}>
-                        {formatTime(item.timestamp)}
-                      </Text>
-                      {item.unreadCount > 0 ? (
-                        <View style={styles.unreadBadge}>
-                          <Text style={styles.unreadText}>
-                            {item.unreadCount}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
+                    <Image source={{ uri: item.avatar }} style={styles.avatar} />
                   </Pressable>
-                ))
-              ) : (
-                <Empty text="No conversations found" />
-              ))}
 
-            {activeTab === "chats" &&
-              (filteredChats.length > 0 ? (
-                filteredChats.map((chat: any) => (
-                  <Pressable
-                    key={chat.id}
-                    onPress={() => router.push(`/chat/${chat.id}` as any)}
-                    style={styles.card}
-                  >
-                    <View style={{ position: "relative" }}>
-                      <Image
-                        source={{
-                          uri: chat.avatar || "https://i.pravatar.cc/150?img=11",
-                        }}
-                        style={styles.avatar}
-                      />
-                      <View style={styles.onlineDot} />
-                    </View>
-
-                    <View style={styles.cardMiddle}>
-                      <Text style={styles.cardTitle}>
-                        {chat.name || "BunkMate User"}
+                  <View style={styles.cardMiddle}>
+                    <View style={styles.titleRow}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>
+                        {item.title}
                       </Text>
-                      <Text style={styles.cardSub} numberOfLines={1}>
-                        {chat.lastMessage || "Tap to chat"}
-                      </Text>
-                    </View>
-
-                    <View style={styles.cardRight}>
-                      <Text style={styles.tsText}>
-                        {formatTime(chat.lastTimestamp)}
-                      </Text>
-                      {chat.unreadCount > 0 ? (
-                        <View style={styles.unreadBadge}>
-                          <Text style={styles.unreadText}>
-                            {chat.unreadCount}
-                          </Text>
+                      {item.badge && (
+                        <View style={styles.groupBadge}>
+                          <Text style={styles.groupBadgeText}>{item.badge}</Text>
                         </View>
-                      ) : null}
+                      )}
                     </View>
-                  </Pressable>
-                ))
-              ) : (
-                <Empty text="No direct chats yet" />
-              ))}
-
-            {activeTab === "requests" &&
-              (requests.length > 0 ? (
-                requests.map((req: any) => (
-                  <View key={req.id} style={styles.card}>
-                    <Image
-                      source={{
-                        uri:
-                          req.fromUserAvatar || "https://i.pravatar.cc/150?img=5",
-                      }}
-                      style={styles.avatar}
-                    />
-                    <View style={styles.cardMiddle}>
-                      <Text style={styles.cardTitle}>
-                        {req.fromUserName || "Traveler"}
-                      </Text>
-                      <Text style={styles.cardSub}>Wants to connect with you</Text>
-                    </View>
+                    <Text style={styles.cardSub} numberOfLines={1}>
+                      {item.subtitle}
+                    </Text>
                   </View>
-                ))
-              ) : (
-                <Empty text="No pending connection requests" />
-              ))}
+
+                  <View style={styles.cardRight}>
+                    <Text style={styles.tsText}>
+                      {formatTime(item.timestamp)}
+                    </Text>
+                    {item.unreadCount > 0 ? (
+                      <View style={styles.unreadDot} />
+                    ) : (
+                      <View style={styles.unreadDot} />
+                    )}
+                  </View>
+                </Pressable>
+              ))
+            ) : (
+              <Empty text="No conversations found" />
+            )}
           </ScrollView>
 
-          {activeTab === "groups" && (
-            <GroupChatScreen
-              groups={filteredGroups}
-              loading={groupsLoading}
-              onRefresh={() => {}}
-            />
-          )}
+          {/* FLOATING ACTION BUTTON (+) matching Screenshot */}
+          <Pressable
+            style={styles.fabBtn}
+            onPress={() => setAddFriendModalVisible(true)}
+          >
+            <Feather name="plus" size={26} color="#ffffff" />
+          </Pressable>
+
+          {/* USER PROFILE MODAL */}
+          <UserProfileModal
+            userId={selectedProfileUid}
+            visible={profileModalVisible}
+            onClose={() => setProfileModalVisible(false)}
+            onStartChat={(targetUid) => {
+              setProfileModalVisible(false);
+              router.push(`/chat/${targetUid}` as any);
+            }}
+          />
+
+          {/* ADD FRIEND / USER SEARCH MODAL */}
+          <AddFriendModal
+            visible={addFriendModalVisible}
+            onClose={() => setAddFriendModalVisible(false)}
+            onSelectUser={(foundUser) => {
+              handleAvatarPress(foundUser.uid || foundUser.id);
+            }}
+            onCreateGroup={() => {
+              setCreateGroupModalVisible(true);
+            }}
+          />
+
+          {/* CREATE GROUP MODAL */}
+          <CreateGroupModal
+            visible={createGroupModalVisible}
+            onClose={() => setCreateGroupModalVisible(false)}
+            onGroupCreated={(groupId) => {
+              router.push(`/(tabs)/group-chatroom/${groupId}` as any);
+            }}
+          />
         </View>
       )}
     </SafeAreaView>
@@ -288,20 +238,27 @@ export default function ChatsScreen() {
 function Empty({ text }: { text: string }) {
   return (
     <View style={styles.empty}>
-      <Ionicons name="chatbubbles-outline" size={32} color="#555555" />
-      <Text style={{ color: "#888888", fontSize: 13, marginTop: 8 }}>{text}</Text>
+      <Text style={{ color: "#777777", fontSize: 14 }}>{text}</Text>
     </View>
   );
 }
 
-function formatTime(ts: number) {
+function formatTime(ts: any) {
   if (!ts) return "";
-  const t = ts > 1e12 ? new Date(ts) : new Date(ts * 1000);
-  const now = new Date();
-  if (t.toDateString() === now.toDateString()) {
-    return t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  let date: Date;
+  if (typeof ts === "number") {
+    date = ts > 1e12 ? new Date(ts) : new Date(ts * 1000);
+  } else if (ts?.seconds) {
+    date = new Date(ts.seconds * 1000);
+  } else if (ts instanceof Date) {
+    date = ts;
+  } else {
+    return "";
   }
-  return t.toLocaleDateString([], { month: "short", day: "numeric" });
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = String(date.getFullYear()).slice(-2);
+  return `${day}/${month}/${year}`;
 }
 
 const styles = StyleSheet.create({
@@ -316,142 +273,116 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingTop: 8,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 14,
+    marginBottom: 16,
+    paddingHorizontal: 4,
   },
   headerTitle: {
     color: "#ffffff",
-    fontSize: 24,
+    fontSize: 32,
     fontWeight: "900",
-  },
-  headerSub: {
-    color: "#888888",
-    fontSize: 12,
-    marginTop: 2,
+    letterSpacing: -0.5,
   },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#121214",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 44,
+    backgroundColor: "#13161c",
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    height: 48,
     borderWidth: 1,
-    borderColor: "#1e1e24",
-    marginBottom: 14,
-    gap: 8,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    marginBottom: 16,
+    gap: 10,
   },
   searchInput: {
     flex: 1,
     color: "#ffffff",
-    fontSize: 13,
-  },
-  tabRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 16,
-  },
-  tabButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: "#141416",
-    borderWidth: 1,
-    borderColor: "#222228",
-  },
-  tabActive: {
-    backgroundColor: "rgba(0,230,176,0.14)",
-    borderColor: "#00e6b0",
-  },
-  tabText: {
-    color: "#888888",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  tabTextActive: {
-    color: "#00e6b0",
-    fontWeight: "800",
+    fontSize: 14,
   },
   card: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#121214",
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#1e1e24",
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255, 255, 255, 0.04)",
   },
   avatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "#222228",
-  },
-  onlineDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#00e6b0",
-    borderWidth: 2,
-    borderColor: "#121214",
-    position: "absolute",
-    bottom: 0,
-    right: 0,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: "#222222",
   },
   cardMiddle: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 14,
     marginRight: 8,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   cardTitle: {
     color: "#ffffff",
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: "700",
+  },
+  groupBadge: {
+    backgroundColor: "rgba(37, 211, 102, 0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(37, 211, 102, 0.3)",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  groupBadgeText: {
+    color: "#25d366",
+    fontSize: 10,
+    fontWeight: "800",
   },
   cardSub: {
     color: "#888888",
-    fontSize: 12,
-    marginTop: 3,
-  },
-  groupBadge: {
-    backgroundColor: "rgba(0,230,176,0.12)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  groupBadgeText: {
-    color: "#00e6b0",
-    fontSize: 8.5,
-    fontWeight: "800",
+    fontSize: 13,
+    marginTop: 4,
   },
   cardRight: {
     alignItems: "flex-end",
+    justifyContent: "center",
+    gap: 8,
   },
   tsText: {
-    color: "#777777",
-    fontSize: 10.5,
+    color: "#888888",
+    fontSize: 11,
   },
-  unreadBadge: {
-    backgroundColor: "#00e6b0",
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
+  unreadDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: "#e2a567",
+  },
+  fabBtn: {
+    position: "absolute",
+    bottom: 24,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: "#c87a1c",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 5,
-    paddingHorizontal: 5,
-  },
-  unreadText: {
-    color: "#00140f",
-    fontSize: 10,
-    fontWeight: "800",
+    elevation: 6,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
   },
   empty: {
     alignItems: "center",
