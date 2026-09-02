@@ -12,7 +12,7 @@
     Platform,
     ActivityIndicator,
   } from "react-native";
-  import { BlurView } from "expo-blur";
+  import { BlurView } from "../ui/AppBlurView";
   import * as DocumentPicker from "expo-document-picker";
   import { MaterialCommunityIcons } from "@expo/vector-icons";
   import { addDoc, collection, serverTimestamp } from "firebase/firestore";

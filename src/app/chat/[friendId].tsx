@@ -19,8 +19,7 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useChatSettings, wallpaperList } from "../../contexts/ChatSettingsContext";
-import { CameraView, Camera } from "expo-camera";
-import { WebRTCManager } from "../../lib/webrtcManager";
+import { useCall } from "../../contexts/CallContext";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
 import {
@@ -45,6 +44,7 @@ export default function ChatRoom() {
   const { friendId: rawId } = useLocalSearchParams();
   const router = useRouter();
   const { user, userData } = useUser();
+  const { startCall } = useCall();
 
   const { wallpaper, fontSize, theme: chatTheme } = useChatSettings();
   const [messages, setMessages] = useState<any[]>([]);
@@ -60,130 +60,32 @@ export default function ChatRoom() {
   const [pendingImage, setPendingImage] = useState<{ uri: string; base64: string } | null>(null);
   const [reactionMsg, setReactionMsg] = useState<any | null>(null);
 
-  // Call States
-  const [activeCall, setActiveCall] = useState<{ type: "audio" | "video"; active: boolean; status?: string } | null>(null);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isSpeaker, setIsSpeaker] = useState(false);
-  const [callSeconds, setCallSeconds] = useState(0);
-
   let friendId = rawId as string;
   if (friendId?.includes("_") && user) {
     const ids = friendId.split("_");
     friendId = ids.find((id) => id !== user.uid) || friendId;
   }
 
-  const callDocId = user && friendId ? `call_${user.uid}_${friendId}` : null;
-
-  const rtcRef = useRef<WebRTCManager | null>(null);
-
-  // Listen to Outgoing Call Doc Status
-  useEffect(() => {
-    if (!callDocId || !activeCall?.active) return;
-    const unsub = onSnapshot(doc(db, "calls", callDocId), (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data.status === "accepted") {
-          setActiveCall((prev) => ({
-            type: prev?.type || "audio",
-            active: true,
-            status: "accepted",
-          }));
-        } else if (data.status === "declined") {
-          Alert.alert("Call Declined", `${friendData?.displayName || "BunkMate"} declined your call.`);
-          if (rtcRef.current) {
-            rtcRef.current.endCall();
-            rtcRef.current = null;
-          }
-          setActiveCall(null);
-        } else if (data.status === "ended") {
-          if (rtcRef.current) {
-            rtcRef.current.endCall();
-            rtcRef.current = null;
-          }
-          setActiveCall(null);
-        }
-      }
-    });
-    return () => unsub();
-  }, [callDocId, activeCall?.active]);
-
-  // Live Timer when Call is Accepted
-  useEffect(() => {
-    let timer: any;
-    if (activeCall?.active && activeCall?.status === "accepted") {
-      timer = setInterval(() => {
-        setCallSeconds((s) => s + 1);
-      }, 1000);
-    } else {
-      setCallSeconds(0);
-    }
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [activeCall?.active, activeCall?.status]);
-
-  const requestCallPermissions = async () => {
-    try {
-      const cam = await Camera.requestCameraPermissionsAsync();
-      const mic = await Camera.requestMicrophonePermissionsAsync();
-      return cam.granted && mic.granted;
-    } catch (e) {
-      console.log("Permission request error:", e);
-      return false;
-    }
-  };
-
-  const initiateCallSignal = async (type: "audio" | "video") => {
-    if (!user || !friendId || !callDocId) return;
-    await requestCallPermissions();
-    try {
-      await setDoc(doc(db, "calls", callDocId), {
-        callId: callDocId,
-        callerId: user.uid,
-        callerName: userData?.displayName || userData?.name || user.displayName || "BunkMate",
-        callerAvatar: userData?.photoURL || userData?.avatar || user.photoURL || "https://i.pravatar.cc/150",
-        callerHandle: userData?.username || "traveler",
-        receiverId: friendId,
-        receiverName: friendData?.displayName || friendData?.name || "BunkMate",
-        callType: type,
-        status: "calling",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      // 1. Immediately start WebRTC caller (creates peer connection & SDP offer)
-      const rtc = new WebRTCManager(callDocId);
-      rtcRef.current = rtc;
-      await rtc.startCaller(type === "video");
-
-      // 2. Set active call state
-      setActiveCall({ type, active: true, status: "calling" });
-    } catch (e) {
-      console.error("Initiate call error:", e);
-      setActiveCall({ type, active: true, status: "calling" });
-    }
-  };
-
   const handleStartPhoneCall = () => {
-    initiateCallSignal("audio");
+    startCall({
+      receiverId: friendId,
+      receiverName: friendData?.displayName || friendData?.name || "BunkMate",
+      receiverAvatar:
+        friendData?.photoURL || friendData?.avatar || "https://i.pravatar.cc/150",
+      receiverHandle: friendData?.username || "traveler",
+      callType: "audio",
+    });
   };
 
   const handleStartVideoCall = () => {
-    initiateCallSignal("video");
-  };
-
-  const handleEndCall = async () => {
-    if (rtcRef.current) {
-      rtcRef.current.endCall();
-      rtcRef.current = null;
-    }
-    if (callDocId) {
-      await updateDoc(doc(db, "calls", callDocId), {
-        status: "ended",
-        endedAt: serverTimestamp(),
-      }).catch(() => {});
-    }
-    setActiveCall(null);
+    startCall({
+      receiverId: friendId,
+      receiverName: friendData?.displayName || friendData?.name || "BunkMate",
+      receiverAvatar:
+        friendData?.photoURL || friendData?.avatar || "https://i.pravatar.cc/150",
+      receiverHandle: friendData?.username || "traveler",
+      callType: "video",
+    });
   };
 
   const flatListRef = useRef<any>(null);
@@ -384,6 +286,58 @@ export default function ChatRoom() {
     const reactionEntries = item.reactions ? Object.values(item.reactions) : [];
     const rawLatest = reactionEntries.length > 0 ? reactionEntries[reactionEntries.length - 1] : null;
     const latestReaction = getEmojiString(rawLatest);
+
+    // Call Log Bubble
+    if (item.type === "call_log") {
+      const isMissed = item.status === "missed" || item.status === "declined";
+      const isVideo = item.callType === "video";
+
+      return (
+        <View style={{ width: "100%", alignItems: "center", marginVertical: 8 }}>
+          <Pressable
+            style={styles.callLogCard}
+            onPress={() => (isVideo ? handleStartVideoCall() : handleStartPhoneCall())}
+          >
+            <View
+              style={[
+                styles.callLogIconWrap,
+                isMissed && styles.callLogIconWrapMissed,
+              ]}
+            >
+              <Ionicons
+                name={isVideo ? "videocam" : "call"}
+                size={16}
+                color={isMissed ? "#ff5252" : "#00e6b0"}
+              />
+            </View>
+            <View style={styles.callLogInfo}>
+              <Text
+                style={[
+                  styles.callLogTitle,
+                  isMissed && { color: "#ff8080" },
+                ]}
+              >
+                {item.text ||
+                  (isMissed
+                    ? "Missed Call"
+                    : `${isVideo ? "Video" : "Voice"} Call`)}
+              </Text>
+              <Text style={styles.callLogTime}>
+                {item.timestamp?.seconds
+                  ? new Date(item.timestamp.seconds * 1000).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : ""}
+              </Text>
+            </View>
+            <View style={styles.callLogActionBtn}>
+              <Text style={styles.callLogActionText}>Call back</Text>
+            </View>
+          </Pressable>
+        </View>
+      );
+    }
 
     return (
       <View style={{ width: "100%" }}>
@@ -672,64 +626,6 @@ export default function ChatRoom() {
         </View>
       </Modal>
 
-      {/* ACTIVE CALL MODAL */}
-      <Modal visible={!!activeCall?.active} transparent animationType="slide" onRequestClose={() => setActiveCall(null)}>
-        <View style={styles.callModalOverlay}>
-          <View style={styles.callHeaderContainer}>
-            <Text style={styles.callTypeTitle}>
-              {activeCall?.type === "video" ? "BunkMate Video Call" : "BunkMate Voice Call"}
-            </Text>
-            <Text style={styles.callTimerText}>
-              {callSeconds > 0
-                ? `${String(Math.floor(callSeconds / 60)).padStart(2, "0")}:${String(callSeconds % 60).padStart(2, "0")}`
-                : "Calling..."}
-            </Text>
-          </View>
-
-          {/* LIVE CAMERA PREVIEW IF VIDEO CALL */}
-          {activeCall?.type === "video" ? (
-            <View style={styles.cameraContainer}>
-              <CameraView style={StyleSheet.absoluteFill} facing="front" />
-            </View>
-          ) : (
-            <View style={styles.callAvatarSection}>
-              <Image
-                source={{ uri: friendData?.photoURL || friendData?.avatar || "https://i.pravatar.cc/150" }}
-                style={styles.callAvatarImg}
-              />
-              <Text style={styles.callNameText}>
-                {friendData?.displayName || friendData?.name || friendData?.username || "BunkMate"}
-              </Text>
-              <Text style={styles.callHandleText}>@{friendData?.username || "traveler"}</Text>
-            </View>
-          )}
-
-          {/* CALL CONTROLS */}
-          <View style={styles.callControlsRow}>
-            <Pressable
-              style={[styles.callControlBtn, isMuted && styles.callControlActive]}
-              onPress={() => setIsMuted(!isMuted)}
-            >
-              <Ionicons name={isMuted ? "mic-off" : "mic"} size={22} color={isMuted ? "#00140f" : "#ffffff"} />
-            </Pressable>
-
-            <Pressable
-              style={styles.endCallBtn}
-              onPress={handleEndCall}
-            >
-              <Ionicons name="call" size={24} color="#ffffff" style={{ transform: [{ rotate: "135deg" }] }} />
-            </Pressable>
-
-            <Pressable
-              style={[styles.callControlBtn, isSpeaker && styles.callControlActive]}
-              onPress={() => setIsSpeaker(!isSpeaker)}
-            >
-              <Ionicons name={isSpeaker ? "volume-high" : "volume-medium"} size={22} color={isSpeaker ? "#00140f" : "#ffffff"} />
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
       {/* IN-CHAT USER PROFILE MODAL */}
       <UserProfileModal
         userId={selectedProfileId || friendId}
@@ -969,83 +865,54 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
-  callModalOverlay: {
-    flex: 1,
-    backgroundColor: "#0b141a",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 20 : 60,
-    paddingHorizontal: 20,
-  },
-  callHeaderContainer: {
-    alignItems: "center",
-    marginTop: 20,
-  },
-  callTypeTitle: {
-    color: "#00e6b0",
-    fontSize: 15,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-  },
-  callTimerText: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "700",
-    marginTop: 6,
-  },
-  cameraContainer: {
-    width: "100%",
-    height: "60%",
-    borderRadius: 24,
-    overflow: "hidden",
-    backgroundColor: "#000000",
-  },
-  callAvatarSection: {
-    alignItems: "center",
-  },
-  callAvatarImg: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 3,
-    borderColor: "#00e6b0",
-    backgroundColor: "#1e2329",
-    marginBottom: 16,
-  },
-  callNameText: {
-    color: "#ffffff",
-    fontSize: 22,
-    fontWeight: "900",
-  },
-  callHandleText: {
-    color: "#888888",
-    fontSize: 13,
-    marginTop: 4,
-  },
-  callControlsRow: {
+  callLogCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 28,
-    marginBottom: 20,
+    backgroundColor: "rgba(22, 27, 34, 0.9)",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    maxWidth: "88%",
   },
-  callControlBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
+  callLogIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(0, 230, 176, 0.12)",
     alignItems: "center",
     justifyContent: "center",
+    marginRight: 10,
   },
-  callControlActive: {
-    backgroundColor: "#00e6b0",
+  callLogIconWrapMissed: {
+    backgroundColor: "rgba(255, 82, 82, 0.15)",
   },
-  endCallBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "#ff5252",
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 4,
+  callLogInfo: {
+    flex: 1,
+    marginRight: 10,
+  },
+  callLogTitle: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  callLogTime: {
+    color: "#888888",
+    fontSize: 10.5,
+    marginTop: 2,
+  },
+  callLogActionBtn: {
+    backgroundColor: "rgba(0, 230, 176, 0.15)",
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0, 230, 176, 0.3)",
+  },
+  callLogActionText: {
+    color: "#00e6b0",
+    fontSize: 11,
+    fontWeight: "700",
   },
 });

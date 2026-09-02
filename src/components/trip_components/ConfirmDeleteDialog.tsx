@@ -8,7 +8,7 @@ import {
   Animated,
   Easing,
 } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView } from "../ui/AppBlurView";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 

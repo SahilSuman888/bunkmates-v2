@@ -7,7 +7,7 @@ TouchableOpacity,
 StyleSheet,
 ScrollView,
 } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView } from "../ui/AppBlurView";
 import Slider from "@react-native-community/slider";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 

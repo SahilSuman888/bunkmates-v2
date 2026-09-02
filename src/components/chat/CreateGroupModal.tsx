@@ -12,7 +12,7 @@ import {
   Alert,
   ScrollView,
 } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView } from "../ui/AppBlurView";
 import { collection, doc, getDoc, setDoc, serverTimestamp, addDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useUser } from "../../contexts/UserContext";

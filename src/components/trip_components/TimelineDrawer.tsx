@@ -10,7 +10,7 @@ import {
   Platform,
   KeyboardAvoidingView,
 } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView } from "../ui/AppBlurView";
 
 export default function TimelineDrawer({
   timelineDrawerOpen,

@@ -15,7 +15,7 @@ import {
   Platform,
   StatusBar,
 } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView } from "./ui/AppBlurView";
 import {
   doc,
   getDoc,
@@ -35,6 +35,7 @@ import {
 import { useRouter } from "expo-router";
 import { db } from "../lib/firebase";
 import { useUser } from "../contexts/UserContext";
+import { useCall } from "../contexts/CallContext";
 import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 
 const { height } = Dimensions.get("window");
@@ -54,6 +55,7 @@ export default function UserProfileModal({
 }) {
   const router = useRouter();
   const { user: currentUser } = useUser();
+  const { startCall } = useCall();
   const [userProfile, setUserProfile] = useState<any>(initialUserData || null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -487,6 +489,67 @@ export default function UserProfileModal({
                 </View>
               </Pressable>
 
+              {/* QUICK CALL ACTIONS */}
+              {currentUser?.uid !== targetUid && (
+                <View style={{ flexDirection: "row", gap: 10, marginVertical: 8 }}>
+                  <Pressable
+                    style={{
+                      flex: 1,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      backgroundColor: "rgba(0, 230, 176, 0.12)",
+                      paddingVertical: 13,
+                      borderRadius: 18,
+                      borderWidth: 1,
+                      borderColor: "rgba(0, 230, 176, 0.3)",
+                    }}
+                    onPress={() => {
+                      onClose();
+                      startCall({
+                        receiverId: targetUid,
+                        receiverName: displayName,
+                        receiverAvatar: photoURL,
+                        receiverHandle: handleText.replace("@", ""),
+                        callType: "audio",
+                      });
+                    }}
+                  >
+                    <Ionicons name="call" size={17} color="#00e6b0" />
+                    <Text style={{ color: "#00e6b0", fontWeight: "700", fontSize: 13 }}>Voice Call</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={{
+                      flex: 1,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      paddingVertical: 13,
+                      borderRadius: 18,
+                      borderWidth: 1,
+                      borderColor: "rgba(255, 255, 255, 0.14)",
+                    }}
+                    onPress={() => {
+                      onClose();
+                      startCall({
+                        receiverId: targetUid,
+                        receiverName: displayName,
+                        receiverAvatar: photoURL,
+                        receiverHandle: handleText.replace("@", ""),
+                        callType: "video",
+                      });
+                    }}
+                  >
+                    <Ionicons name="videocam" size={18} color="#ffffff" />
+                    <Text style={{ color: "#ffffff", fontWeight: "700", fontSize: 13 }}>Video Call</Text>
+                  </Pressable>
+                </View>
+              )}
+
               {/* PROFILE NAVIGATION BUTTON */}
               <Pressable style={styles.navActionCard} onPress={() => onClose()}>
                 <Feather name="user" size={18} color="#cccccc" />
@@ -812,7 +875,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#0d0e12",
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "#0d0e12",
   },
   cardContainer: {

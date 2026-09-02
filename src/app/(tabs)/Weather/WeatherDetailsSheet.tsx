@@ -10,7 +10,7 @@ import {
   PanResponder,
   Animated,
 } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView } from "../../../components/ui/AppBlurView";
 import dayjs from "dayjs";
 import WeatherGridCard from "./WeatherGridCard";
 import HourlyForecast from "./HourlyForecast";

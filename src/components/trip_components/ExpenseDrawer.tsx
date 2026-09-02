@@ -12,7 +12,7 @@ import {
   KeyboardAvoidingView,
   Image,
 } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView } from "../ui/AppBlurView";
 import Checkbox from "@react-native-community/checkbox";
 
 interface Member {

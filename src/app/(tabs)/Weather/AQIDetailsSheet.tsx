@@ -10,7 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView } from "../../../components/ui/AppBlurView";
 import { Feather } from "@expo/vector-icons";
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get("window");

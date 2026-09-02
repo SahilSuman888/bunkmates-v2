@@ -9,7 +9,7 @@ import {
   Text,
   ActivityIndicator,
 } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView } from "./ui/AppBlurView";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, usePathname } from "expo-router";
 import { useUser } from "../contexts/UserContext";

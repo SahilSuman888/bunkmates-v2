@@ -10,7 +10,7 @@ import {
   Dimensions,
   Modal,
 } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView } from "../ui/AppBlurView";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { Ionicons } from "@expo/vector-icons"; // Ensure expo/vector-icons is installed

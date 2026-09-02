@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet } from "react-native";
 import BottomSheet from "@gorhom/bottom-sheet";
 import { useMemo, useRef } from "react";
-import { BlurView } from "expo-blur";
+import { BlurView } from "../ui/AppBlurView";
 
 interface Props {
   weather: any;

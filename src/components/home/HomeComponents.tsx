@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
   ViewStyle,
 } from "react-native";
-import { BlurView } from "expo-blur";
+import { BlurView } from "../ui/AppBlurView";
 import { MotiView } from "moti";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { router } from "expo-router";

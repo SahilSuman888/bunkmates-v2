@@ -1,6 +1,6 @@
 import React from 'react';
 import { ScrollView, View, Text, StyleSheet } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { BlurView } from '../../../components/ui/AppBlurView';
 import dayjs from 'dayjs'; // Ensure dayjs is installed for easy formatting
 import WeatherIcon from './WeatherIcon';
 

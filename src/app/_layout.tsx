@@ -14,6 +14,7 @@ import {
 } from "../contexts/ThemeContext";
 
 import { ChatSettingsProvider } from "../contexts/ChatSettingsContext";
+import { CallProvider } from "../contexts/CallContext";
 
 import NotificationsHandler from "../components/NotificationsHandler";
 import IncomingCallHandler from "../components/IncomingCallHandler";
@@ -31,20 +32,22 @@ function LayoutContent() {
     >
       <GradientProvider>
         <UserProvider>
-          <ChatSettingsProvider>
+          <CallProvider>
+            <ChatSettingsProvider>
 
-            {/* Push notifications disabled temporarily */}
-            <NotificationsHandler />
-            <IncomingCallHandler />
+              {/* Push notifications disabled temporarily */}
+              <NotificationsHandler />
+              <IncomingCallHandler />
 
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: "transparent" },
-              }}
-            />
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: "transparent" },
+                }}
+              />
 
-          </ChatSettingsProvider>
+            </ChatSettingsProvider>
+          </CallProvider>
         </UserProvider>
       </GradientProvider>
     </View>
