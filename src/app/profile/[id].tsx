@@ -7,10 +7,10 @@ import {
   Pressable,
   ScrollView,
   Alert,
-  SafeAreaView,
   StatusBar,
   Platform
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialCommunityIcons, Feather, Ionicons } from "@expo/vector-icons";
 import {

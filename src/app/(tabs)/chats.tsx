@@ -7,15 +7,17 @@ import {
   Pressable,
   Text,
   TextInput,
-  Image,
   StatusBar,
   Platform,
-  Animated,
   Dimensions,
+  Modal,
+  RefreshControl,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
+import { Image as ExpoImage } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import { useUser } from "../../contexts/UserContext";
 import { useCall } from "../../contexts/CallContext";
 import { useUserChats } from "../../hooks/useUserChats";
@@ -30,25 +32,29 @@ import {
   collection,
   query,
   where,
-  orderBy,
-  limit,
   onSnapshot,
+  limit,
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
+type ChatFilterScope = "All" | "Direct" | "Groups" | "Unread" | "Calls";
+
 export default function ChatsScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, loading: authLoading } = useUser();
+  const { user, userData, loading: authLoading } = useUser();
   const { startCall } = useCall();
 
-  const [activeTab, setActiveTab] = useState<"chats" | "calls">("chats");
+  const [activeScope, setActiveScope] = useState<ChatFilterScope>("All");
   const [callHistory, setCallHistory] = useState<any[]>([]);
   const [callHistoryLoading, setCallHistoryLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Tab animated slider value
-  const tabSliderAnim = useRef(new Animated.Value(0)).current;
+  // Quick Action Menu on a chat
+  const [selectedChatAction, setSelectedChatAction] = useState<any | null>(null);
 
   const { chats = [], loading: chatsLoading } =
     useUserChats(user?.uid || null) || {};
@@ -59,44 +65,26 @@ export default function ChatsScreen() {
   const { requests = [], loading: requestsLoading } =
     useFriendRequests(user?.uid || null) || {};
 
-  const [searchText, setSearchText] = useState("");
-
-  // Modal States
+  // Modals
   const [selectedProfileUid, setSelectedProfileUid] = useState<string | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [addFriendModalVisible, setAddFriendModalVisible] = useState(false);
   const [createGroupModalVisible, setCreateGroupModalVisible] = useState(false);
+  const [composeMenuVisible, setComposeMenuVisible] = useState(false);
 
-  // Animate tab switch
-  const handleTabChange = (tab: "chats" | "calls") => {
-    try {
-      Haptics.selectionAsync();
-    } catch (e) {}
-
-    setActiveTab(tab);
-    Animated.spring(tabSliderAnim, {
-      toValue: tab === "chats" ? 0 : 1,
-      bounciness: 6,
-      speed: 14,
-      useNativeDriver: false,
-    }).start();
-  };
-
-  // ============================================================
-  // FETCH CALLS DIRECTLY FROM ROOT `calls` FIRESTORE COLLECTION
-  // ============================================================
+  // ═══════════════════════════════════════════════════════════
+  // 1. FETCH CALLS
+  // ═══════════════════════════════════════════════════════════
   useEffect(() => {
     if (!user?.uid) return;
 
     setCallHistoryLoading(true);
 
-    // 1. Query Outgoing calls (callerId == user.uid)
     const qCaller = query(
       collection(db, "calls"),
       where("callerId", "==", user.uid)
     );
 
-    // 2. Query Incoming calls (receiverId == user.uid)
     const qReceiver = query(
       collection(db, "calls"),
       where("receiverId", "==", user.uid)
@@ -109,7 +97,6 @@ export default function ChatsScreen() {
       const callMap = new Map<string, any>();
 
       [...callerCalls, ...receiverCalls].forEach((call) => {
-        // Calculate duration from endedAt & createdAt if not directly set
         let dur = call.duration || 0;
         if (
           !dur &&
@@ -174,37 +161,36 @@ export default function ChatsScreen() {
     };
   }, [user?.uid]);
 
+  // Pull to refresh simulation
+  const handleRefresh = () => {
+    setRefreshing(true);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (e) {}
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 700);
+  };
+
+  // ═══════════════════════════════════════════════════════════
+  // 2. CONVERSATIONS & FILTERING
+  // ═══════════════════════════════════════════════════════════
   const filteredChats = useMemo(() => {
     return chats.filter((chat: any) =>
-      (chat?.name || "").toLowerCase().includes(searchText.toLowerCase().trim())
+      (chat?.name || "").toLowerCase().includes(searchQuery.toLowerCase().trim())
     );
-  }, [chats, searchText]);
+  }, [chats, searchQuery]);
 
   const filteredGroups = useMemo(() => {
     return groups.filter((group: any) =>
-      (group?.name || "").toLowerCase().includes(searchText.toLowerCase().trim())
+      (group?.name || "").toLowerCase().includes(searchQuery.toLowerCase().trim())
     );
-  }, [groups, searchText]);
-
-  const filteredCallHistory = useMemo(() => {
-    return callHistory.filter((call: any) => {
-      const isOutgoing = call.callerId === user?.uid;
-      const peerName = isOutgoing ? call.receiverName : call.callerName;
-      const peerHandle = isOutgoing ? call.receiverHandle : call.callerHandle;
-      const queryStr = searchText.toLowerCase().trim();
-
-      return (
-        (peerName || "").toLowerCase().includes(queryStr) ||
-        (peerHandle || "").toLowerCase().includes(queryStr) ||
-        (call.callType || "").toLowerCase().includes(queryStr)
-      );
-    });
-  }, [callHistory, searchText, user?.uid]);
+  }, [groups, searchQuery]);
 
   const combinedList = useMemo(() => {
     const normalizedChats = (filteredChats || []).map((c: any) => ({
       id: c.id,
-      type: "chat",
+      type: "chat" as const,
       title: c.name || c.displayName || "BunkMate Traveler",
       subtitle: c.lastMessage || "No messages yet",
       avatar: c.avatar || c.photoURL || "https://i.pravatar.cc/150?img=11",
@@ -216,13 +202,13 @@ export default function ChatsScreen() {
 
     const normalizedGroups = (filteredGroups || []).map((g: any) => ({
       id: g.id,
-      type: "group",
+      type: "group" as const,
       title: g.name || "Trip Group Chat",
       subtitle: g.lastMessage || "No messages yet",
       avatar: g.iconURL || "https://i.pravatar.cc/150?img=32",
       timestamp: g.lastTimestamp || g.updatedAt || 0,
       unreadCount: g.unreadCounts?.current || 0,
-      badge: g.name?.includes("Dev") ? "🧪 Dev Beta" : null,
+      badge: g.name?.includes("Dev") ? "Dev Beta" : null,
       rawItem: g,
     }));
 
@@ -233,6 +219,94 @@ export default function ChatsScreen() {
     );
   }, [filteredChats, filteredGroups]);
 
+  // Filter based on activeScope
+  const displayedList = useMemo(() => {
+    if (activeScope === "Direct") {
+      return combinedList.filter((item) => item.type === "chat");
+    }
+    if (activeScope === "Groups") {
+      return combinedList.filter((item) => item.type === "group");
+    }
+    if (activeScope === "Unread") {
+      return combinedList.filter((item) => item.unreadCount > 0);
+    }
+    return combinedList;
+  }, [combinedList, activeScope]);
+
+  const filteredCallHistory = useMemo(() => {
+    return callHistory.filter((call: any) => {
+      const isOutgoing = call.callerId === user?.uid;
+      const peerName = isOutgoing ? call.receiverName : call.callerName;
+      const peerHandle = isOutgoing ? call.receiverHandle : call.callerHandle;
+      const queryStr = searchQuery.toLowerCase().trim();
+
+      return (
+        (peerName || "").toLowerCase().includes(queryStr) ||
+        (peerHandle || "").toLowerCase().includes(queryStr) ||
+        (call.callType || "").toLowerCase().includes(queryStr)
+      );
+    });
+  }, [callHistory, searchQuery, user?.uid]);
+
+  const totalUnreadCount = useMemo(() => {
+    return combinedList.reduce((acc, c) => acc + (c.unreadCount > 0 ? 1 : 0), 0);
+  }, [combinedList]);
+
+  // ═══════════════════════════════════════════════════════════
+  // 1b. REALTIME ONLINE USERS LISTENER (Firestore users collection)
+  // ═══════════════════════════════════════════════════════════
+  const [realtimeOnlineUsers, setRealtimeOnlineUsers] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const qUsers = query(collection(db, "users"), limit(60));
+    const unsub = onSnapshot(
+      qUsers,
+      (snapshot) => {
+        const list: any[] = [];
+        const now = Date.now();
+
+        snapshot.forEach((docSnap) => {
+          if (docSnap.id === user.uid) return; // Exclude current user
+
+          const data = docSnap.data();
+          const lastSeenMs = data.lastSeen?.toMillis ? data.lastSeen.toMillis() : 0;
+          const isRecent = lastSeenMs > 0 && now - lastSeenMs < 10 * 60 * 1000;
+
+          const isUserOnline = data.online === true || data.isOnline === true || isRecent;
+
+          if (isUserOnline) {
+            const rawName = data.displayName || data.name || data.username || "Traveler";
+            const photo =
+              data.photoURL ||
+              data.avatar ||
+              `https://ui-avatars.com/api/?name=${encodeURIComponent(rawName)}&background=10b981&color=fff`;
+
+            list.push({
+              id: docSnap.id,
+              uid: docSnap.id,
+              name: rawName.split(" ")[0],
+              fullName: rawName,
+              avatar: photo,
+              online: true,
+            });
+          }
+        });
+
+        setRealtimeOnlineUsers(list);
+      },
+      (err) => {
+        console.warn("[Chats] Error listening to online users:", err);
+      }
+    );
+
+    return () => unsub();
+  }, [user?.uid]);
+
+  // ═══════════════════════════════════════════════════════════
+  // 3. ACTION HANDLERS
+  // ═══════════════════════════════════════════════════════════
   const handleAvatarPress = (uid: string, e?: any) => {
     if (e) e.stopPropagation();
     if (!uid) return;
@@ -263,160 +337,261 @@ export default function ChatsScreen() {
     });
   };
 
+  const handleStartCallFromChat = (item: any, type: "audio" | "video") => {
+    setSelectedChatAction(null);
+    if (item.type === "group") {
+      router.push(`/(tabs)/group-chatroom/${item.id}` as any);
+      return;
+    }
+
+    startCall({
+      receiverId: item.rawItem?.uid || item.id,
+      receiverName: item.title,
+      receiverAvatar: item.avatar,
+      receiverHandle: item.rawItem?.username || "traveler",
+      callType: type,
+    });
+  };
+
   const loading = authLoading || chatsLoading || groupsLoading || requestsLoading;
 
-  // Tab indicator slide interpolations
-  const sliderWidth = (SCREEN_WIDTH - 32 - 8) / 2;
-  const sliderLeft = tabSliderAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [4, 4 + sliderWidth],
-  });
-
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <StatusBar barStyle="light-content" backgroundColor="#0a0e14" />
+    <View style={s.screenContainer}>
+      <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#00e6b0" />
+      {/* ── TOP HEADER (Clean, Professional, Profile Removed) ── */}
+      <View style={[s.topHeader, { paddingTop: insets.top + 8 }]}>
+        <View>
+          <Text style={s.headerTitleText}>Chats</Text>
+          <Text style={s.headerSubtitleText}>
+            {activeScope === "Calls"
+              ? `${callHistory.length} calls logged`
+              : `${combinedList.length} chats ${totalUnreadCount > 0 ? `• ${totalUnreadCount} unread` : ""}`}
+          </Text>
         </View>
-      ) : (
-        <View style={styles.container}>
-          {/* HEADER */}
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.headerTitle}>
-                {activeTab === "chats" ? "Messages" : "Call History"}
-              </Text>
-              <Text style={styles.headerSubtitle}>
-                {activeTab === "chats"
-                  ? `${combinedList.length} conversations`
-                  : `${callHistory.length} total calls recorded`}
-              </Text>
-            </View>
-            <NotificationBell />
-          </View>
 
-          {/* SEARCH BAR */}
-          <View style={styles.searchContainer}>
-            <Feather name="search" size={18} color="#7f8c9b" />
-            <TextInput
-              style={styles.searchInput}
-              placeholder={
-                activeTab === "chats"
-                  ? "Search travelers & groups..."
-                  : "Search calls by name or handle..."
-              }
-              placeholderTextColor="#7f8c9b"
-              value={searchText}
-              onChangeText={setSearchText}
-            />
-            {searchText ? (
-              <Pressable
-                onPress={() => {
+        <View style={s.headerRightCluster}>
+          {/* Create Group Quick Button */}
+          <Pressable
+            style={s.headerCircleBtn}
+            onPress={() => {
+              try {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              } catch (e) {}
+              setCreateGroupModalVisible(true);
+            }}
+            hitSlop={8}
+          >
+            <Ionicons name="people-outline" size={20} color="#ffffff" />
+          </Pressable>
+
+          {/* New Chat Quick Button */}
+          <Pressable
+            style={s.headerCircleBtn}
+            onPress={() => {
+              try {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              } catch (e) {}
+              setAddFriendModalVisible(true);
+            }}
+            hitSlop={8}
+          >
+            <Ionicons name="person-add-outline" size={19} color="#ffffff" />
+          </Pressable>
+
+          <NotificationBell />
+        </View>
+      </View>
+
+      {/* ── SEARCH BAR (High-Legibility, Sleek Floating Pill) ── */}
+      <View style={s.searchRow}>
+        <View style={s.searchFieldBox}>
+          <Feather name="search" size={17} color="#7e8594" style={{ marginRight: 10 }} />
+          <TextInput
+            placeholder={
+              activeScope === "Calls"
+                ? "Search call records..."
+                : "Search bunkmates, groups, chats..."
+            }
+            placeholderTextColor="#6b7280"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            style={s.searchInputField}
+          />
+          {searchQuery.length > 0 && (
+            <Pressable
+              onPress={() => {
+                try {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setSearchText("");
-                }}
-              >
-                <Ionicons name="close-circle" size={18} color="#7f8c9b" />
-              </Pressable>
-            ) : null}
-          </View>
-
-          {/* ---------------------------------------------------- */}
-          {/* TAB 1: CHATS LIST                                   */}
-          {/* ---------------------------------------------------- */}
-          {activeTab === "chats" ? (
-            <ScrollView
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
+                } catch (e) {}
+                setSearchQuery("");
+              }}
+              hitSlop={8}
             >
-              {combinedList.length > 0 ? (
-                combinedList.map((item: any) => (
-                  <Pressable
-                    key={`${item.type}-${item.id}`}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      item.type === "chat"
-                        ? router.push(`/chat/${item.id}` as any)
-                        : router.push(
-                            `/(tabs)/group-chatroom/${item.id}` as any
-                          );
-                    }}
-                    style={({ pressed }) => [
-                      styles.card,
-                      pressed && styles.cardPressed,
+              <Ionicons name="close-circle" size={18} color="#7e8594" />
+            </Pressable>
+          )}
+        </View>
+      </View>
+
+      {/* ── HORIZONTAL CATEGORY CHIPS (All, Direct, Groups, Unread, Calls) ── */}
+      <View style={s.scopeChipsContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.scopeChipsScroll}
+        >
+          {(
+            [
+              { key: "All", label: "All", count: combinedList.length },
+              { key: "Direct", label: "Direct", count: chats.length },
+              { key: "Groups", label: "Groups", count: groups.length },
+              { key: "Unread", label: "Unread", count: totalUnreadCount },
+              { key: "Calls", label: "Calls", count: callHistory.length },
+            ] as const
+          ).map((scope) => {
+            const isSelected = activeScope === scope.key;
+            return (
+              <Pressable
+                key={scope.key}
+                onPress={() => {
+                  try {
+                    Haptics.selectionAsync();
+                  } catch (e) {}
+                  setActiveScope(scope.key);
+                }}
+                style={[s.scopeChip, isSelected && s.scopeChipSelected]}
+              >
+                {scope.key === "Groups" && (
+                  <Ionicons
+                    name="people"
+                    size={13}
+                    color={isSelected ? "#000000" : "rgba(255, 255, 255, 0.6)"}
+                    style={{ marginRight: 5 }}
+                  />
+                )}
+                {scope.key === "Calls" && (
+                  <Ionicons
+                    name="call"
+                    size={12}
+                    color={isSelected ? "#000000" : "rgba(255, 255, 255, 0.6)"}
+                    style={{ marginRight: 5 }}
+                  />
+                )}
+                <Text style={[s.scopeChipText, isSelected && s.scopeChipTextSelected]}>
+                  {scope.label}
+                </Text>
+                {scope.count > 0 && (
+                  <View
+                    style={[
+                      s.scopeCountBadge,
+                      isSelected && s.scopeCountBadgeSelected,
                     ]}
                   >
-                    <Pressable
-                      onPress={(e) =>
-                        item.type === "chat"
-                          ? handleAvatarPress(item.rawItem?.uid || item.id, e)
-                          : null
-                      }
-                      style={styles.avatarWrap}
+                    <Text
+                      style={[
+                        s.scopeCountBadgeText,
+                        isSelected && s.scopeCountBadgeTextSelected,
+                      ]}
                     >
-                      <Image
-                        source={{ uri: item.avatar }}
-                        style={styles.avatar}
-                      />
-                    </Pressable>
+                      {scope.count}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
 
-                    <View style={styles.cardMiddle}>
-                      <View style={styles.titleRow}>
-                        <Text style={styles.cardTitle} numberOfLines={1}>
-                          {item.title}
-                        </Text>
-                        {item.badge && (
-                          <View style={styles.groupBadge}>
-                            <Text style={styles.groupBadgeText}>
-                              {item.badge}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text style={styles.cardSub} numberOfLines={1}>
-                        {item.subtitle}
-                      </Text>
-                    </View>
-
-                    <View style={styles.cardRight}>
-                      <Text style={styles.tsText}>
-                        {formatTime(item.timestamp)}
-                      </Text>
-                      {item.unreadCount > 0 ? (
-                        <View style={styles.unreadDotBadge}>
-                          <Text style={styles.unreadBadgeText}>
-                            {item.unreadCount}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  </Pressable>
-                ))
-              ) : (
-                <Empty text="No conversations found" icon="chatbubbles-outline" />
-              )}
-            </ScrollView>
-          ) : (
-            /* ---------------------------------------------------- */
-            /* TAB 2: CALL HISTORY LIST (FROM ROOT `calls` DB)      */
-            /* ---------------------------------------------------- */
-            <ScrollView
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {callHistoryLoading ? (
-                <View style={{ marginTop: 50, alignItems: "center" }}>
-                  <ActivityIndicator size="small" color="#00e6b0" />
-                  <Text style={styles.loadingText}>Fetching database calls...</Text>
+      {/* ── MAIN SCROLL FEED ── */}
+      {loading ? (
+        <View style={s.centerBox}>
+          <ActivityIndicator size="large" color="#ffffff" />
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={[
+            s.mainListScroll,
+            { paddingBottom: insets.bottom + 120 },
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="#ffffff"
+              colors={["#00e6b0"]}
+            />
+          }
+        >
+          {/* Active Bunkmates Tray (Only shows if REAL online users exist, no dummy data) */}
+          {activeScope !== "Calls" &&
+            activeScope !== "Groups" &&
+            !searchQuery &&
+            realtimeOnlineUsers.length > 0 && (
+              <View style={s.activeBunkmatesSection}>
+                <View style={s.activeSectionHeader}>
+                  <Text style={s.activeSectionTitle}>Active Bunkmates</Text>
+                  <Text style={s.activeSectionCount}>
+                    {realtimeOnlineUsers.length} online
+                  </Text>
                 </View>
-              ) : filteredCallHistory.length > 0 ? (
-                filteredCallHistory.map((call: any) => {
+
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={s.activeTrayScroll}
+                >
+                  {/* + New Chat Shortcut */}
+                  <Pressable
+                    style={s.activeTrayItem}
+                    onPress={() => setAddFriendModalVisible(true)}
+                  >
+                    <View style={s.activeTrayAddCircle}>
+                      <Feather name="plus" size={20} color="#00e6b0" />
+                    </View>
+                    <Text style={s.activeTrayName}>New</Text>
+                  </Pressable>
+
+                  {/* Real Online Companions */}
+                  {realtimeOnlineUsers.map((comp) => (
+                    <Pressable
+                      key={comp.uid}
+                      style={s.activeTrayItem}
+                      onPress={() => router.push(`/chat/${comp.uid}` as any)}
+                    >
+                      <View style={s.activeTrayAvatarRing}>
+                        <ExpoImage
+                          source={{ uri: comp.avatar }}
+                          style={s.activeTrayAvatarImg}
+                          contentFit="cover"
+                        />
+                        <View style={s.activeTrayOnlineDot} />
+                      </View>
+                      <Text style={s.activeTrayName} numberOfLines={1}>
+                        {comp.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+          {/* ═══════════════════════════════════════════════════════════
+             1. CALLS FEED (When Calls tab is active)
+             ═══════════════════════════════════════════════════════════ */}
+          {activeScope === "Calls" ? (
+            callHistoryLoading ? (
+              <View style={s.centerBox}>
+                <ActivityIndicator size="small" color="#ffffff" />
+                <Text style={s.emptySubText}>Fetching calls...</Text>
+              </View>
+            ) : filteredCallHistory.length > 0 ? (
+              <View style={s.cardsStack}>
+                {filteredCallHistory.map((call: any) => {
                   const isOutgoing = call.callerId === user?.uid;
-                  const peerUid = isOutgoing
-                    ? call.receiverId
-                    : call.callerId;
+                  const peerUid = isOutgoing ? call.receiverId : call.callerId;
                   const peerName = isOutgoing
                     ? call.receiverName || "BunkMate"
                     : call.callerName || "BunkMate";
@@ -432,85 +607,71 @@ export default function ChatsScreen() {
                     call.status === "declined" ||
                     (call.status === "ended" && !call.computedDuration);
 
-                  const callTime =
-                    call.createdAt || call.timestamp || call.endedAt;
+                  const callTime = call.createdAt || call.timestamp || call.endedAt;
 
                   return (
-                    <View key={call.id} style={styles.callCard}>
+                    <View key={call.id} style={s.modernCard}>
                       <Pressable
                         onPress={() => handleAvatarPress(peerUid)}
-                        style={styles.avatarWrap}
+                        style={s.avatarContainer}
                       >
-                        <Image
+                        <ExpoImage
                           source={{
                             uri:
-                              peerAvatar || "https://i.pravatar.cc/150?img=12",
+                              peerAvatar ||
+                              "https://i.pravatar.cc/150?img=12",
                           }}
-                          style={styles.avatar}
+                          style={s.avatarImage}
+                          contentFit="cover"
                         />
-                        {/* Call Type Miniature Badge */}
                         <View
                           style={[
-                            styles.typeBadge,
-                            isVideo
-                              ? styles.typeBadgeVideo
-                              : styles.typeBadgeAudio,
+                            s.callTypeBadge,
+                            isVideo ? s.callTypeBadgeVideo : s.callTypeBadgeAudio,
                           ]}
                         >
                           <Ionicons
                             name={isVideo ? "videocam" : "call"}
-                            size={10}
-                            color="#00140f"
+                            size={9}
+                            color="#000000"
                           />
                         </View>
                       </Pressable>
 
-                      <View style={styles.cardMiddle}>
-                        <View style={styles.titleRow}>
-                          <Text style={styles.cardTitle} numberOfLines={1}>
+                      <View style={s.cardBodyMiddle}>
+                        <View style={s.cardHeadlineRow}>
+                          <Text style={s.cardHeadlineTitle} numberOfLines={1}>
                             {peerName}
                           </Text>
                           {peerHandle && (
-                            <Text style={styles.handleSubText} numberOfLines={1}>
+                            <Text style={s.cardHandleSub} numberOfLines={1}>
                               @{peerHandle}
                             </Text>
                           )}
                         </View>
 
-                        <View style={styles.callMetaRow}>
-                          {/* Direction / Status Icon */}
-                          <View
-                            style={[
-                              styles.statusIconWrap,
+                        <View style={s.callDetailRow}>
+                          <Ionicons
+                            name={
                               isMissed
-                                ? styles.statusIconMissed
+                                ? "arrow-down"
                                 : isOutgoing
-                                ? styles.statusIconOutgoing
-                                : styles.statusIconIncoming,
-                            ]}
-                          >
-                            <Ionicons
-                              name={
-                                isMissed
-                                  ? "arrow-down"
-                                  : isOutgoing
-                                  ? "arrow-up"
-                                  : "arrow-down"
-                              }
-                              size={11}
-                              color={
-                                isMissed
-                                  ? "#ff5252"
-                                  : isOutgoing
-                                  ? "#00e6b0"
-                                  : "#25d366"
-                              }
-                            />
-                          </View>
-
+                                ? "arrow-up"
+                                : "arrow-down"
+                            }
+                            size={12}
+                            color={
+                              isMissed
+                                ? "#ff5252"
+                                : isOutgoing
+                                ? "#00e676"
+                                : "#29b6f6"
+                            }
+                            style={{ marginRight: 4 }}
+                          />
                           <Text
                             style={[
-                              styles.callStatusLabel,
+                              s.callDetailLabel,
                               isMissed && { color: "#ff5252", fontWeight: "700" },
                             ]}
                           >
@@ -519,196 +680,418 @@ export default function ChatsScreen() {
                                 ? "Unanswered"
                                 : "Missed Call"
                               : isOutgoing
-                              ? "Outgoing Call"
-                              : "Incoming Call"}
+                              ? "Outgoing"
+                              : "Incoming"}
                           </Text>
 
                           {call.computedDuration > 0 && (
-                            <Text style={styles.callDurationDot}>•</Text>
+                            <Text style={s.callBullet}>•</Text>
                           )}
                           {call.computedDuration > 0 && (
-                            <Text style={styles.callDurationText}>
+                            <Text style={s.callDurationText}>
                               {formatDuration(call.computedDuration)}
                             </Text>
                           )}
                         </View>
                       </View>
 
-                      {/* Timestamp & One-Tap Call Back Actions */}
-                      <View style={styles.callActionsCol}>
-                        <Text style={styles.tsText}>
-                          {formatTime(callTime)}
-                        </Text>
-
-                        <View style={styles.quickCallBtnsRow}>
+                      <View style={s.cardTrailingCol}>
+                        <Text style={s.timeStringText}>{formatTime(callTime)}</Text>
+                        <View style={s.callbackBtnGroup}>
                           <Pressable
-                            style={styles.quickCallActionBtn}
+                            style={s.callbackActionCircle}
                             onPress={() => handleCallBack(call, "audio")}
-                            hitSlop={8}
+                            hitSlop={6}
                           >
-                            <Ionicons name="call" size={15} color="#00e6b0" />
+                            <Ionicons name="call" size={13} color="#ffffff" />
                           </Pressable>
-
                           <Pressable
-                            style={[
-                              styles.quickCallActionBtn,
-                              styles.quickCallVideoBtn,
-                            ]}
+                            style={s.callbackActionCircle}
                             onPress={() => handleCallBack(call, "video")}
-                            hitSlop={8}
+                            hitSlop={6}
                           >
-                            <Ionicons
-                              name="videocam"
-                              size={15}
-                              color="#00e6b0"
-                            />
+                            <Ionicons name="videocam" size={13} color="#ffffff" />
                           </Pressable>
                         </View>
                       </View>
                     </View>
                   );
-                })
-              ) : (
-                <Empty text="No call history found in database" icon="call-outline" />
-              )}
-            </ScrollView>
-          )}
-
-          {/* ============================================================ */}
-          {/* BOTTOM-ANCHORED M3 EXPRESSIVE SEGMENTED TAB SWITCHER & FAB   */}
-          {/* ============================================================ */}
-          <View style={styles.bottomDockContainer} pointerEvents="box-none">
-            {/* SEGMENTED TAB PILL (Messages vs Calls) */}
-            <View style={styles.floatingTabSwitcher}>
-              {/* Sliding Active Pill Background */}
-              <Animated.View
-                style={[
-                  styles.tabSliderBackground,
-                  {
-                    width: sliderWidth,
-                    left: sliderLeft,
-                  },
-                ]}
+                })}
+              </View>
+            ) : (
+              <EmptyView
+                icon="phone-off"
+                title="No call records yet"
+                subtitle="Voice and video calls with bunkmates will appear here"
               />
+            )
+          ) : (
+            /* ═══════════════════════════════════════════════════════════
+               2. CHATS FEED (Direct & Group Conversations)
+               ═══════════════════════════════════════════════════════════ */
+            displayedList.length > 0 ? (
+              <View style={s.cardsStack}>
+                {displayedList.map((item: any) => {
+                  const isGroup = item.type === "group";
+                  const isUnread = item.unreadCount > 0;
+                  const peerUid =
+                    item.rawItem?.uid ||
+                    (item.id.includes("_")
+                      ? item.id.split("_").find((x: string) => x !== user?.uid)
+                      : item.id);
+                  const isPeerOnline =
+                    !isGroup &&
+                    (realtimeOnlineUsers.some((u) => u.uid === peerUid) ||
+                      item.rawItem?.online);
 
-              <Pressable
-                style={styles.tabBtn}
-                onPress={() => handleTabChange("chats")}
-              >
-                <Ionicons
-                  name={
-                    activeTab === "chats"
-                      ? "chatbubble-ellipses"
-                      : "chatbubble-ellipses-outline"
-                  }
-                  size={17}
-                  color={activeTab === "chats" ? "#00140f" : "#8b949e"}
-                  style={{ marginRight: 6 }}
-                />
-                <Text
-                  style={[
-                    styles.tabBtnText,
-                    activeTab === "chats" && styles.tabBtnTextActive,
-                  ]}
-                >
-                  Messages
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={styles.tabBtn}
-                onPress={() => handleTabChange("calls")}
-              >
-                <Ionicons
-                  name={activeTab === "calls" ? "call" : "call-outline"}
-                  size={17}
-                  color={activeTab === "calls" ? "#00140f" : "#8b949e"}
-                  style={{ marginRight: 6 }}
-                />
-                <Text
-                  style={[
-                    styles.tabBtnText,
-                    activeTab === "calls" && styles.tabBtnTextActive,
-                  ]}
-                >
-                  Calls
-                </Text>
-                {callHistory.length > 0 && (
-                  <View
-                    style={[
-                      styles.tabCountBadge,
-                      activeTab === "calls" && styles.tabCountBadgeActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.tabCountText,
-                        activeTab === "calls" && styles.tabCountTextActive,
+                  return (
+                    <Pressable
+                      key={`${item.type}-${item.id}`}
+                      onPress={() => {
+                        try {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        } catch (e) {}
+                        isGroup
+                          ? router.push(`/(tabs)/group-chatroom/${item.id}` as any)
+                          : router.push(`/chat/${item.id}` as any);
+                      }}
+                      onLongPress={() => {
+                        try {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        } catch (e) {}
+                        setSelectedChatAction(item);
+                      }}
+                      style={({ pressed }) => [
+                        s.modernCard,
+                        isUnread && s.modernCardUnread,
+                        pressed && s.modernCardPressed,
                       ]}
                     >
-                      {callHistory.length}
-                    </Text>
-                  </View>
-                )}
-              </Pressable>
-            </View>
+                      {/* Avatar with status */}
+                      <Pressable
+                        onPress={(e) =>
+                          !isGroup
+                            ? handleAvatarPress(peerUid, e)
+                            : null
+                        }
+                        style={s.avatarContainer}
+                      >
+                        <ExpoImage
+                          source={{ uri: item.avatar }}
+                          style={s.avatarImage}
+                          contentFit="cover"
+                        />
+                        {isGroup ? (
+                          <View style={s.avatarBadgeGroup}>
+                            <Ionicons name="people" size={10} color="#ffffff" />
+                          </View>
+                        ) : isPeerOnline ? (
+                          <View style={s.avatarBadgeOnline} />
+                        ) : null}
+                      </Pressable>
 
-            {/* NEW CHAT / USER FAB (+) */}
+                      {/* Middle Texts */}
+                      <View style={s.cardBodyMiddle}>
+                        <View style={s.cardHeadlineRow}>
+                          <Text
+                            style={[
+                              s.cardHeadlineTitle,
+                              isUnread && s.cardHeadlineTitleUnread,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item.title}
+                          </Text>
+
+                          {isGroup && (
+                            <View style={s.groupChipBadge}>
+                              <Text style={s.groupChipText}>Group</Text>
+                            </View>
+                          )}
+                        </View>
+
+                        <View style={s.cardMessageSnippetRow}>
+                          {/* Prefix icon */}
+                          {item.subtitle?.includes("📹") || item.subtitle?.includes("Video") ? (
+                            <Ionicons
+                              name="videocam-outline"
+                              size={14}
+                              color="#38bdf8"
+                              style={{ marginRight: 4 }}
+                            />
+                          ) : item.subtitle?.includes("📞") || item.subtitle?.includes("Voice") ? (
+                            <Ionicons
+                              name="call-outline"
+                              size={14}
+                              color="#38bdf8"
+                              style={{ marginRight: 4 }}
+                            />
+                          ) : null}
+
+                          <Text
+                            style={[
+                              s.messageSnippetText,
+                              isUnread && s.messageSnippetTextUnread,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item.subtitle}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Right Timestamp & Unread */}
+                      <View style={s.cardTrailingCol}>
+                        <Text style={[s.timeStringText, isUnread && s.timeStringTextUnread]}>
+                          {formatTime(item.timestamp)}
+                        </Text>
+
+                        {isUnread ? (
+                          <View style={s.unreadNumberBadge}>
+                            <Text style={s.unreadNumberText}>
+                              {item.unreadCount}
+                            </Text>
+                          </View>
+                        ) : (
+                          <Ionicons
+                            name="chevron-forward"
+                            size={14}
+                            color="rgba(255, 255, 255, 0.2)"
+                            style={{ marginTop: 6 }}
+                          />
+                        )}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : (
+              <EmptyView
+                icon="message-square"
+                title={
+                  searchQuery
+                    ? `No chats match "${searchQuery}"`
+                    : activeScope === "Unread"
+                    ? "All caught up! No unread messages"
+                    : activeScope === "Groups"
+                    ? "No group chats found"
+                    : "No conversations yet"
+                }
+                subtitle={
+                  activeScope === "Groups"
+                    ? "Create a travel group to coordinate trips together"
+                    : "Connect with bunkmates and start a new conversation"
+                }
+                actionLabel={
+                  activeScope === "Groups" ? "Create Group" : "Start New Chat"
+                }
+                onAction={() => {
+                  if (activeScope === "Groups") {
+                    setCreateGroupModalVisible(true);
+                  } else {
+                    setAddFriendModalVisible(true);
+                  }
+                }}
+              />
+            )
+          )}
+        </ScrollView>
+      )}
+
+      {/* ── FLOATING ACTION BUTTON (FAB) ── */}
+      <View
+        style={[s.floatingFabAnchor, { bottom: insets.bottom + 85 }]}
+        pointerEvents="box-none"
+      >
+        <Pressable
+          onPress={() => {
+            try {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            } catch (e) {}
+            setComposeMenuVisible(true);
+          }}
+          style={s.fabButtonSquare}
+          hitSlop={8}
+        >
+          <Feather name="edit-3" size={21} color="#ffffff" />
+        </Pressable>
+      </View>
+
+      {/* ── COMPOSE SHEET MODAL ── */}
+      <Modal
+        visible={composeMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setComposeMenuVisible(false)}
+      >
+        <Pressable
+          style={s.bottomSheetOverlay}
+          onPress={() => setComposeMenuVisible(false)}
+        >
+          <View style={s.bottomSheetPanel}>
+            <View style={s.sheetHandleBar} />
+            <Text style={s.sheetMainTitle}>Start Conversation</Text>
+            <Text style={s.sheetMainSubtitle}>
+              Connect with fellow travelers and travel companions
+            </Text>
+
             <Pressable
-              style={styles.fabBtn}
+              style={s.sheetActionItem}
               onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                setComposeMenuVisible(false);
                 setAddFriendModalVisible(true);
               }}
             >
-              <Feather name="plus" size={24} color="#00140f" />
+              <View style={s.sheetIconBox}>
+                <Ionicons name="chatbubble-outline" size={20} color="#ffffff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.sheetActionTitle}>Direct Message</Text>
+                <Text style={s.sheetActionDesc}>
+                  Chat 1-on-1 with another traveler
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="rgba(255, 255, 255, 0.4)" />
+            </Pressable>
+
+            <Pressable
+              style={s.sheetActionItem}
+              onPress={() => {
+                setComposeMenuVisible(false);
+                setCreateGroupModalVisible(true);
+              }}
+            >
+              <View style={[s.sheetIconBox, { backgroundColor: "rgba(59, 130, 246, 0.2)" }]}>
+                <Ionicons name="people-outline" size={20} color="#3b82f6" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.sheetActionTitle}>Create Group Chat</Text>
+                <Text style={s.sheetActionDesc}>
+                  Plan & coordinate trips with multiple bunkmates
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="rgba(255, 255, 255, 0.4)" />
             </Pressable>
           </View>
+        </Pressable>
+      </Modal>
 
-          {/* USER PROFILE MODAL */}
-          <UserProfileModal
-            userId={selectedProfileUid}
-            visible={profileModalVisible}
-            onClose={() => setProfileModalVisible(false)}
-            onStartChat={(targetUid) => {
-              setProfileModalVisible(false);
-              router.push(`/chat/${targetUid}` as any);
-            }}
-          />
+      {/* ── QUICK CHAT ACTION LONG-PRESS MODAL ── */}
+      <Modal
+        visible={!!selectedChatAction}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedChatAction(null)}
+      >
+        <Pressable
+          style={s.bottomSheetOverlay}
+          onPress={() => setSelectedChatAction(null)}
+        >
+          <View style={s.bottomSheetPanel}>
+            <View style={s.sheetHandleBar} />
+            <Text style={s.sheetMainTitle}>{selectedChatAction?.title}</Text>
+            <Text style={s.sheetMainSubtitle} numberOfLines={1}>
+              {selectedChatAction?.subtitle}
+            </Text>
 
-          {/* ADD FRIEND / USER SEARCH MODAL */}
-          <AddFriendModal
-            visible={addFriendModalVisible}
-            onClose={() => setAddFriendModalVisible(false)}
-            onSelectUser={(foundUser) => {
-              handleAvatarPress(foundUser.uid || foundUser.id);
-            }}
-            onCreateGroup={() => {
-              setCreateGroupModalVisible(true);
-            }}
-          />
+            <Pressable
+              style={s.sheetActionItem}
+              onPress={() => {
+                const item = selectedChatAction;
+                setSelectedChatAction(null);
+                item?.type === "group"
+                  ? router.push(`/(tabs)/group-chatroom/${item.id}` as any)
+                  : router.push(`/chat/${item.id}` as any);
+              }}
+            >
+              <View style={s.sheetIconBox}>
+                <Ionicons name="chatbubbles-outline" size={20} color="#ffffff" />
+              </View>
+              <Text style={s.sheetActionTitle}>Open Conversation</Text>
+            </Pressable>
 
-          {/* CREATE GROUP MODAL */}
-          <CreateGroupModal
-            visible={createGroupModalVisible}
-            onClose={() => setCreateGroupModalVisible(false)}
-            onGroupCreated={(groupId) => {
-              router.push(`/(tabs)/group-chatroom/${groupId}` as any);
-            }}
-          />
-        </View>
-      )}
-    </SafeAreaView>
+            <Pressable
+              style={s.sheetActionItem}
+              onPress={() => handleStartCallFromChat(selectedChatAction, "audio")}
+            >
+              <View style={[s.sheetIconBox, { backgroundColor: "rgba(0, 230, 176, 0.15)" }]}>
+                <Ionicons name="call-outline" size={20} color="#00e6b0" />
+              </View>
+              <Text style={s.sheetActionTitle}>Voice Call</Text>
+            </Pressable>
+
+            <Pressable
+              style={s.sheetActionItem}
+              onPress={() => handleStartCallFromChat(selectedChatAction, "video")}
+            >
+              <View style={[s.sheetIconBox, { backgroundColor: "rgba(56, 189, 248, 0.15)" }]}>
+                <Ionicons name="videocam-outline" size={20} color="#38bdf8" />
+              </View>
+              <Text style={s.sheetActionTitle}>Video Call</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* ── PROFILE MODAL ── */}
+      <UserProfileModal
+        userId={selectedProfileUid}
+        visible={profileModalVisible}
+        onClose={() => setProfileModalVisible(false)}
+        onStartChat={(targetUid) => {
+          setProfileModalVisible(false);
+          router.push(`/chat/${targetUid}` as any);
+        }}
+      />
+
+      {/* ── ADD FRIEND MODAL ── */}
+      <AddFriendModal
+        visible={addFriendModalVisible}
+        onClose={() => setAddFriendModalVisible(false)}
+        onSelectUser={(foundUser) => {
+          handleAvatarPress(foundUser.uid || foundUser.id);
+        }}
+        onCreateGroup={() => {
+          setCreateGroupModalVisible(true);
+        }}
+      />
+
+      {/* ── CREATE GROUP MODAL ── */}
+      <CreateGroupModal
+        visible={createGroupModalVisible}
+        onClose={() => setCreateGroupModalVisible(false)}
+        onGroupCreated={(groupId) => {
+          router.push(`/(tabs)/group-chatroom/${groupId}` as any);
+        }}
+      />
+    </View>
   );
 }
 
-function Empty({ text, icon }: { text: string; icon: any }) {
+function EmptyView({
+  icon,
+  title,
+  subtitle,
+  actionLabel,
+  onAction,
+}: {
+  icon: any;
+  title: string;
+  subtitle: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
   return (
-    <View style={styles.empty}>
-      <View style={styles.emptyIconWrap}>
-        <Ionicons name={icon} size={32} color="#00e6b0" />
-      </View>
-      <Text style={styles.emptyText}>{text}</Text>
+    <View style={s.emptyStateContainer}>
+      <Feather name={icon} size={42} color="rgba(255, 255, 255, 0.2)" />
+      <Text style={s.emptyMainTitle}>{title}</Text>
+      <Text style={s.emptySubText}>{subtitle}</Text>
+      {actionLabel && onAction && (
+        <Pressable style={s.emptyCtaButton} onPress={onAction}>
+          <Text style={s.emptyCtaText}>{actionLabel}</Text>
+          <Ionicons name="arrow-forward" size={14} color="#000000" style={{ marginLeft: 6 }} />
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -750,92 +1133,287 @@ function formatTime(ts: any) {
   }
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
+/* ═════════════════════════════════════════════════════════════════════ */
+/* STYLES (Ultra-Clean, High-Contrast, Unified Design Language)          */
+/* ═════════════════════════════════════════════════════════════════════ */
+
+const s = StyleSheet.create({
+  screenContainer: {
     flex: 1,
-    backgroundColor: "#0a0e14",
-  },
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  container: {
-    flex: 1,
+    backgroundColor: "#000000",
     paddingHorizontal: 16,
   },
-  header: {
+
+  // 1. Top Header
+  topHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 14,
+    marginBottom: 12,
   },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: "900",
-    color: "#ffffff",
-    letterSpacing: 0.3,
-  },
-  headerSubtitle: {
-    color: "#7f8c9b",
-    fontSize: 12.5,
-    fontWeight: "600",
-    marginTop: 2,
-  },
-  searchContainer: {
+  headerLeftCluster: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#161c24",
+    gap: 12,
+  },
+  profileAvatarWrap: {
+    position: "relative",
+  },
+  profileAvatarImg: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#161922",
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+  },
+  avatarOnlineRing: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#00e676",
+    borderWidth: 2,
+    borderColor: "#000000",
+  },
+  headerTitleText: {
+    fontSize: 26,
+    fontWeight: "800",
+    color: "#ffffff",
+    letterSpacing: -0.4,
+  },
+  headerSubtitleText: {
+    color: "rgba(255, 255, 255, 0.45)",
+    fontSize: 12,
+    fontWeight: "500",
+    marginTop: 1,
+  },
+  headerRightCluster: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerCircleBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // 2. Search Row
+  searchRow: {
+    marginBottom: 12,
+  },
+  searchFieldBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#0d0f14",
     borderRadius: 20,
     paddingHorizontal: 14,
     height: 46,
-    marginBottom: 14,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.07)",
+    borderColor: "rgba(255, 255, 255, 0.08)",
   },
-  searchInput: {
+  searchInputField: {
     flex: 1,
-    marginLeft: 10,
     color: "#ffffff",
     fontSize: 14,
     fontWeight: "500",
   },
-  scrollContent: {
-    paddingBottom: 170,
+
+  // 3. Scope Chips
+  scopeChipsContainer: {
+    marginBottom: 14,
   },
-  card: {
+  scopeChipsScroll: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  scopeChip: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 13,
-    paddingHorizontal: 10,
-    borderRadius: 18,
-    backgroundColor: "transparent",
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: "#0d0f14",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  scopeChipSelected: {
+    backgroundColor: "#ffffff",
+    borderColor: "#ffffff",
+  },
+  scopeChipText: {
+    color: "rgba(255, 255, 255, 0.65)",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  scopeChipTextSelected: {
+    color: "#000000",
+    fontWeight: "700",
+  },
+  scopeCountBadge: {
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+    marginLeft: 6,
+  },
+  scopeCountBadgeSelected: {
+    backgroundColor: "rgba(0, 0, 0, 0.12)",
+  },
+  scopeCountBadgeText: {
+    color: "#ffffff",
+    fontSize: 10.5,
+    fontWeight: "700",
+  },
+  scopeCountBadgeTextSelected: {
+    color: "#000000",
+  },
+
+  // 4. Active Bunkmates Tray
+  activeBunkmatesSection: {
+    marginBottom: 16,
+  },
+  activeSectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+    paddingHorizontal: 2,
+  },
+  activeSectionTitle: {
+    color: "rgba(255, 255, 255, 0.45)",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  activeSectionCount: {
+    color: "#00e676",
+    fontSize: 11.5,
+    fontWeight: "600",
+  },
+  activeTrayScroll: {
+    gap: 14,
+  },
+  activeTrayItem: {
+    alignItems: "center",
+    width: 56,
+  },
+  activeTrayAddCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: "#00e6b0",
+    borderStyle: "dashed",
+    backgroundColor: "rgba(0, 230, 176, 0.08)",
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: 4,
   },
-  cardPressed: {
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
+  activeTrayAvatarRing: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: "#00e6b0",
+    position: "relative",
+    padding: 1.5,
+    marginBottom: 4,
   },
-  callCard: {
+  activeTrayAvatarImg: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 22,
+    backgroundColor: "#1c202a",
+  },
+  activeTrayOnlineDot: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 11,
+    height: 11,
+    borderRadius: 5.5,
+    backgroundColor: "#00e676",
+    borderWidth: 2,
+    borderColor: "#000000",
+  },
+  activeTrayName: {
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 11,
+    fontWeight: "500",
+    textAlign: "center",
+  },
+
+  // 5. Cards Stack
+  mainListScroll: {
+    paddingTop: 2,
+  },
+  cardsStack: {
+    gap: 10,
+  },
+  modernCard: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    backgroundColor: "#131820",
-    marginBottom: 8,
+    backgroundColor: "#0d0f14",
+    padding: 14,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.06)",
   },
-  avatarWrap: {
+  modernCardUnread: {
+    borderColor: "rgba(255, 255, 255, 0.16)",
+    backgroundColor: "#11141b",
+  },
+  modernCardPressed: {
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+  },
+
+  // Avatar Container
+  avatarContainer: {
     position: "relative",
   },
-  avatar: {
+  avatarImage: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: "#1b222d",
+    backgroundColor: "#181b22",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
   },
-  typeBadge: {
+  avatarBadgeGroup: {
+    position: "absolute",
+    bottom: -1,
+    right: -1,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: "#1f2533",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#0d0f14",
+  },
+  avatarBadgeOnline: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#00e676",
+    borderWidth: 2,
+    borderColor: "#0d0f14",
+  },
+  callTypeBadge: {
     position: "absolute",
     bottom: -2,
     right: -2,
@@ -845,243 +1423,262 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
-    borderColor: "#131820",
+    borderColor: "#0d0f14",
   },
-  typeBadgeVideo: {
-    backgroundColor: "#00e6b0",
+  callTypeBadgeVideo: {
+    backgroundColor: "#00e676",
   },
-  typeBadgeAudio: {
-    backgroundColor: "#4fc3f7",
+  callTypeBadgeAudio: {
+    backgroundColor: "#38bdf8",
   },
-  cardMiddle: {
+
+  // Card Body
+  cardBodyMiddle: {
     flex: 1,
     marginLeft: 14,
     justifyContent: "center",
   },
-  titleRow: {
+  cardHeadlineRow: {
     flexDirection: "row",
     alignItems: "center",
   },
-  cardTitle: {
+  cardHeadlineTitle: {
     color: "#ffffff",
-    fontSize: 15.5,
-    fontWeight: "800",
-    letterSpacing: 0.2,
-  },
-  handleSubText: {
-    color: "#7f8c9b",
-    fontSize: 12,
-    fontWeight: "600",
-    marginLeft: 6,
-    maxWidth: 110,
-  },
-  groupBadge: {
-    backgroundColor: "rgba(0, 230, 176, 0.15)",
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 8,
-    marginLeft: 8,
-  },
-  groupBadgeText: {
-    color: "#00e6b0",
-    fontSize: 10.5,
+    fontSize: 16,
     fontWeight: "700",
+    letterSpacing: -0.2,
+    maxWidth: "80%",
   },
-  cardSub: {
-    color: "#8b949e",
-    fontSize: 13,
+  cardHeadlineTitleUnread: {
+    fontWeight: "800",
+  },
+  cardHandleSub: {
+    color: "rgba(255, 255, 255, 0.4)",
+    fontSize: 12,
+    marginLeft: 6,
+  },
+  groupChipBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    marginLeft: 6,
+  },
+  groupChipText: {
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 10,
+    fontWeight: "600",
+  },
+
+  // Message Snippet
+  cardMessageSnippetRow: {
+    flexDirection: "row",
+    alignItems: "center",
     marginTop: 4,
+  },
+  messageSnippetText: {
+    color: "rgba(255, 255, 255, 0.55)",
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
+  },
+  messageSnippetTextUnread: {
+    color: "rgba(255, 255, 255, 0.85)",
+    fontWeight: "600",
+  },
+
+  // Call Details
+  callDetailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  callDetailLabel: {
+    color: "rgba(255, 255, 255, 0.65)",
+    fontSize: 12,
     fontWeight: "500",
   },
-  callMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  statusIconWrap: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 6,
-  },
-  statusIconIncoming: {
-    backgroundColor: "rgba(37, 211, 102, 0.18)",
-  },
-  statusIconOutgoing: {
-    backgroundColor: "rgba(0, 230, 176, 0.18)",
-  },
-  statusIconMissed: {
-    backgroundColor: "rgba(255, 82, 82, 0.18)",
-  },
-  callStatusLabel: {
-    color: "#8b949e",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  callDurationDot: {
-    color: "#555555",
-    marginHorizontal: 5,
+  callBullet: {
+    color: "rgba(255, 255, 255, 0.3)",
+    marginHorizontal: 4,
   },
   callDurationText: {
-    color: "#8b949e",
+    color: "rgba(255, 255, 255, 0.55)",
     fontSize: 11.5,
-    fontWeight: "600",
   },
-  cardRight: {
+
+  // Trailing / Right Info
+  cardTrailingCol: {
     alignItems: "flex-end",
     justifyContent: "center",
+    marginLeft: 8,
   },
-  callActionsCol: {
-    alignItems: "flex-end",
-    justifyContent: "center",
-    marginLeft: 6,
+  timeStringText: {
+    color: "rgba(255, 255, 255, 0.4)",
+    fontSize: 11.5,
+    fontWeight: "500",
   },
-  quickCallBtnsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
+  timeStringTextUnread: {
+    color: "#ffffff",
+    fontWeight: "700",
+  },
+  unreadNumberBadge: {
     marginTop: 6,
-  },
-  quickCallActionBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "rgba(0, 230, 176, 0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(0, 230, 176, 0.28)",
-  },
-  quickCallVideoBtn: {
-    backgroundColor: "rgba(0, 230, 176, 0.18)",
-  },
-  tsText: {
-    color: "#6b7785",
-    fontSize: 11.5,
-    fontWeight: "600",
-  },
-  unreadDotBadge: {
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: "#00e6b0",
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 4,
-    marginTop: 6,
   },
-  unreadBadgeText: {
-    color: "#00140f",
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  empty: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 80,
-  },
-  emptyIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "rgba(0, 230, 176, 0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 14,
-  },
-  emptyText: {
-    color: "#7f8c9b",
-    fontSize: 14.5,
-    fontWeight: "600",
-  },
-  loadingText: {
-    color: "#7f8c9b",
-    fontSize: 13,
-    fontWeight: "600",
-    marginTop: 10,
-  },
-  bottomDockContainer: {
-    position: "absolute",
-    bottom: Platform.OS === "ios" ? 104 : 90,
-    left: 16,
-    right: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  floatingTabSwitcher: {
-    flex: 1,
-    flexDirection: "row",
-    backgroundColor: "rgba(18, 24, 32, 0.95)",
-    borderRadius: 28,
-    padding: 4,
-    marginRight: 12,
-    borderWidth: 1.2,
-    borderColor: "rgba(255, 255, 255, 0.12)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 12,
-    elevation: 10,
-    height: 54,
-    alignItems: "center",
-  },
-  tabSliderBackground: {
-    position: "absolute",
-    top: 4,
-    bottom: 4,
-    borderRadius: 24,
-    backgroundColor: "#00e6b0",
-  },
-  tabBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 10,
-    borderRadius: 24,
-    zIndex: 2,
-  },
-  tabBtnText: {
-    color: "#8b949e",
-    fontSize: 13.5,
-    fontWeight: "700",
-  },
-  tabBtnTextActive: {
-    color: "#00140f",
-    fontWeight: "900",
-  },
-  tabCountBadge: {
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-    borderRadius: 10,
-    marginLeft: 6,
-  },
-  tabCountBadgeActive: {
-    backgroundColor: "rgba(0, 20, 15, 0.22)",
-  },
-  tabCountText: {
-    color: "#ffffff",
-    fontSize: 10.5,
+  unreadNumberText: {
+    color: "#000000",
+    fontSize: 11,
     fontWeight: "800",
   },
-  tabCountTextActive: {
-    color: "#00140f",
+  callbackBtnGroup: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 6,
   },
-  fabBtn: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: "#00e6b0",
+  callbackActionCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
     alignItems: "center",
     justifyContent: "center",
-    elevation: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+
+  // 6. FAB Button (Matches Notes FAB)
+  floatingFabAnchor: {
+    position: "absolute",
+    right: 20,
+    zIndex: 99,
+  },
+  fabButtonSquare: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: "#161922",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.2)",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+
+  // 7. Bottom Sheet
+  bottomSheetOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    justifyContent: "flex-end",
+  },
+  bottomSheetPanel: {
+    backgroundColor: "#13151b",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 40,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  sheetHandleBar: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.25)",
+    alignSelf: "center",
+    marginBottom: 16,
+  },
+  sheetMainTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#ffffff",
+    marginBottom: 4,
+  },
+  sheetMainSubtitle: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 13,
+    marginBottom: 20,
+  },
+  sheetActionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    marginBottom: 10,
+    gap: 12,
+  },
+  sheetIconBox: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetActionTitle: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: 2,
+  },
+  sheetActionDesc: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 12,
+  },
+
+  // 8. Empty & Loading states
+  centerBox: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 80,
+  },
+  emptyStateContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 80,
+    paddingHorizontal: 24,
+  },
+  emptyMainTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 14,
+    textAlign: "center",
+  },
+  emptySubText: {
+    color: "rgba(255, 255, 255, 0.45)",
+    fontSize: 13,
+    marginTop: 4,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  emptyCtaButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 20,
+    marginTop: 18,
+  },
+  emptyCtaText: {
+    color: "#000000",
+    fontSize: 13,
+    fontWeight: "800",
   },
 });

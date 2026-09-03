@@ -1,5 +1,5 @@
 import { Platform, AppState, AppStateStatus } from "react-native";
-import * as Notifications from "expo-notifications";
+import Notifications from "./safeNotifications";
 
 /**
  * CallForegroundService:

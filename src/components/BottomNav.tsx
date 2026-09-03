@@ -45,6 +45,11 @@ export default function BottomNav() {
     return () => unsub();
   }, [user]);
 
+  // Hide bottom navigation on full-screen chats (evaluated AFTER all hooks)
+  if (pathname.includes("group-chatroom") || pathname.includes("chat/")) {
+    return null;
+  }
+
   // Determine if a given path matches the current location.  Expo Router
   // creates real URLs without the grouping parentheses, but we're still
   // passing the grouped paths throughout the codebase in a few places. To be

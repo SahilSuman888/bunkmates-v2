@@ -7,7 +7,6 @@ import {
   TextInput,
   Image,
   Pressable,
-  SafeAreaView,
   StatusBar,
   Platform,
   ActivityIndicator,
@@ -23,6 +22,7 @@ import { useUser } from "../contexts/UserContext";
 // ==========================================
 export interface ChatUser {
   id: string;
+  uid?: string;
   name: string;
   avatar: string;
   lastMessage: string;
@@ -65,11 +65,12 @@ export const useUserChats = (userId: string | null) => {
             const userData = userSnap.data();
             name = userData.displayName || userData.name || userData.username || "Unknown User";
             avatar = userData.photoURL || userData.avatar || avatar;
-            online = userData.online || false;
+            online = userData.online || userData.isOnline || false;
           }
 
           results.push({
             id: chatDoc.id,
+            uid: otherUserId,
             name,
             avatar,
             lastMessage: data.lastMessage?.text || data.lastMessage || "No messages yet",

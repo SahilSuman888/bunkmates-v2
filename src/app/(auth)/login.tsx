@@ -29,11 +29,16 @@ import { db } from "../../lib/firebase";
 import { useSessionGradient, AuthRadialBackground } from "../../contexts/GradientContext";
 
 
+import Constants from "expo-constants";
+
 let GoogleSignin: any = null;
 try {
-  GoogleSignin = require("@react-native-google-signin/google-signin").GoogleSignin;
+  const isExpoGo = Constants.appOwnership === "expo" || (Constants as any).executionEnvironment === "storeClient";
+  if (!isExpoGo) {
+    GoogleSignin = require("@react-native-google-signin/google-signin").GoogleSignin;
+  }
 } catch (error) {
-  console.warn("Google Sign-In native module unavailable in this environment:", error);
+  console.log("Google Sign-In native module unavailable in this environment:", error);
 }
 // ...existing code...
 

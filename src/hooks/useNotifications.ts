@@ -20,7 +20,7 @@ export const useNotifications = () => {
 
     const run = async () => {
       try {
-        const Notifications = await import('expo-notifications');
+        const Notifications = (await import('../lib/safeNotifications')).default;
 
         const registerForPushNotificationsAsync = async () => {
           let token: string | null = null;

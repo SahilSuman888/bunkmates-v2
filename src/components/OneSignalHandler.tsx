@@ -1,137 +1,121 @@
 import { useEffect } from "react";
+import { useRouter } from "expo-router";
 import {
-  OneSignal,
-  LogLevel,
-} from "react-native-onesignal";
-import { router } from "expo-router";
+  initOneSignal,
+  registerNotificationHandler,
+  unregisterNotificationHandler,
+  PendingNotificationNav,
+} from "../lib/onesignal";
+import { useCall } from "../contexts/CallContext";
 
-const ONESIGNAL_APP_ID =
-  "263ae218-7fa0-49cf-9503-d7d0fab26d60";
-
+/**
+ * OneSignalHandler
+ * Mounted at root layout to handle OneSignal initialization,
+ * foreground push events, and deep-link navigation on notification tap.
+ */
 export default function OneSignalHandler() {
+  const router = useRouter();
+  const { loadAndShowCall, startCall } = useCall();
+
   useEffect(() => {
-    try {
-      // Debug logs while testing
-      OneSignal.Debug.setLogLevel(
-        LogLevel.Verbose
-      );
+    initOneSignal();
 
-      // Initialize OneSignal
-      OneSignal.initialize(
-        ONESIGNAL_APP_ID
-      );
+    const handleNotification = (nav: PendingNotificationNav) => {
+      console.log("[OneSignalHandler] Handling notification click:", nav);
+      const { type, data } = nav;
 
-      // Ask user for notification permission
-      OneSignal.Notifications.requestPermission(
-        true
-      );
-
-      // Notification clicked
-      const clickListener = (
-        event: any
-      ) => {
+      // Ensure router is fully mounted and ready before dispatching transition
+      setTimeout(() => {
         try {
-          console.log(
-            "OneSignal notification clicked:",
-            event
-          );
-
-          const data =
-            event?.notification
-              ?.additionalData || {};
-
-          const type =
-            typeof data.type === "string"
-              ? data.type
-              : "general";
-
-          const notificationId =
-            typeof data.notificationId ===
-            "string"
-              ? data.notificationId
-              : "";
-
-          const senderId =
-            typeof data.senderId === "string"
-              ? data.senderId
-              : "";
-
-          // -----------------------------
-          // CHAT
-          // -----------------------------
-
-          if (
-            type === "chat" &&
-            senderId
-          ) {
-            router.push({
-              pathname:
-                `/chat/${senderId}` as any,
-
-              params: {
-                displayName:
-                  typeof data.displayName ===
-                  "string"
-                    ? data.displayName
-                    : "Chat",
-
-                photoURL:
-                  typeof data.photoURL ===
-                  "string"
-                    ? data.photoURL
-                    : "",
-              },
-            });
-
+          // 1. Incoming Call (1:1 or Group Call)
+          if (type === "call" || type === "group_call") {
+            const callId = data?.callId;
+            if (callId) {
+              console.log("[OneSignalHandler] Loading call screen directly:", callId);
+              loadAndShowCall(callId);
+            }
             return;
           }
 
-          // -----------------------------
-          // NOTIFICATION PAGE
-          // -----------------------------
-
-          if (notificationId) {
-            router.push({
-              pathname:
-                "/notifications" as any,
-
-              params: {
-                notificationId,
-              },
-            });
-
+          // 2. Single 1:1 Chat Message
+          if (type === "chat") {
+            const senderId = data?.senderId;
+            if (senderId) {
+              console.log("[OneSignalHandler] Navigating to user chat:", senderId);
+              router.push({
+                pathname: "/chat/[friendId]",
+                params: {
+                  friendId: senderId,
+                  displayName: data?.displayName || "Chat",
+                  photoURL: data?.photoURL || "",
+                },
+              });
+            }
             return;
           }
 
-          router.push(
-            "/notifications" as any
-          );
-        } catch (error) {
-          console.error(
-            "OneSignal click error:",
-            error
-          );
+          // 3. Group Chat Message
+          if (type === "group_chat") {
+            const groupId = data?.groupId;
+            if (groupId) {
+              console.log("[OneSignalHandler] Navigating to group chat:", groupId);
+              router.push(`/(tabs)/group-chatroom/${groupId}` as any);
+            }
+            return;
+          }
+
+          // 4. Missed Call Card (Screenshot 2: "Call back" & "Message")
+          if (type === "missed_call") {
+            const callerId = data?.callerId;
+            const callerName = data?.callerName || "BunkMate";
+            const callerAvatar = data?.callerAvatar || "";
+            const callType = data?.callType || "audio";
+            const actionId = nav.actionId;
+
+            if (actionId === "CALL_BACK" && callerId) {
+              startCall({
+                receiverId: callerId,
+                receiverName: callerName,
+                receiverAvatar: callerAvatar,
+                callType,
+              });
+              return;
+            }
+
+            if ((actionId === "MESSAGE" || !actionId) && callerId) {
+              router.push({
+                pathname: "/chat/[friendId]",
+                params: {
+                  friendId: callerId,
+                  displayName: callerName,
+                  photoURL: callerAvatar,
+                },
+              });
+              return;
+            }
+
+            router.push("/notifications" as any);
+            return;
+          }
+
+          // 5. Friend Requests & General Notifications
+          const notificationId = data?.notificationId;
+          router.push({
+            pathname: "/notifications" as any,
+            ...(notificationId ? { params: { notificationId } } : {}),
+          });
+        } catch (e) {
+          console.warn("[OneSignalHandler] Notification navigation error:", e);
         }
-      };
+      }, 350);
+    };
 
-      OneSignal.Notifications.addEventListener(
-        "click",
-        clickListener
-      );
+    registerNotificationHandler(handleNotification);
 
-      return () => {
-        OneSignal.Notifications.removeEventListener(
-          "click",
-          clickListener
-        );
-      };
-    } catch (error) {
-      console.error(
-        "OneSignal initialization error:",
-        error
-      );
-    }
-  }, []);
+    return () => {
+      unregisterNotificationHandler();
+    };
+  }, [router, loadAndShowCall]);
 
   return null;
 }

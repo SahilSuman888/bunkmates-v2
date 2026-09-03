@@ -18,7 +18,12 @@ import { CallProvider } from "../contexts/CallContext";
 
 import NotificationsHandler from "../components/NotificationsHandler";
 import IncomingCallHandler from "../components/IncomingCallHandler";
+import OneSignalHandler from "../components/OneSignalHandler";
 import { GradientProvider } from "../contexts/GradientContext";
+import { initOneSignal } from "../lib/onesignal";
+
+// Initialize OneSignal & Android Notification Channels at module load
+initOneSignal();
 
 function LayoutContent() {
   const { themeColors } = useThemeToggle();
@@ -35,7 +40,10 @@ function LayoutContent() {
           <CallProvider>
             <ChatSettingsProvider>
 
-              {/* Push notifications disabled temporarily */}
+              {/* OneSignal — handles push notification taps & call alerts */}
+              <OneSignalHandler />
+
+              {/* Local expo-notifications handler */}
               <NotificationsHandler />
               <IncomingCallHandler />
 

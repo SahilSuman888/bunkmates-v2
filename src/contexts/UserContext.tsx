@@ -1,8 +1,9 @@
-// contexts/UserContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { AppState } from 'react-native';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { loginOneSignalUser, logoutOneSignalUser } from '../lib/onesignal';
 
 interface UserContextType {
   user: any; // Firebase Auth user
@@ -44,6 +45,15 @@ export const UserProvider = ({ children }: UserProviderProps) => {
     return () => unsubscribe();
   }, []);
 
+  // Guarantee OneSignal is linked to user's Firebase UID whenever user exists
+  useEffect(() => {
+    if (user?.uid) {
+      loginOneSignalUser(user.uid);
+    } else if (!loading && !user) {
+      logoutOneSignalUser();
+    }
+  }, [user?.uid, loading]);
+
   // fetch the Firestore document whenever an authenticated user is available
   useEffect(() => {
     if (!user?.uid) {
@@ -59,7 +69,39 @@ export const UserProvider = ({ children }: UserProviderProps) => {
       }
     });
 
-    return () => unsub();
+    // Mark current user online in Firestore
+    updateDoc(ref, {
+      online: true,
+      isOnline: true,
+      lastSeen: serverTimestamp(),
+    }).catch(() => {});
+
+    // Listen to AppState (active vs background)
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        updateDoc(ref, {
+          online: true,
+          isOnline: true,
+          lastSeen: serverTimestamp(),
+        }).catch(() => {});
+      } else {
+        updateDoc(ref, {
+          online: false,
+          isOnline: false,
+          lastSeen: serverTimestamp(),
+        }).catch(() => {});
+      }
+    });
+
+    return () => {
+      unsub();
+      appStateSub.remove();
+      updateDoc(ref, {
+        online: false,
+        isOnline: false,
+        lastSeen: serverTimestamp(),
+      }).catch(() => {});
+    };
   }, [user]);
 
   return (

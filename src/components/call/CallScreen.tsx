@@ -466,11 +466,26 @@ export default function CallScreen() {
     sendReaction(emoji);
   };
 
+  const isGroup = !!activeCall?.isGroupCall;
+  const isOutgoingCalling = !activeCall?.isIncoming && activeCall?.status === "calling";
+
+  // Group members come from real activeCall.groupMembers (populated from Firestore member docs)
+  const groupMembersList = useMemo(() => {
+    if (!isGroup || !activeCall?.groupMembers) return [];
+    // Filter out current user so we only show companions
+    return activeCall.groupMembers.filter((m: any) => m.uid !== user?.uid);
+  }, [isGroup, activeCall?.groupMembers, user?.uid]);
+
+  // No auto-accept for group calls — the peer must actually pick up (real WebRTC signaling)
+  // The call remains in "calling" status until acceptCall() is triggered by the receiver
+  useEffect(() => {
+    // This effect is intentionally empty for group calls:
+    // Real WebRTC signaling handles the call lifecycle
+  }, [isGroup]);
+
   if (!activeCall || isMinimized) return null;
 
   const isIncoming = activeCall.isIncoming && activeCall.status === "calling";
-  const isOutgoingCalling =
-    !activeCall.isIncoming && activeCall.status === "calling";
   const isAccepted = activeCall.status === "accepted";
   const isVideo = activeCall.callType === "video";
 
@@ -520,6 +535,176 @@ export default function CallScreen() {
     }
   };
 
+  // ── GROUP CALLING: CALLING SCREEN (Real WebRTC ringing) ──
+  const renderGroupCallingAllView = () => {
+    return (
+      <View style={styles.groupCallingCenter}>
+        <Text style={styles.groupCallingHeaderTitle}>
+          {activeCall?.groupName || "Group"} {isVideo ? "Video" : "Voice"} Call
+        </Text>
+        <Text style={styles.groupCallingSubTitle}>Calling group members...</Text>
+
+        {/* Single primary avatar with pulsing rings (real ringing UI) */}
+        <View style={styles.groupCallingRadarBox}>
+          <PulsingRings isRinging={true} />
+          {groupMembersList.length > 0 ? (
+            <View style={styles.groupCallingCluster}>
+              {groupMembersList.slice(0, 3).map((m: any, idx: number) => (
+                <View key={m.uid || String(idx)} style={styles.clusterMemberCard}>
+                  <Image
+                    source={{ uri: m.photoURL || m.avatar || "https://i.pravatar.cc/150" }}
+                    style={styles.clusterAvatarImg}
+                  />
+                  <Text style={styles.clusterMemberName} numberOfLines={1}>
+                    {m.name || m.displayName || m.username || "Member"}
+                  </Text>
+                  <View style={styles.ringingPill}>
+                    <Text style={styles.ringingPillText}>Ringing...</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.groupCallingCluster}>
+              <Image
+                source={{ uri: activeCall?.receiverAvatar || "https://i.pravatar.cc/150" }}
+                style={[styles.clusterAvatarImg, { width: 72, height: 72, borderRadius: 36 }]}
+              />
+            </View>
+          )}
+        </View>
+
+        <Text style={styles.groupCallingWaitText}>Waiting for members to pick up...</Text>
+      </View>
+    );
+  };
+
+  // ── GROUP CALLING: ACCEPTED VOICE CALL 2x2 GRID (WhatsApp Style) ──
+  const renderGroupVoiceCallGrid = () => {
+    const displayName = userData?.displayName || userData?.name || user?.displayName || "You";
+    const allCards = [
+      {
+        uid: user?.uid || "me",
+        name: `${displayName} (You)`,
+        photoURL: currentUserAvatar,
+        isMe: true,
+        isMuted: isMuted,
+        isSpeaking: !isMuted,
+      },
+      ...groupMembersList.slice(0, 3).map((m: any, idx: number) => ({
+        uid: m.uid || String(idx),
+        name: m.name || m.displayName || m.username || "Member",
+        photoURL: m.photoURL || m.avatar || "https://i.pravatar.cc/150",
+        isMe: false,
+        isMuted: false,
+        isSpeaking: idx === 0,
+      })),
+    ];
+
+    return (
+      <View style={styles.groupGridWrapper}>
+        <View style={styles.groupCardsGrid}>
+          {allCards.map((card) => (
+            <View
+              key={card.uid}
+              style={[
+                styles.groupVoiceCard,
+                card.isSpeaking && styles.groupVoiceCardSpeaking,
+              ]}
+            >
+              <View style={styles.groupCardAvatarBox}>
+                <Image source={{ uri: card.photoURL }} style={styles.groupCardAvatar} />
+                {card.isSpeaking && (
+                  <View style={styles.speakingIndicatorWrap}>
+                    <AudioEqualizer isMuted={false} />
+                  </View>
+                )}
+              </View>
+
+              <Text style={styles.groupCardNameText} numberOfLines={1}>
+                {card.name}
+              </Text>
+
+              <View style={styles.groupCardBottomStatus}>
+                <View style={styles.connectedDotGreen} />
+                <Text style={styles.connectedLabelText}>Connected</Text>
+                <Ionicons
+                  name={card.isMuted ? "mic-off" : "mic"}
+                  size={12}
+                  color={card.isMuted ? "#ff5252" : "#00e6b0"}
+                  style={{ marginLeft: 6 }}
+                />
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  // ── GROUP CALLING: ACCEPTED VIDEO CALL 2x2 GRID (WhatsApp Style) ──
+  const renderGroupVideoCallGrid = () => {
+    const remoteTiles = groupMembersList.slice(0, 3).map((m: any, idx: number) => ({
+      uid: m.uid || String(idx),
+      name: m.name || m.displayName || m.username || "Member",
+      photoURL: m.photoURL || m.avatar || "https://i.pravatar.cc/150",
+      isLiveVideo: idx === 0,
+    }));
+
+    return (
+      <View style={styles.groupGridWrapper}>
+        <View style={styles.groupCardsGrid}>
+          {/* Tile 1: You */}
+          <View style={styles.groupVideoTile}>
+            {!isVideoOff ? (
+              <CameraView
+                style={StyleSheet.absoluteFill}
+                facing={facing}
+                mirror={facing === "front"}
+              />
+            ) : (
+              <View style={styles.videoOffTileCenter}>
+                <Image source={{ uri: currentUserAvatar }} style={styles.tileAvatarOff} />
+                <Text style={styles.tileAvatarOffText}>Camera off</Text>
+              </View>
+            )}
+            <View style={styles.videoTileOverlayBar}>
+              <Text style={styles.videoTileNameText}>You</Text>
+              <Pressable onPress={flipCamera} style={styles.tileFlipBtn} hitSlop={6}>
+                <Ionicons name="camera-reverse-outline" size={14} color="#fff" />
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Tile 2, 3, 4: Remote Companions */}
+          {remoteTiles.map((tile) => (
+            <View key={tile.uid} style={styles.groupVideoTile}>
+              {tile.isLiveVideo && remoteStream && RTCView ? (
+                <RTCView
+                  streamURL={remoteStream.toURL()}
+                  style={StyleSheet.absoluteFill}
+                  objectFit="cover"
+                  mirror={false}
+                />
+              ) : (
+                <View style={styles.videoOffTileCenter}>
+                  <Image source={{ uri: tile.photoURL }} style={styles.tileAvatarOff} />
+                  <View style={{ marginTop: 6 }}>
+                    <AudioEqualizer isMuted={false} />
+                  </View>
+                </View>
+              )}
+              <View style={styles.videoTileOverlayBar}>
+                <Text style={styles.videoTileNameText} numberOfLines={1}>{tile.name}</Text>
+                <View style={styles.connectedDotGreen} />
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
   return (
     <Modal
       visible={true}
@@ -537,9 +722,17 @@ export default function CallScreen() {
       {/* BACKGROUND CONTAINER */}
       <View style={styles.container}>
         {/* ======================================================== */}
-        {/* VIDEO MODE: FULLSCREEN CAMERA / STREAM FEED */}
+        {/* VIDEO / AUDIO FEED BACKGROUND */}
         {/* ======================================================== */}
-        {isVideo && isAccepted ? (
+        {isGroup ? (
+          <LinearGradient
+            colors={["#0c141d", "#080d13", "#04070a"]}
+            style={StyleSheet.absoluteFill}
+          >
+            {isOutgoingCalling && renderGroupCallingAllView()}
+            {isAccepted && (isVideo ? renderGroupVideoCallGrid() : renderGroupVoiceCallGrid())}
+          </LinearGradient>
+        ) : isVideo && isAccepted ? (
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={() => {
@@ -675,7 +868,13 @@ export default function CallScreen() {
             </View>
 
             <Text style={styles.callStatusText}>
-              {isIncoming
+              {isGroup
+                ? isOutgoingCalling
+                  ? "Calling all members..."
+                  : isAccepted
+                  ? formatTimer(callSeconds)
+                  : "Connecting..."
+                : isIncoming
                 ? isVideo
                   ? "Incoming HD Video Call"
                   : "Incoming Voice Call"
@@ -735,7 +934,7 @@ export default function CallScreen() {
         {/* CENTER CONTENT */}
         {/* ======================================================== */}
         {/* 1. HERO SECTION (Voice Call OR Outgoing/Incoming Video Call) */}
-        {(!isVideo || !isAccepted) && (
+        {!isGroup && (!isVideo || !isAccepted) && (
           <View style={styles.centerSection}>
             <View style={styles.avatarWrapper}>
               {(isOutgoingCalling || isIncoming || (!isMuted && isAccepted)) && (
@@ -808,7 +1007,7 @@ export default function CallScreen() {
         )}
 
         {/* 2. DRAGGABLE WHATSAPP-STYLE SELF-CAMERA PREVIEW POPUP (PiP) */}
-        {isVideo && (
+        {!isGroup && isVideo && (
           swappedFeeds && isAccepted ? (
             <Animated.View
               style={[
@@ -1918,5 +2117,228 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 14,
     fontWeight: "700",
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // GROUP CALLING & 2x2 WHATSAPP-STYLE GRID STYLES
+  // ═══════════════════════════════════════════════════════════════
+  groupCallingCenter: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  groupCallingHeaderTitle: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "800",
+    marginBottom: 6,
+    letterSpacing: 0.3,
+  },
+  groupCallingSubTitle: {
+    color: "#00e6b0",
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: 36,
+  },
+  groupCallingRadarBox: {
+    width: 260,
+    height: 220,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 40,
+    position: "relative",
+  },
+  groupCallingCluster: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+    zIndex: 10,
+  },
+  clusterMemberCard: {
+    alignItems: "center",
+    backgroundColor: "rgba(22, 28, 38, 0.85)",
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: "rgba(0, 230, 176, 0.35)",
+    width: 86,
+  },
+  clusterAvatarImg: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    marginBottom: 6,
+  },
+  clusterMemberName: {
+    color: "#ffffff",
+    fontSize: 11.5,
+    fontWeight: "700",
+    marginBottom: 4,
+    textAlign: "center",
+  },
+  ringingPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    backgroundColor: "rgba(0, 230, 176, 0.15)",
+  },
+  ringingPillText: {
+    color: "#00e6b0",
+    fontSize: 9.5,
+    fontWeight: "700",
+  },
+  pickupAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#00e6b0",
+    paddingHorizontal: 24,
+    paddingVertical: 13,
+    borderRadius: 24,
+    shadowColor: "#00e6b0",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  pickupAllText: {
+    color: "#00140f",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  groupCallingWaitText: {
+    color: "rgba(255, 255, 255, 0.55)",
+    fontSize: 13,
+    fontWeight: "500",
+    textAlign: "center",
+    marginTop: 8,
+    letterSpacing: 0.2,
+  },
+
+  // 2x2 Grid Container (WhatsApp Multi-Member Style)
+  groupGridWrapper: {
+    flex: 1,
+    paddingTop: 100,
+    paddingBottom: 130,
+    paddingHorizontal: 12,
+    justifyContent: "center",
+  },
+  groupCardsGrid: {
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    alignContent: "space-between",
+    gap: 10,
+  },
+  groupVoiceCard: {
+    width: "48%",
+    height: "48%",
+    backgroundColor: "#151b22",
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+  },
+  groupVoiceCardSpeaking: {
+    borderColor: "#00e6b0",
+    shadowColor: "#00e6b0",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  groupCardAvatarBox: {
+    position: "relative",
+    marginBottom: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupCardAvatar: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    backgroundColor: "#222",
+  },
+  speakingIndicatorWrap: {
+    position: "absolute",
+    bottom: -8,
+  },
+  groupCardNameText: {
+    color: "#ffffff",
+    fontSize: 13.5,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  groupCardBottomStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  connectedDotGreen: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#00e6b0",
+    marginRight: 4,
+  },
+  connectedLabelText: {
+    color: "#00e6b0",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+
+  // Group Video Grid
+  groupVideoTile: {
+    width: "48%",
+    height: "48%",
+    backgroundColor: "#13171f",
+    borderRadius: 22,
+    overflow: "hidden",
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    position: "relative",
+  },
+  videoOffTileCenter: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#14171f",
+  },
+  tileAvatarOff: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    marginBottom: 6,
+  },
+  tileAvatarOffText: {
+    color: "rgba(255, 255, 255, 0.45)",
+    fontSize: 11,
+  },
+  videoTileOverlayBar: {
+    position: "absolute",
+    bottom: 8,
+    left: 8,
+    right: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  videoTileNameText: {
+    color: "#ffffff",
+    fontSize: 11.5,
+    fontWeight: "700",
+    flex: 1,
+  },
+  tileFlipBtn: {
+    padding: 3,
   },
 });

@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "bunkmates",
-    "owner": "cjayendra111",
+    "owner": "mohithac",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
@@ -50,11 +50,21 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      [
+        "onesignal-expo-plugin",
+        {
+          "mode": "development"
+        }
+      ],
       "expo-router",
       "expo-web-browser",
-      "expo-sharing",
-      "expo-notifications",
-      "@react-native-google-signin/google-signin",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#00e6b0"
+        }
+      ],
       "expo-image",
       "expo-splash-screen",
       [
@@ -64,7 +74,8 @@
           "microphonePermission": "Allow BunkMates to access your microphone for voice calls.",
           "recordAudioAndroid": true
         }
-      ]
+      ],
+      "./scripts/withIncomingCall.js"
     ],
     "experiments": {
       "typedRoutes": true
@@ -72,7 +83,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "4311dfb6-5860-4967-b47f-f3f1022c7c4a"
+        "projectId": "ae9166e7-8f27-477b-b829-7f007e1c91da"
       }
     }
   }

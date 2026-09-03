@@ -8,10 +8,10 @@ import {
   TextInput,
   Modal,
   Alert,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { auth, db } from "../lib/firebase";
 import {

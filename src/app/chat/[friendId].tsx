@@ -39,6 +39,7 @@ import { db } from "../../lib/firebase";
 import { useUser } from "../../contexts/UserContext";
 import { MaterialCommunityIcons, Ionicons, Feather } from "@expo/vector-icons";
 import UserProfileModal from "../../components/UserProfileModal";
+import { sendChatMessageNotification } from "../../lib/sendAppNotification";
 
 export default function ChatRoom() {
   const { friendId: rawId } = useLocalSearchParams();
@@ -152,6 +153,16 @@ export default function ChatRoom() {
           lastTimestamp: serverTimestamp(),
         });
       });
+
+      // Send OneSignal push notification & add to Firestore notifications collection
+      sendChatMessageNotification({
+        receiverId: friendId,
+        senderId: user.uid,
+        senderName: userData?.displayName || userData?.name || user.displayName || "BunkMate",
+        senderAvatar: userData?.photoURL || userData?.avatar || user.photoURL,
+        messageText,
+        chatId,
+      });
     } catch {
       Alert.alert("Error", "Message failed to send");
     }
@@ -220,6 +231,15 @@ export default function ChatRoom() {
       await updateDoc(doc(db, "chats", chatId), {
         lastMessage: "📷 Image",
         lastTimestamp: serverTimestamp(),
+      });
+
+      sendChatMessageNotification({
+        receiverId: friendId,
+        senderId: user.uid,
+        senderName: userData?.displayName || userData?.name || user.displayName || "BunkMate",
+        senderAvatar: userData?.photoURL || userData?.avatar || user.photoURL,
+        messageText: "📷 Sent a photo",
+        chatId,
       });
     } catch (error: any) {
       console.error("Upload Error:", error);

@@ -1,4 +1,4 @@
-import * as Notifications from "expo-notifications";
+import Notifications from "./safeNotifications";
 import { Platform } from "react-native";
 
 export async function setupPreviewNotifications() {

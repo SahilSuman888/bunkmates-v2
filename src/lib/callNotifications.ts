@@ -1,11 +1,9 @@
-import { Platform } from "react-native";
-import * as Notifications from "expo-notifications";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "./firebase";
+import { Platform, NativeModules } from "react-native";
+import Notifications from "./safeNotifications";
 
-export const CALL_CHANNEL_ID = "bunkmates-incoming-calls-v2";
-export const ONGOING_CALL_CHANNEL_ID = "bunkmates-ongoing-calls-v2";
-export const MISSED_CALL_CHANNEL_ID = "bunkmates-missed-calls-v2";
+export const CALL_CHANNEL_ID = "bunkmates-incoming-calls-v5";
+export const ONGOING_CALL_CHANNEL_ID = "bunkmates-ongoing-calls-v5";
+export const MISSED_CALL_CHANNEL_ID = "bunkmates-missed-calls-v5";
 
 let activeIncomingNotificationId: string | null = null;
 let activeOngoingNotificationId: string | null = null;
@@ -18,18 +16,18 @@ export async function setupCallNotificationCategories() {
     // 1. Set notification categories with action buttons
     await Notifications.setNotificationCategoryAsync("incoming_call_category", [
       {
-        identifier: "ACCEPT_ACTION",
-        buttonTitle: "✅ Accept",
-        options: {
-          opensAppToForeground: true,
-        },
-      },
-      {
         identifier: "DECLINE_ACTION",
-        buttonTitle: "❌ Decline",
+        buttonTitle: "Decline",
         options: {
           opensAppToForeground: false,
           isDestructive: true,
+        },
+      },
+      {
+        identifier: "ACCEPT_ACTION",
+        buttonTitle: "Answer",
+        options: {
+          opensAppToForeground: true,
         },
       },
     ]);
@@ -52,10 +50,18 @@ export async function setupCallNotificationCategories() {
       },
     ]);
 
+    // Screenshot 2: "Call back" and "Message"
     await Notifications.setNotificationCategoryAsync("missed_call_category", [
       {
         identifier: "CALLBACK_ACTION",
-        buttonTitle: "📞 Call Back",
+        buttonTitle: "Call back",
+        options: {
+          opensAppToForeground: true,
+        },
+      },
+      {
+        identifier: "MESSAGE_ACTION",
+        buttonTitle: "Message",
         options: {
           opensAppToForeground: true,
         },
@@ -64,13 +70,17 @@ export async function setupCallNotificationCategories() {
 
     // 2. Android Channels Configuration
     if (Platform.OS === "android") {
-      // Incoming Calls: High-priority full-screen intent channel
+      // Incoming Calls: High-priority heads-up banner & ringtone channel (Screenshot 1)
       await Notifications.setNotificationChannelAsync(CALL_CHANNEL_ID, {
         name: "Incoming Calls",
-        description: "Full-screen alerts and ringtones for incoming voice & video calls",
+        description: "Heads-up banner alerts and ringtone for incoming voice & video calls",
         importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 600, 300, 600, 300, 600],
         sound: "default",
+        audioAttributes: {
+          usage: Notifications?.AndroidAudioUsage?.RINGTONE ?? 6,
+          contentType: Notifications?.AndroidAudioContentType?.SONIFICATION ?? 4,
+        },
+        vibrationPattern: [0, 1000, 800, 1000, 800, 1000],
         enableVibrate: true,
         enableLights: true,
         lightColor: "#00e6b0",
@@ -92,7 +102,7 @@ export async function setupCallNotificationCategories() {
         showBadge: false,
       });
 
-      // Missed Calls: Standard high priority alert channel
+      // Missed Calls: Standard high priority alert channel (Screenshot 2)
       await Notifications.setNotificationChannelAsync(MISSED_CALL_CHANNEL_ID, {
         name: "Missed Calls",
         description: "Notifications for missed incoming calls",
@@ -182,6 +192,10 @@ export async function showOngoingCallNotification(
  */
 export async function cancelCallNotification(callId?: string) {
   try {
+    if (Platform.OS === "android" && NativeModules.BunkMatesRingtone) {
+      NativeModules.BunkMatesRingtone.stop(callId || "");
+    }
+
     if (activeIncomingNotificationId) {
       await Notifications.dismissNotificationAsync(activeIncomingNotificationId);
       activeIncomingNotificationId = null;
@@ -202,7 +216,8 @@ export async function cancelCallNotification(callId?: string) {
 export async function showMissedCallNotification(
   callerName: string,
   callType: "audio" | "video",
-  callerId?: string
+  callerId?: string,
+  callerAvatar?: string
 ) {
   try {
     await cancelCallNotification();
@@ -210,9 +225,9 @@ export async function showMissedCallNotification(
 
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: callType === "video" ? "📹 Missed Video Call" : "📞 Missed Voice Call",
-        body: `You missed a ${callType} call from ${callerName}`,
-        data: { type: "missed_call", callerId, callerName, callType },
+        title: callerName, // Matches Screenshot 2: "Mummy"
+        body: `1 missed ${callType} call`, // Matches Screenshot 2: "1 missed voice call"
+        data: { type: "missed_call", callerId, callerName, callerAvatar, callType },
         sound: "default",
         priority: Notifications.AndroidNotificationPriority.HIGH,
         categoryIdentifier: "missed_call_category",
@@ -225,8 +240,122 @@ export async function showMissedCallNotification(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// OneSignal credentials
+// ─────────────────────────────────────────────────────────────────────────────
+const ONESIGNAL_APP_ID = "263ae218-7fa0-49cf-9503-d7d0fab26d60";
+
+// OneSignal App API Key (Rich Authentication Token, scoped to BunkMates App)
+const ONESIGNAL_REST_API_KEY =
+  "[REMOVED]";
+
 /**
- * Send Remote Push Notification to receiver's Expo Push Token
+ * Send a call push notification via OneSignal REST API.
+ *
+ * Targets the receiver by their Firebase UID (set as OneSignal External User ID
+ * via OneSignal.login() in UserContext). No Firestore lookup needed.
+ *
+ * Works even when the receiver's app is fully closed (FCM/APNs delivery).
+ */
+export async function sendOneSignalCallNotification({
+  receiverId,
+  callerName,
+  callType,
+  callId,
+  isGroupCall = false,
+  groupName,
+}: {
+  receiverId: string;
+  callerName: string;
+  callType: "audio" | "video";
+  callId: string;
+  isGroupCall?: boolean;
+  groupName?: string;
+}) {
+  if (!receiverId) return;
+
+  if (!ONESIGNAL_REST_API_KEY || ONESIGNAL_REST_API_KEY.length < 10) {
+    console.warn("[CallNotifications] OneSignal REST API Key is not configured.");
+    return;
+  }
+
+  try {
+    const isVideo = callType === "video";
+    const callEmoji = isGroupCall ? "👥" : isVideo ? "📹" : "📞";
+    const callLabel = isGroupCall
+      ? "Incoming Group Call"
+      : isVideo
+      ? "Incoming Video Call"
+      : "Incoming Voice Call";
+
+    const body: any = {
+      app_id: ONESIGNAL_APP_ID,
+
+      // Target by Firebase UID (External User ID set via OneSignal.login)
+      include_aliases: {
+        external_id: [receiverId],
+      },
+      target_channel: "push",
+
+      // Notification content
+      headings: { en: `${callEmoji} ${callLabel}` },
+      contents: { en: `${callerName} is calling you on BunkMates...` },
+
+      // Custom data — used by OneSignalHandler.tsx onClick to open call screen
+      data: {
+        type: isGroupCall ? "group_call" : "call",
+        callId,
+        callType,
+        callerName,
+        isGroupCall,
+        groupName: groupName || null,
+      },
+
+      existing_android_channel_id: CALL_CHANNEL_ID,
+      android_sound: "default",
+      android_visibility: 1, // PUBLIC — show on lock screen
+      priority: 10,          // max urgency
+      ttl: 35,               // expire after 35 s if not delivered (call timeout)
+
+      // iOS: wake app in background for Firestore listener to pick up the call
+      content_available: true,
+      apns_push_type_background: "voip",
+
+      // Action buttons (Android only — deep-link handled in OneSignalHandler)
+      buttons: [
+        { id: "ACCEPT_CALL",  text: "✅ Accept" },
+        { id: "DECLINE_CALL", text: "❌ Decline" },
+      ],
+    };
+
+    const res = await fetch("https://api.onesignal.com/notifications", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // v2 org keys use "Key" prefix (not "Basic")
+        Authorization: `Key ${ONESIGNAL_REST_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const json = await res.json();
+
+    if (json.errors) {
+      console.error("[CallNotifications] OneSignal error:", json.errors);
+    } else {
+      console.log(
+        `[CallNotifications] OneSignal call push sent → ${receiverId}`,
+        json
+      );
+    }
+  } catch (e) {
+    console.error("[CallNotifications] Failed to send OneSignal call notification:", e);
+  }
+}
+
+/**
+ * @deprecated Use sendOneSignalCallNotification instead.
+ * Kept for backward-compatibility; internally calls the new function.
  */
 export async function sendRemoteCallPushNotification({
   receiverId,
@@ -239,44 +368,5 @@ export async function sendRemoteCallPushNotification({
   callType: "audio" | "video";
   callId: string;
 }) {
-  if (!receiverId) return;
-
-  try {
-    const userDoc = await getDoc(doc(db, "users", receiverId));
-    if (!userDoc.exists()) return;
-
-    const userData = userDoc.data();
-    const pushToken = userData?.expoPushToken;
-
-    if (!pushToken || typeof pushToken !== "string") {
-      console.log(`[CallNotifications] No push token found for user ${receiverId}`);
-      return;
-    }
-
-    const message = {
-      to: pushToken,
-      sound: "default",
-      title: callType === "video" ? `📹 Incoming Video Call` : `📞 Incoming Voice Call`,
-      body: `${callerName} is calling you on BunkMates...`,
-      data: { type: "call", callId, callType, callerName },
-      priority: "high",
-      channelId: CALL_CHANNEL_ID,
-      categoryIdentifier: "incoming_call_category",
-      _displayInForeground: true,
-    };
-
-    await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Accept-encoding": "gzip, deflate",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(message),
-    });
-
-    console.log(`[CallNotifications] Remote call push sent successfully to ${receiverId}`);
-  } catch (e) {
-    console.error("[CallNotifications] Failed to send remote call push notification:", e);
-  }
+  return sendOneSignalCallNotification({ receiverId, callerName, callType, callId });
 }
