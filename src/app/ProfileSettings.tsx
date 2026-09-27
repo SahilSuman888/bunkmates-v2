@@ -1792,11 +1792,15 @@ export default function ProfileSettings() {
         contentContainerStyle={styles.modernScrollContent}
       >
         {/* **@** User Profile Card with Avatar, Name, Email, and Edit Profile Pen Icon */}
-        <View
-          style={[
+        <Pressable
+          style={({ pressed }) => [
             styles.modernProfileCard,
             { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            pressed && styles.pressed,
           ]}
+          onPress={() => router.push("/ProfileEdit" as any)}
+          accessibilityRole="button"
+          accessibilityLabel="Edit Profile"
         >
           <Image
             source={{ uri: profile.photoURL || backgroundImage }}
@@ -1828,17 +1832,10 @@ export default function ProfileSettings() {
           </View>
 
           {/* **@** Edit Profile Pen Icon Button */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.modernProfileEditBtn,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => router.push("/ProfileEdit" as any)}
-            accessibilityLabel="Edit Profile"
-          >
+          <View style={styles.modernProfileEditBtn}>
             <Feather name="edit-3" size={19} color="#FF5A5F" />
-          </Pressable>
-        </View>
+          </View>
+        </Pressable>
 
         {/* =====================================================
             1. ACCOUNT
@@ -1857,12 +1854,7 @@ export default function ProfileSettings() {
             { backgroundColor: colors.card, borderColor: colors.cardBorder },
           ]}
         >
-          <SettingRow
-            icon="person-circle-outline"
-            title="Edit Profile"
-            subtitle="Personal details, travel bio & contact"
-            onPress={() => router.push("/ProfileEdit" as any)}
-          />
+          {/* **@** Edit Profile option removed from ACCOUNT as requested (accessible via the pen icon above) */}
           <SettingRow
             icon="shield-checkmark-outline"
             title="Account & Security"
