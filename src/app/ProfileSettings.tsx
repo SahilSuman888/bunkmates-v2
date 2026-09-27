@@ -25,6 +25,7 @@ import {
   Alert,
   Modal,
   TextInput,
+  Platform,
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -1769,6 +1770,14 @@ export default function ProfileSettings() {
           />
 
           <SettingItem
+            icon="qrcode-scan"
+            title="My QR Code"
+            subtitle="Show your QR code or scan a friend's code"
+            iconColor="#00e6b0"
+            onPress={() => router.push("/qr-code" as any)}
+          />
+
+          <SettingItem
             icon="information-outline"
             title="About"
             subtitle="About BunkMates, policies, and app info"
@@ -3282,6 +3291,22 @@ const styles = StyleSheet.create({
     lineHeight: 18,
 
     marginBottom: 28,
+  },
+
+  licenseNotice: {
+    color: "#999",
+    fontSize: 11,
+    lineHeight: 18,
+    marginBottom: 20,
+  },
+
+  licenseSectionHeading: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1,
+    marginBottom: 14,
+    marginTop: 10,
   },
 
   libraryItem: {
