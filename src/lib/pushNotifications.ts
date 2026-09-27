@@ -6,7 +6,7 @@ import { db } from "./firebase";
 
 export const NOTIFICATION_CHANNEL_ID = "bunkmates-notifications";
 
-// expo-notifications Android Push support was removed in Expo Go SDK 53+.
+// **@** Fixed for Expo Go SDK 53: expo-notifications Android Push support removed from Expo Go.
 // Lazy-load to prevent crash in Expo Go; works fully in dev/prod builds.
 let Notifications: typeof import("expo-notifications") | null = null;
 let handlerConfigured = false;

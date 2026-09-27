@@ -25,7 +25,7 @@ import {
   Alert,
   Modal,
   TextInput,
-  Platform,
+  Platform, // **@** Added Platform import
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -1769,6 +1769,7 @@ export default function ProfileSettings() {
             onPress={() => router.push("/inviteFriend" as any)}
           />
 
+          {/* **@** Ported from v2-main: Direct navigation to full QR code screen */}
           <SettingItem
             icon="qrcode-scan"
             title="My QR Code"
@@ -2759,7 +2760,7 @@ const styles = StyleSheet.create({
   },
 
   cameraPreview: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     width: "100%",
     height: "100%",
   },
@@ -3293,6 +3294,7 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
 
+  // **@** Added missing licenseNotice & licenseSectionHeading styles
   licenseNotice: {
     color: "#999",
     fontSize: 11,

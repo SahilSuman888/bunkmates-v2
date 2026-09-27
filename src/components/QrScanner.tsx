@@ -1,3 +1,4 @@
+// **@** Ported from bunkmates-v2-main: Reusable QR Camera Scanner Component
 import React, { useEffect, useState } from "react";
 import { View, StyleSheet, ActivityIndicator, Text } from "react-native";
 import {

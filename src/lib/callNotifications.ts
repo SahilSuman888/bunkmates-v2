@@ -9,7 +9,7 @@ export const MISSED_CALL_CHANNEL_ID = "bunkmates-missed-calls-v2";
 let activeIncomingNotificationId: string | null = null;
 let activeOngoingNotificationId: string | null = null;
 
-// expo-notifications Android Push support was removed in Expo Go SDK 53+.
+// **@** Fixed for Expo Go SDK 53: expo-notifications Android Push was removed from Expo Go.
 // We lazy-load it so the app doesn't crash in Expo Go; in a dev/prod build it works fully.
 let Notifications: typeof import("expo-notifications") | null = null;
 let notificationsAvailable = false;

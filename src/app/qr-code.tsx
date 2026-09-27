@@ -1,3 +1,4 @@
+// **@** Ported from bunkmates-v2-main: Full QR Code Screen (Generate + Full-Screen Camera Scanner + Add Friend)
 // QR CODE SCREEN - Full-Screen Camera Background with Floating Header, Pill Tabs, Settings Gear & 4 Bold White Corner Brackets
 
 import React, { useState, useEffect } from "react";
