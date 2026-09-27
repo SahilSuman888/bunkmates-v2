@@ -636,7 +636,7 @@ export default function ProfileSettings() {
     onPress: () => void;
   };
 
-  const searchableSettings: SearchableSetting[] = useMemo(() => [
+  const searchableSettings: SearchableSetting[] = [
     // ACCOUNT
     {
       id: "edit-profile",
@@ -976,10 +976,10 @@ export default function ProfileSettings() {
         ]);
       },
     },
-  ], [isDark, themeMode, toggleThemeFn, isDeveloper, profile]);
+  ];
 
   // **@** Filter settings in real time based on user query
-  const filteredSettings = useMemo(() => {
+  const filteredSettings = (() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [];
     return searchableSettings.filter((item) => {
@@ -989,7 +989,7 @@ export default function ProfileSettings() {
       const keywordMatch = item.keywords.some((k) => k.toLowerCase().includes(q));
       return titleMatch || subtitleMatch || categoryMatch || keywordMatch;
     });
-  }, [searchQuery, searchableSettings]);
+  })();
 
   const SettingItem = ({
     icon,
