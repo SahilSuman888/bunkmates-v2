@@ -11,12 +11,13 @@ import {
   getDoc,
   getDocs,
 } from "firebase/firestore";
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
   ImageBackground,
   Image, // **@** Added Image for modern avatar
+  InteractionManager, // **@** Defer heavy work until after nav animation
   Linking,
   Pressable,
   ScrollView,
@@ -79,6 +80,155 @@ const verticalScale = (size: number) =>
     )
   );
 
+// **@** SettingRow extracted outside component and memoized to prevent
+// re-creation on every parent render — major perf win for long lists.
+type SettingRowProps = {
+  icon: any;
+  iconFamily?: "ionicons" | "material" | "feather";
+  iconColor?: string;
+  iconBg?: string;
+  title: string;
+  subtitle?: string;
+  category?: string;
+  rightText?: string;
+  badge?: string;
+  onPress?: () => void;
+  isLast?: boolean;
+  isDark?: boolean;
+  colors?: {
+    divider: string;
+    textPrimary: string;
+    textSecondary: string;
+    chevron: string;
+    coralBg: string;
+  };
+};
+
+const SettingRowMemo = React.memo(function SettingRow({
+  icon,
+  iconFamily = "ionicons",
+  iconColor = "#FF5A5F",
+  iconBg,
+  title,
+  subtitle,
+  category,
+  rightText,
+  badge,
+  onPress,
+  isLast = false,
+  isDark = true,
+  colors,
+}: SettingRowProps) {
+  const dividerColor = colors?.divider ?? (isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7");
+  const textPrimary = colors?.textPrimary ?? (isDark ? "#FFFFFF" : "#11141A");
+  const textSecondary = colors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590");
+  const chevronColor = colors?.chevron ?? (isDark ? "#555860" : "#B4B9C2");
+  const resolvedIconBg = iconBg ?? colors?.coralBg ?? (isDark ? "rgba(255, 90, 95, 0.16)" : "rgba(255, 90, 95, 0.09)");
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.modernRow,
+        pressed && {
+          backgroundColor: isDark
+            ? "rgba(255,255,255,0.04)"
+            : "rgba(0,0,0,0.03)",
+        },
+      ]}
+    >
+      <View style={[styles.modernIconBox, { backgroundColor: resolvedIconBg }]}>
+        {iconFamily === "material" ? (
+          <MaterialCommunityIcons name={icon} size={20} color={iconColor} />
+        ) : iconFamily === "feather" ? (
+          <Feather name={icon} size={19} color={iconColor} />
+        ) : (
+          <Ionicons name={icon} size={20} color={iconColor} />
+        )}
+      </View>
+
+      <View
+        style={[
+          styles.modernRowContent,
+          !isLast && {
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: dividerColor,
+          },
+        ]}
+      >
+        <View style={styles.modernRowTextGroup}>
+          <View style={styles.modernRowTitleWrap}>
+            <Text
+              style={[
+                styles.modernRowTitle,
+                { color: textPrimary },
+              ]}
+              numberOfLines={1}
+            >
+              {title}
+            </Text>
+            {category ? (
+              <View
+                style={[
+                  styles.modernCategoryBadge,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(255,255,255,0.08)"
+                      : "rgba(0,0,0,0.05)",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modernCategoryBadgeText,
+                    { color: textSecondary },
+                  ]}
+                >
+                  {category}
+                </Text>
+              </View>
+            ) : null}
+            {badge ? (
+              <View style={styles.modernHotBadge}>
+                <Text style={styles.modernHotBadgeText}>{badge}</Text>
+              </View>
+            ) : null}
+          </View>
+          {subtitle ? (
+            <Text
+              style={[
+                styles.modernRowSubtitle,
+                { color: textSecondary },
+              ]}
+              numberOfLines={2}
+            >
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+
+        <View style={styles.modernRowRightGroup}>
+          {rightText ? (
+            <Text
+              style={[
+                styles.modernRowRightText,
+                { color: textSecondary },
+              ]}
+            >
+              {rightText}
+            </Text>
+          ) : null}
+          <Ionicons
+            name="chevron-forward"
+            size={17}
+            color={chevronColor}
+          />
+        </View>
+      </View>
+    </Pressable>
+  );
+});
+
 export default function ProfileSettings() {
   const router = useRouter();
 
@@ -136,7 +286,8 @@ export default function ProfileSettings() {
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  const colors = {
+  // **@** Memoized — only rebuilds when theme changes, not on every render
+  const colors = useMemo(() => ({
     bg: isDark ? "#0A0A0C" : "#F4F6F9",
     card: isDark ? "#141418" : "#FFFFFF",
     cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
@@ -150,10 +301,12 @@ export default function ProfileSettings() {
     chevron: isDark ? "#555860" : "#B4B9C2",
     logoutBorder: isDark ? "rgba(255, 90, 95, 0.45)" : "rgba(255, 90, 95, 0.4)",
     logoutBg: isDark ? "rgba(255, 90, 95, 0.08)" : "rgba(255, 90, 95, 0.04)",
-  };
+  }), [isDark]);
 
   // =========================================================
-  // LOAD USER
+  // LOAD USER — **@** Optimized: profile loads instantly after nav
+  // animation completes via InteractionManager; trip count is
+  // deferred to a second pass so the UI isn't blocked.
   // =========================================================
 
   useEffect(() => {
@@ -164,7 +317,9 @@ export default function ProfileSettings() {
       return;
     }
 
-    const loadProfile = async () => {
+    // **@** Defer all Firestore work until after the navigation
+    // animation finishes so the transition feels instant.
+    const task = InteractionManager.runAfterInteractions(async () => {
       try {
         let profileData: ProfileData = {
           name:
@@ -239,11 +394,27 @@ export default function ProfileSettings() {
         }
 
         setProfile(profileData);
+      } catch (error) {
+        console.log(
+          "Profile fetch error:",
+          error
+        );
+      } finally {
+        setLoading(false);
+      }
+    });
 
-        // =====================================================
-        // TRIP COUNT
-        // =====================================================
+    return () => task.cancel();
+  }, [authLoading, user]);
 
+  // **@** Trip count is fetched in a SEPARATE effect, further deferred,
+  // so it never blocks the main settings render or initial navigation.
+  useEffect(() => {
+    if (authLoading || !user) return;
+
+    // Small delay to ensure settings page has fully rendered first.
+    const timer = setTimeout(() => {
+      const task = InteractionManager.runAfterInteractions(async () => {
         try {
           const tripsSnap =
             await getDocs(
@@ -278,17 +449,12 @@ export default function ProfileSettings() {
             tripError
           );
         }
-      } catch (error) {
-        console.log(
-          "Profile fetch error:",
-          error
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
+      });
 
-    loadProfile();
+      return () => task.cancel();
+    }, 500);
+
+    return () => clearTimeout(timer);
   }, [authLoading, user]);
 
   // Restore developer mode on this device, matching the web version's
@@ -448,14 +614,23 @@ export default function ProfileSettings() {
       return;
     }
 
-    router.back();
+    // **@** Navigate back, or fallback to home/tabs if history stack is empty
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)" as any);
+    }
   };
 
   // =========================================================
   // LOADING
   // =========================================================
 
-  if (authLoading || loading) {
+  // **@** Show skeleton/loading only while auth is resolving.
+  // Profile data now loads via InteractionManager so we show
+  // the settings layout ASAP with fallback values, rather than
+  // blocking the entire screen behind a spinner.
+  if (authLoading) {
     return (
       <View
         style={styles.loadingContainer}
@@ -490,135 +665,19 @@ export default function ProfileSettings() {
   // SETTING ROW (MODERN IOS / SCREENSHOT STYLE)
   // =========================================================
 
-  // **@** Modern SettingRow matching screenshot design
-  const SettingRow = ({
-    icon,
-    iconFamily = "ionicons",
-    iconColor = "#FF5A5F",
-    iconBg = colors.coralBg,
-    title,
-    subtitle,
-    category,
-    rightText,
-    badge,
-    onPress,
-    isLast = false,
-  }: {
-    icon: any;
-    iconFamily?: "ionicons" | "material" | "feather";
-    iconColor?: string;
-    iconBg?: string;
-    title: string;
-    subtitle?: string;
-    category?: string;
-    rightText?: string;
-    badge?: string;
-    onPress?: () => void;
-    isLast?: boolean;
-  }) => {
-    return (
-      <Pressable
-        onPress={onPress}
-        style={({ pressed }) => [
-          styles.modernRow,
-          pressed && {
-            backgroundColor: isDark
-              ? "rgba(255,255,255,0.04)"
-              : "rgba(0,0,0,0.03)",
-          },
-        ]}
-      >
-        <View style={[styles.modernIconBox, { backgroundColor: iconBg }]}>
-          {iconFamily === "material" ? (
-            <MaterialCommunityIcons name={icon} size={20} color={iconColor} />
-          ) : iconFamily === "feather" ? (
-            <Feather name={icon} size={19} color={iconColor} />
-          ) : (
-            <Ionicons name={icon} size={20} color={iconColor} />
-          )}
-        </View>
-
-        <View
-          style={[
-            styles.modernRowContent,
-            !isLast && {
-              borderBottomWidth: StyleSheet.hairlineWidth,
-              borderBottomColor: colors.divider,
-            },
-          ]}
-        >
-          <View style={styles.modernRowTextGroup}>
-            <View style={styles.modernRowTitleWrap}>
-              <Text
-                style={[
-                  styles.modernRowTitle,
-                  { color: colors.textPrimary },
-                ]}
-                numberOfLines={1}
-              >
-                {title}
-              </Text>
-              {category ? (
-                <View
-                  style={[
-                    styles.modernCategoryBadge,
-                    {
-                      backgroundColor: isDark
-                        ? "rgba(255,255,255,0.08)"
-                        : "rgba(0,0,0,0.05)",
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.modernCategoryBadgeText,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {category}
-                  </Text>
-                </View>
-              ) : null}
-              {badge ? (
-                <View style={styles.modernHotBadge}>
-                  <Text style={styles.modernHotBadgeText}>{badge}</Text>
-                </View>
-              ) : null}
-            </View>
-            {subtitle ? (
-              <Text
-                style={[
-                  styles.modernRowSubtitle,
-                  { color: colors.textSecondary },
-                ]}
-                numberOfLines={2}
-              >
-                {subtitle}
-              </Text>
-            ) : null}
-          </View>
-
-          <View style={styles.modernRowRightGroup}>
-            {rightText ? (
-              <Text
-                style={[
-                  styles.modernRowRightText,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                {rightText}
-              </Text>
-            ) : null}
-            <Ionicons
-              name="chevron-forward"
-              size={17}
-              color={colors.chevron}
-            />
-          </View>
-        </View>
-      </Pressable>
-    );
-  };
+  // **@** SettingRow is now defined outside the component as SettingRowMemo.
+  // This shim passes down the current theme colors so the externally-defined
+  // component renders correctly without needing context access.
+  const SettingRow = useCallback(
+    (props: Omit<SettingRowProps, "isDark" | "colors">) => (
+      <SettingRowMemo
+        {...props}
+        isDark={isDark}
+        colors={colors}
+      />
+    ),
+    [isDark, colors]
+  );
 
   // **@** Comprehensive list of all searchable settings & features inside Settings
   type SearchableSetting = {
@@ -636,7 +695,8 @@ export default function ProfileSettings() {
     onPress: () => void;
   };
 
-  const searchableSettings: SearchableSetting[] = [
+  // **@** Memoized so the massive array is only rebuilt when dependencies change
+  const searchableSettings: SearchableSetting[] = useMemo(() => [
     // ACCOUNT
     {
       id: "edit-profile",
@@ -645,7 +705,7 @@ export default function ProfileSettings() {
       subtitle: "Personal details, travel bio & contact",
       keywords: ["edit profile", "profile", "bio", "name", "email", "phone", "avatar", "photo", "username"],
       icon: "edit-3",
-      iconFamily: "feather",
+      iconFamily: "feather" as const,
       iconColor: "#FF5A5F",
       onPress: () => {
         setIsSearching(false);
@@ -927,7 +987,7 @@ export default function ProfileSettings() {
       subtitle: "Open source software & dependencies",
       keywords: ["license", "licenses", "open source", "attribution", "third party", "libraries"],
       icon: "license",
-      iconFamily: "material",
+      iconFamily: "material" as const,
       onPress: () => {
         setIsSearching(false);
         setCurrentPage("licenses");
@@ -976,10 +1036,10 @@ export default function ProfileSettings() {
         ]);
       },
     },
-  ];
+  ], [isDark, isDeveloper, themeMode, toggleThemeFn]);
 
-  // **@** Filter settings in real time based on user query
-  const filteredSettings = (() => {
+  // **@** Memoized filter — only recalculates when query or settings list changes
+  const filteredSettings = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [];
     return searchableSettings.filter((item) => {
@@ -989,7 +1049,7 @@ export default function ProfileSettings() {
       const keywordMatch = item.keywords.some((k) => k.toLowerCase().includes(q));
       return titleMatch || subtitleMatch || categoryMatch || keywordMatch;
     });
-  })();
+  }, [searchQuery, searchableSettings]);
 
   const SettingItem = ({
     icon,
@@ -2145,12 +2205,37 @@ export default function ProfileSettings() {
         backgroundColor={colors.bg}
       />
 
-      {/* **@** Top Header: Standard mode or In-Settings Search mode with exact 20px edge spacing */}
+      {/* **@** Top Header: Standard mode with back button, left-aligned title, and action buttons */}
       {!isSearching ? (
         <View style={styles.modernHeader}>
-          <Text style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}>
-            Settings
-          </Text>
+          {/* **@** Left side: Back navigation button + Settings Title (UI/UX aligned) */}
+          <View style={styles.modernHeaderLeft}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.modernHeaderBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
+              ]}
+              onPress={handleInternalBack}
+              accessibilityLabel="Go back"
+              hitSlop={6}
+            >
+              <Ionicons
+                name="arrow-back"
+                size={20}
+                color={colors.textPrimary}
+              />
+            </Pressable>
+
+            <Text
+              style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}
+              numberOfLines={1}
+            >
+              Settings
+            </Text>
+          </View>
+
+          {/* **@** Action buttons (QR Code & Search) on the right */}
           <View style={styles.modernHeaderIcons}>
             {/* QR Code Action Button */}
             <Pressable
@@ -4814,13 +4899,24 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 20, // **@** Equal 20px edge spacing as requested
     paddingTop: Platform.OS === "android" ? 14 : 8,
-    paddingBottom: 6,
+    paddingBottom: 8,
+    minHeight: 56,
   },
 
+  // **@** Left container holding the back arrow and Settings title
+  modernHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    marginRight: 12,
+  },
+
+  // **@** Settings title positioned to the right of the arrow with clean visual hierarchy
   modernHeaderTitle: {
-    fontSize: 32,
-    fontWeight: "800",
-    letterSpacing: -0.5,
+    fontSize: 22,
+    fontWeight: "600", // **@** Refined semi-bold weight for modern UI/UX visual balance
+    letterSpacing: -0.3,
+    marginLeft: 14, // **@** Clear breathing space between arrow and title
   },
 
   modernHeaderIcons: {
