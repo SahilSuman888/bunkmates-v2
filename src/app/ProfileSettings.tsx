@@ -1767,26 +1767,21 @@ export default function ProfileSettings() {
             />
           </Pressable>
 
-          {/* Trips Action Button */}
+          {/* **@** Search Action Button */}
           <Pressable
             style={({ pressed }) => [
               styles.modernHeaderBtn,
               { backgroundColor: colors.card, borderColor: colors.cardBorder },
               pressed && styles.pressed,
             ]}
-            onPress={() => router.push("/trips" as any)}
-            accessibilityLabel="Trips"
+            onPress={() => router.push("/search" as any)}
+            accessibilityLabel="Search"
           >
             <Ionicons
-              name="airplane-outline"
+              name="search-outline"
               size={20}
               color={colors.textPrimary}
             />
-            {tripCount > 0 && (
-              <View style={styles.modernTripBadge}>
-                <Text style={styles.modernTripBadgeText}>{tripCount}</Text>
-              </View>
-            )}
           </Pressable>
         </View>
       </View>
