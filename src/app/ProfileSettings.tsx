@@ -11,7 +11,7 @@ import {
   getDoc,
   getDocs,
 } from "firebase/firestore";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -27,6 +27,7 @@ import {
   Alert,
   Modal,
   TextInput,
+  Keyboard, // **@** Added Keyboard for in-settings search dismissal
   Platform, // **@** Added Platform import
   Appearance, // **@** Added Appearance for theme detection
 } from "react-native";
@@ -102,6 +103,11 @@ export default function ProfileSettings() {
 
   const [tripCount, setTripCount] = useState(4);
 
+  // **@** In-Settings Search states for searching setting features/options
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<TextInput>(null);
+
   const [profile, setProfile] =
     useState<ProfileData>({
       name: "",
@@ -138,6 +144,7 @@ export default function ProfileSettings() {
     textPrimary: isDark ? "#FFFFFF" : "#11141A",
     textSecondary: isDark ? "#8E95A2" : "#7E8590",
     sectionHeader: isDark ? "#8E95A2" : "#7E8590",
+    coral: "#FF5A5F",
     coralAccent: "#FF5A5F",
     coralBg: isDark ? "rgba(255, 90, 95, 0.16)" : "rgba(255, 90, 95, 0.09)",
     chevron: isDark ? "#555860" : "#B4B9C2",
@@ -491,6 +498,7 @@ export default function ProfileSettings() {
     iconBg = colors.coralBg,
     title,
     subtitle,
+    category,
     rightText,
     badge,
     onPress,
@@ -502,6 +510,7 @@ export default function ProfileSettings() {
     iconBg?: string;
     title: string;
     subtitle?: string;
+    category?: string;
     rightText?: string;
     badge?: string;
     onPress?: () => void;
@@ -549,6 +558,27 @@ export default function ProfileSettings() {
               >
                 {title}
               </Text>
+              {category ? (
+                <View
+                  style={[
+                    styles.modernCategoryBadge,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(255,255,255,0.08)"
+                        : "rgba(0,0,0,0.05)",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.modernCategoryBadgeText,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {category}
+                  </Text>
+                </View>
+              ) : null}
               {badge ? (
                 <View style={styles.modernHotBadge}>
                   <Text style={styles.modernHotBadgeText}>{badge}</Text>
@@ -589,6 +619,377 @@ export default function ProfileSettings() {
       </Pressable>
     );
   };
+
+  // **@** Comprehensive list of all searchable settings & features inside Settings
+  type SearchableSetting = {
+    id: string;
+    category: string;
+    title: string;
+    subtitle: string;
+    keywords: string[];
+    icon: any;
+    iconFamily?: "ionicons" | "material" | "feather";
+    iconColor?: string;
+    iconBg?: string;
+    badge?: string;
+    rightText?: string;
+    onPress: () => void;
+  };
+
+  const searchableSettings: SearchableSetting[] = useMemo(() => [
+    // ACCOUNT
+    {
+      id: "edit-profile",
+      category: "ACCOUNT",
+      title: "Edit Profile",
+      subtitle: "Personal details, travel bio & contact",
+      keywords: ["edit profile", "profile", "bio", "name", "email", "phone", "avatar", "photo", "username"],
+      icon: "edit-3",
+      iconFamily: "feather",
+      iconColor: "#FF5A5F",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/ProfileEdit" as any);
+      },
+    },
+    {
+      id: "account-security",
+      category: "ACCOUNT",
+      title: "Account & Security",
+      subtitle: "Password, Two-factor auth, session logs",
+      keywords: ["account", "security", "password", "two factor", "2fa", "session", "login", "auth"],
+      icon: "shield-checkmark-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/accounts" as any);
+      },
+    },
+    {
+      id: "privacy-data",
+      category: "ACCOUNT",
+      title: "Privacy & Data",
+      subtitle: "Profile visibility, location logs",
+      keywords: ["privacy", "data", "visibility", "tracking", "location", "logs"],
+      icon: "lock-closed-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Privacy & Data", "Profile visibility and tracking options are kept private.");
+      },
+    },
+    {
+      id: "connected-accounts",
+      category: "ACCOUNT",
+      title: "Connected Accounts",
+      subtitle: "Google, Apple, social integrations",
+      keywords: ["connected accounts", "google", "apple", "social", "integration", "link", "oauth"],
+      icon: "link-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Connected Accounts", "Google authentication is active.");
+      },
+    },
+    {
+      id: "qr-code",
+      category: "ACCOUNT",
+      title: "My QR Code",
+      subtitle: "Share profile & quick connect scanner",
+      keywords: ["qr", "code", "scan", "scanner", "share", "barcode"],
+      icon: "qr-code-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/qr-code" as any);
+      },
+    },
+
+    // TRIP EXPERIENCE
+    {
+      id: "notifications",
+      category: "TRIP EXPERIENCE",
+      title: "Notifications",
+      subtitle: "Trip updates, chat pings, alerts",
+      keywords: ["notifications", "alerts", "ping", "updates", "trip notification", "messages"],
+      icon: "notifications-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/notifications" as any);
+      },
+    },
+    {
+      id: "trip-preferences",
+      category: "TRIP EXPERIENCE",
+      title: "Trip Preferences",
+      subtitle: "Dietary rules, accommodation styles, travel pace",
+      keywords: ["preferences", "diet", "food", "accommodation", "hotel", "travel pace", "style"],
+      badge: "Hot",
+      icon: "compass-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Trip Preferences", "Configure your travel preferences and accommodation styles.");
+      },
+    },
+    {
+      id: "currency-expenses",
+      category: "TRIP EXPERIENCE",
+      title: "Currency & Expenses",
+      subtitle: "Default Split bills, home currency USD",
+      keywords: ["currency", "expenses", "split", "bills", "money", "budget", "cost", "dollar", "usd"],
+      icon: "cash-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/budget" as any);
+      },
+    },
+    {
+      id: "offline-downloads",
+      category: "TRIP EXPERIENCE",
+      title: "Offline & Downloads",
+      subtitle: "Storage management, offline maps",
+      keywords: ["offline", "downloads", "storage", "cache", "offline maps", "data saving"],
+      icon: "cloud-download-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Offline & Downloads", "Offline maps cache and local assets storage management.");
+      },
+    },
+    {
+      id: "maps-navigation",
+      category: "TRIP EXPERIENCE",
+      title: "Maps & Navigation",
+      subtitle: "Offline cache, route preferences",
+      keywords: ["maps", "navigation", "routes", "directions", "gps", "travel route"],
+      icon: "location-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Maps & Navigation", "Navigation route preferences and scenic route toggles.");
+      },
+    },
+    {
+      id: "weather-alerts",
+      category: "TRIP EXPERIENCE",
+      title: "Weather Alerts & AQI",
+      subtitle: "Local weather forecasts & rain warnings",
+      keywords: ["weather", "alerts", "aqi", "air quality", "rain", "temperature", "forecast"],
+      icon: "partly-sunny-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/(tabs)/aqi" as any);
+      },
+    },
+    {
+      id: "my-trips",
+      category: "TRIP EXPERIENCE",
+      title: "My Trips & Itineraries",
+      subtitle: "Explore, manage, and plan adventures",
+      keywords: ["trips", "my trips", "itinerary", "journey", "vacation", "planner"],
+      icon: "airplane-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/trips" as any);
+      },
+    },
+
+    // APP SETTINGS
+    {
+      id: "appearance",
+      category: "APP SETTINGS",
+      title: "Appearance",
+      subtitle: "Theme color, dark mode & light mode",
+      keywords: ["appearance", "theme", "dark mode", "light mode", "color", "display"],
+      rightText:
+        themeMode === "system"
+          ? "System (Auto)"
+          : themeMode === "dark"
+          ? "Dark Mode"
+          : "Light Mode",
+      icon: "color-filter-outline",
+      onPress: () => {
+        toggleThemeFn();
+      },
+    },
+    {
+      id: "language-region",
+      category: "APP SETTINGS",
+      title: "Language & Region",
+      subtitle: "English (US), locale settings",
+      keywords: ["language", "region", "country", "english", "locale", "timezone"],
+      rightText: "English (US)",
+      icon: "globe-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Language & Region", "Language is currently set to English (US).");
+      },
+    },
+    {
+      id: "accessibility",
+      category: "APP SETTINGS",
+      title: "Accessibility",
+      subtitle: "Font scale, high contrast features",
+      keywords: ["accessibility", "font", "contrast", "size", "zoom", "reader"],
+      icon: "accessibility-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Accessibility", "Dynamic font scaling and high contrast features active.");
+      },
+    },
+    {
+      id: "chats",
+      category: "APP SETTINGS",
+      title: "Chats",
+      subtitle: "Theme, Wallpapers, and Chat Settings",
+      keywords: ["chats", "chat", "messages", "wallpaper", "chat theme", "bubbles"],
+      icon: "chatbubble-ellipses-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/chat-settings" as any);
+      },
+    },
+    {
+      id: "general-settings",
+      category: "APP SETTINGS",
+      title: "General Settings",
+      subtitle: "App Theme, Language, and Location",
+      keywords: ["general", "settings", "default", "preferences"],
+      icon: "settings-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/general-settings" as any);
+      },
+    },
+    {
+      id: "ai-features",
+      category: "APP SETTINGS",
+      title: "AI Features",
+      subtitle: "Configure Groq API Key & AI settings",
+      keywords: ["ai", "groq", "artificial intelligence", "api key", "bot", "assistant", "model", "smart"],
+      icon: "sparkles",
+      iconColor: "#00e676",
+      iconBg: isDark ? "rgba(0, 230, 118, 0.16)" : "rgba(0, 230, 118, 0.10)",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/ai-settings" as any);
+      },
+    },
+
+    // SUPPORT
+    {
+      id: "help-support",
+      category: "SUPPORT",
+      title: "Help & Support",
+      subtitle: "Guides, FAQs, 24/7 BunkMates bot",
+      keywords: ["help", "support", "faq", "customer service", "guide", "problem", "ticket"],
+      icon: "chatbubble-question-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/help" as any);
+      },
+    },
+    {
+      id: "feedback",
+      category: "SUPPORT",
+      title: "Send Feedback",
+      subtitle: "Feature requests, report bugs",
+      keywords: ["feedback", "bug", "issue", "suggestion", "report", "feature request"],
+      icon: "megaphone-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/feedback" as any);
+      },
+    },
+    {
+      id: "rate-app",
+      category: "SUPPORT",
+      title: "Rate BunkMates",
+      subtitle: "Show us some love on the store",
+      keywords: ["rate", "review", "stars", "app store", "play store"],
+      icon: "ribbon-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Rate BunkMates", "Thank you for rating BunkMates 5 stars! ⭐⭐⭐⭐⭐");
+      },
+    },
+    {
+      id: "about-app",
+      category: "SUPPORT",
+      title: "About BunkMates",
+      subtitle: "Version 3.4.1 (Stable)",
+      keywords: ["about", "version", "build", "info", "release"],
+      icon: "information-circle-outline",
+      onPress: () => {
+        setIsSearching(false);
+        handleBuildTap();
+        setCurrentPage("about");
+      },
+    },
+    {
+      id: "licenses",
+      category: "SUPPORT",
+      title: "Third-Party Licenses",
+      subtitle: "Open source software & dependencies",
+      keywords: ["license", "licenses", "open source", "attribution", "third party", "libraries"],
+      icon: "license",
+      iconFamily: "material",
+      onPress: () => {
+        setIsSearching(false);
+        setCurrentPage("licenses");
+      },
+    },
+    {
+      id: "invite-friend",
+      category: "SUPPORT",
+      title: "Invite a Friend",
+      subtitle: "Share BunkMates with travel companions",
+      keywords: ["invite", "friend", "referral", "share", "refer"],
+      icon: "person-add-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/inviteFriend" as any);
+      },
+    },
+    ...(isDeveloper
+      ? [
+          {
+            id: "developer-tools",
+            category: "DEVELOPER",
+            title: "Developer Tools & Sandbox",
+            subtitle: "Access internal tools, sandboxes, and developer routes",
+            keywords: ["developer", "dev", "tools", "sandbox", "debug"],
+            icon: "code-slash-outline",
+            onPress: () => {
+              setIsSearching(false);
+              setCurrentPage("developers");
+            },
+          } as SearchableSetting,
+        ]
+      : []),
+    {
+      id: "logout",
+      category: "ACCOUNT",
+      title: "Log Out",
+      subtitle: "Sign out of your current session",
+      keywords: ["logout", "log out", "sign out", "exit"],
+      icon: "log-out-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Log Out", "Are you sure you want to log out of BunkMates?", [
+          { text: "Cancel", style: "cancel" },
+          { text: "Log Out", style: "destructive", onPress: handleLogout },
+        ]);
+      },
+    },
+  ], [isDark, themeMode, toggleThemeFn, isDeveloper, profile]);
+
+  // **@** Filter settings in real time based on user query
+  const filteredSettings = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return searchableSettings.filter((item) => {
+      const titleMatch = item.title.toLowerCase().includes(q);
+      const subtitleMatch = item.subtitle?.toLowerCase().includes(q);
+      const categoryMatch = item.category.toLowerCase().includes(q);
+      const keywordMatch = item.keywords.some((k) => k.toLowerCase().includes(q));
+      return titleMatch || subtitleMatch || categoryMatch || keywordMatch;
+    });
+  }, [searchQuery, searchableSettings]);
 
   const SettingItem = ({
     icon,
@@ -1744,54 +2145,234 @@ export default function ProfileSettings() {
         backgroundColor={colors.bg}
       />
 
-      {/* **@** Top Header matching reference screenshot (Title + 2 action icons with equal 20px edge spacing) */}
-      <View style={styles.modernHeader}>
-        <Text style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}>
-          Settings
-        </Text>
-        <View style={styles.modernHeaderIcons}>
-          {/* QR Code Action Button */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.modernHeaderBtn,
-              { backgroundColor: colors.card, borderColor: colors.cardBorder },
-              pressed && styles.pressed,
-            ]}
-            onPress={() => router.push("/qr-code" as any)}
-            accessibilityLabel="QR Code"
-          >
-            <Ionicons
-              name="qr-code-outline"
-              size={20}
-              color={colors.textPrimary}
-            />
-          </Pressable>
+      {/* **@** Top Header: Standard mode or In-Settings Search mode with exact 20px edge spacing */}
+      {!isSearching ? (
+        <View style={styles.modernHeader}>
+          <Text style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}>
+            Settings
+          </Text>
+          <View style={styles.modernHeaderIcons}>
+            {/* QR Code Action Button */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.modernHeaderBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
+              ]}
+              onPress={() => router.push("/qr-code" as any)}
+              accessibilityLabel="QR Code"
+            >
+              <Ionicons
+                name="qr-code-outline"
+                size={20}
+                color={colors.textPrimary}
+              />
+            </Pressable>
 
-          {/* **@** Search Action Button */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.modernHeaderBtn,
+            {/* **@** Search Settings Action Button (Opens in-settings search) */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.modernHeaderBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
+              ]}
+              onPress={() => setIsSearching(true)}
+              accessibilityLabel="Search settings"
+            >
+              <Ionicons
+                name="search-outline"
+                size={20}
+                color={colors.textPrimary}
+              />
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.modernSearchHeader}>
+          <View
+            style={[
+              styles.modernSearchInputWrapper,
               { backgroundColor: colors.card, borderColor: colors.cardBorder },
-              pressed && styles.pressed,
             ]}
-            onPress={() => router.push("/search" as any)}
-            accessibilityLabel="Search"
           >
             <Ionicons
               name="search-outline"
-              size={20}
-              color={colors.textPrimary}
+              size={18}
+              color={colors.textSecondary}
+              style={{ marginRight: 8 }}
             />
+            <TextInput
+              ref={searchInputRef}
+              style={[styles.modernSearchInput, { color: colors.textPrimary }]}
+              placeholder="Search settings & features..."
+              placeholderTextColor={colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
+              <Pressable
+                onPress={() => setSearchQuery("")}
+                hitSlop={8}
+                style={styles.modernSearchClearBtn}
+                accessibilityLabel="Clear search"
+              >
+                <Ionicons
+                  name="close-circle"
+                  size={18}
+                  color={colors.textSecondary}
+                />
+              </Pressable>
+            )}
+          </View>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.modernSearchCancelBtn,
+              pressed && { opacity: 0.7 },
+            ]}
+            onPress={() => {
+              setIsSearching(false);
+              setSearchQuery("");
+              Keyboard.dismiss();
+            }}
+            accessibilityLabel="Cancel search"
+          >
+            <Text style={[styles.modernSearchCancelText, { color: colors.coral }]}>
+              Cancel
+            </Text>
           </Pressable>
         </View>
-      </View>
+      )}
 
       <ScrollView
         style={styles.modernScroll}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.modernScrollContent}
+        keyboardShouldPersistTaps="handled"
       >
-        {/* **@** User Profile Card with Avatar, Name, Email, and Edit Profile Pen Icon */}
+        {isSearching ? (
+          <View style={styles.modernSearchResultsContainer}>
+            {searchQuery.trim().length === 0 ? (
+              <View>
+                <Text
+                  style={[
+                    styles.modernSectionHeading,
+                    { color: colors.sectionHeader },
+                  ]}
+                >
+                  SUGGESTED SETTINGS
+                </Text>
+                <View
+                  style={[
+                    styles.modernCardGroup,
+                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                  ]}
+                >
+                  {searchableSettings.slice(0, 6).map((item, idx) => (
+                    <SettingRow
+                      key={item.id}
+                      icon={item.icon}
+                      iconFamily={item.iconFamily}
+                      iconColor={item.iconColor}
+                      iconBg={item.iconBg}
+                      title={item.title}
+                      subtitle={item.subtitle}
+                      category={item.category}
+                      badge={item.badge}
+                      rightText={item.rightText}
+                      isLast={idx === 5}
+                      onPress={item.onPress}
+                    />
+                  ))}
+                </View>
+                <Text style={[styles.modernSearchTip, { color: colors.textSecondary }]}>
+                  Type any setting name, feature, or keyword to find it instantly.
+                </Text>
+              </View>
+            ) : filteredSettings.length > 0 ? (
+              <View>
+                <Text
+                  style={[
+                    styles.modernSectionHeading,
+                    { color: colors.sectionHeader },
+                  ]}
+                >
+                  MATCHING SETTINGS ({filteredSettings.length})
+                </Text>
+                <View
+                  style={[
+                    styles.modernCardGroup,
+                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                  ]}
+                >
+                  {filteredSettings.map((item, idx) => (
+                    <SettingRow
+                      key={item.id}
+                      icon={item.icon}
+                      iconFamily={item.iconFamily}
+                      iconColor={item.iconColor}
+                      iconBg={item.iconBg}
+                      title={item.title}
+                      subtitle={item.subtitle}
+                      category={item.category}
+                      badge={item.badge}
+                      rightText={item.rightText}
+                      isLast={idx === filteredSettings.length - 1}
+                      onPress={item.onPress}
+                    />
+                  ))}
+                </View>
+              </View>
+            ) : (
+              <View style={styles.modernEmptySearchWrap}>
+                <View
+                  style={[
+                    styles.modernEmptySearchIconBox,
+                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                  ]}
+                >
+                  <Ionicons
+                    name="search-outline"
+                    size={30}
+                    color={colors.textSecondary}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.modernEmptySearchTitle,
+                    { color: colors.textPrimary },
+                  ]}
+                >
+                  No settings found
+                </Text>
+                <Text
+                  style={[
+                    styles.modernEmptySearchSubtitle,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  We couldn't find any settings matching "{searchQuery}". Try searching for theme, security, currency, or notifications.
+                </Text>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.modernEmptyClearBtn,
+                    { backgroundColor: colors.coralBg, borderColor: colors.coral },
+                    pressed && { opacity: 0.8 },
+                  ]}
+                  onPress={() => setSearchQuery("")}
+                >
+                  <Text style={[styles.modernEmptyClearBtnText, { color: colors.coral }]}>
+                    Clear Query
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        ) : (
+          <>
+            {/* **@** User Profile Card with Avatar, Name, Email, and Edit Profile Pen Icon */}
         <Pressable
           style={({ pressed }) => [
             styles.modernProfileCard,
@@ -2146,6 +2727,8 @@ export default function ProfileSettings() {
           <Ionicons name="log-out-outline" size={20} color="#FF5A5F" />
           <Text style={styles.modernLogoutText}>Log Out</Text>
         </Pressable>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -4443,5 +5026,117 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 15,
     marginLeft: 8,
+  },
+
+  // **@** In-Settings Search Styles
+  modernSearchHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20, // **@** Exact 20px padding from screen edge
+    paddingTop: Platform.OS === "android" ? 14 : 8,
+    paddingBottom: 8,
+    gap: 12,
+  },
+
+  modernSearchInputWrapper: {
+    flex: 1,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+  },
+
+  modernSearchInput: {
+    flex: 1,
+    fontSize: 15,
+    paddingVertical: 0,
+    height: "100%",
+  },
+
+  modernSearchClearBtn: {
+    padding: 4,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  modernSearchCancelBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    justifyContent: "center",
+  },
+
+  modernSearchCancelText: {
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  modernCategoryBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+
+  modernCategoryBadgeText: {
+    fontSize: 9.5,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+  },
+
+  modernSearchResultsContainer: {
+    paddingTop: 6,
+  },
+
+  modernSearchTip: {
+    fontSize: 12.5,
+    textAlign: "center",
+    marginTop: 18,
+    marginHorizontal: 30,
+    lineHeight: 18,
+  },
+
+  modernEmptySearchWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 56,
+    paddingHorizontal: 28,
+  },
+
+  modernEmptySearchIconBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+
+  modernEmptySearchTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+    marginBottom: 6,
+  },
+
+  modernEmptySearchSubtitle: {
+    fontSize: 13.5,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+
+  modernEmptyClearBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+
+  modernEmptyClearBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
   },
 });
