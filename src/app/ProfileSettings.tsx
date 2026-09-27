@@ -1699,10 +1699,9 @@ export default function ProfileSettings() {
               styles.qrCard,
               pressed && styles.pressed,
             ]}
+            // **@** Matches v2-main: open full-featured /qr-code screen
             onPress={() => {
-              setQrTab("my");
-              setScanned(false);
-              setCurrentPage("qr");
+              router.push("/qr-code" as any);
             }}
           >
             <MaterialCommunityIcons

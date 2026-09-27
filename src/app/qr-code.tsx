@@ -257,27 +257,27 @@ function ScannerOverlay({ scanBoxSize }: { scanBoxSize: number }) {
 
   const pathData = layout
     ? (() => {
-        const W = layout.w;
-        const H = layout.h;
-        const x = (W - scanBoxSize) / 2;
-        const y = (H - scanBoxSize) / 2 + offsetY;
-        const s = scanBoxSize;
-        const BLEED = 100;
+      const W = layout.w;
+      const H = layout.h;
+      const x = (W - scanBoxSize) / 2;
+      const y = (H - scanBoxSize) / 2 + offsetY;
+      const s = scanBoxSize;
+      const BLEED = 100;
 
-        return [
-          `M ${-BLEED} ${-BLEED} H ${W + BLEED * 2} V ${H + BLEED * 2} H ${-BLEED} Z`,
-          `M ${x + r} ${y}`,
-          `H ${x + s - r}`,
-          `A ${r} ${r} 0 0 1 ${x + s} ${y + r}`,
-          `V ${y + s - r}`,
-          `A ${r} ${r} 0 0 1 ${x + s - r} ${y + s}`,
-          `H ${x + r}`,
-          `A ${r} ${r} 0 0 1 ${x} ${y + s - r}`,
-          `V ${y + r}`,
-          `A ${r} ${r} 0 0 1 ${x + r} ${y}`,
-          `Z`,
-        ].join(" ");
-      })()
+      return [
+        `M ${-BLEED} ${-BLEED} H ${W + BLEED * 2} V ${H + BLEED * 2} H ${-BLEED} Z`,
+        `M ${x + r} ${y}`,
+        `H ${x + s - r}`,
+        `A ${r} ${r} 0 0 1 ${x + s} ${y + r}`,
+        `V ${y + s - r}`,
+        `A ${r} ${r} 0 0 1 ${x + s - r} ${y + s}`,
+        `H ${x + r}`,
+        `A ${r} ${r} 0 0 1 ${x} ${y + s - r}`,
+        `V ${y + r}`,
+        `A ${r} ${r} 0 0 1 ${x + r} ${y}`,
+        `Z`,
+      ].join(" ");
+    })()
     : "";
 
   return (
