@@ -1,6 +1,7 @@
 import {
   Ionicons,
   MaterialCommunityIcons,
+  Feather, // **@** Added Feather for profile edit pen icon
 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
@@ -10,11 +11,13 @@ import {
   getDoc,
   getDocs,
 } from "firebase/firestore";
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
   ImageBackground,
+  Image, // **@** Added Image for modern avatar
+  InteractionManager, // **@** Defer heavy work until after nav animation
   Linking,
   Pressable,
   ScrollView,
@@ -25,11 +28,15 @@ import {
   Alert,
   Modal,
   TextInput,
+  Keyboard, // **@** Added Keyboard for in-settings search dismissal
+  Platform, // **@** Added Platform import
+  Appearance, // **@** Added Appearance for theme detection
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useUser } from "../contexts/UserContext";
+import { useThemeToggle } from "../contexts/ThemeContext"; // **@** Added dynamic theme hook
 import { auth, db } from "../lib/firebase";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -73,6 +80,155 @@ const verticalScale = (size: number) =>
     )
   );
 
+// **@** SettingRow extracted outside component and memoized to prevent
+// re-creation on every parent render — major perf win for long lists.
+type SettingRowProps = {
+  icon: any;
+  iconFamily?: "ionicons" | "material" | "feather";
+  iconColor?: string;
+  iconBg?: string;
+  title: string;
+  subtitle?: string;
+  category?: string;
+  rightText?: string;
+  badge?: string;
+  onPress?: () => void;
+  isLast?: boolean;
+  isDark?: boolean;
+  colors?: {
+    divider: string;
+    textPrimary: string;
+    textSecondary: string;
+    chevron: string;
+    coralBg: string;
+  };
+};
+
+const SettingRowMemo = React.memo(function SettingRow({
+  icon,
+  iconFamily = "ionicons",
+  iconColor = "#FF5A5F",
+  iconBg,
+  title,
+  subtitle,
+  category,
+  rightText,
+  badge,
+  onPress,
+  isLast = false,
+  isDark = true,
+  colors,
+}: SettingRowProps) {
+  const dividerColor = colors?.divider ?? (isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7");
+  const textPrimary = colors?.textPrimary ?? (isDark ? "#FFFFFF" : "#11141A");
+  const textSecondary = colors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590");
+  const chevronColor = colors?.chevron ?? (isDark ? "#555860" : "#B4B9C2");
+  const resolvedIconBg = iconBg ?? colors?.coralBg ?? (isDark ? "rgba(255, 90, 95, 0.16)" : "rgba(255, 90, 95, 0.09)");
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.modernRow,
+        pressed && {
+          backgroundColor: isDark
+            ? "rgba(255,255,255,0.04)"
+            : "rgba(0,0,0,0.03)",
+        },
+      ]}
+    >
+      <View style={[styles.modernIconBox, { backgroundColor: resolvedIconBg }]}>
+        {iconFamily === "material" ? (
+          <MaterialCommunityIcons name={icon} size={20} color={iconColor} />
+        ) : iconFamily === "feather" ? (
+          <Feather name={icon} size={19} color={iconColor} />
+        ) : (
+          <Ionicons name={icon} size={20} color={iconColor} />
+        )}
+      </View>
+
+      <View
+        style={[
+          styles.modernRowContent,
+          !isLast && {
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: dividerColor,
+          },
+        ]}
+      >
+        <View style={styles.modernRowTextGroup}>
+          <View style={styles.modernRowTitleWrap}>
+            <Text
+              style={[
+                styles.modernRowTitle,
+                { color: textPrimary },
+              ]}
+              numberOfLines={1}
+            >
+              {title}
+            </Text>
+            {category ? (
+              <View
+                style={[
+                  styles.modernCategoryBadge,
+                  {
+                    backgroundColor: isDark
+                      ? "rgba(255,255,255,0.08)"
+                      : "rgba(0,0,0,0.05)",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modernCategoryBadgeText,
+                    { color: textSecondary },
+                  ]}
+                >
+                  {category}
+                </Text>
+              </View>
+            ) : null}
+            {badge ? (
+              <View style={styles.modernHotBadge}>
+                <Text style={styles.modernHotBadgeText}>{badge}</Text>
+              </View>
+            ) : null}
+          </View>
+          {subtitle ? (
+            <Text
+              style={[
+                styles.modernRowSubtitle,
+                { color: textSecondary },
+              ]}
+              numberOfLines={2}
+            >
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+
+        <View style={styles.modernRowRightGroup}>
+          {rightText ? (
+            <Text
+              style={[
+                styles.modernRowRightText,
+                { color: textSecondary },
+              ]}
+            >
+              {rightText}
+            </Text>
+          ) : null}
+          <Ionicons
+            name="chevron-forward"
+            size={17}
+            color={chevronColor}
+          />
+        </View>
+      </View>
+    </Pressable>
+  );
+});
+
 export default function ProfileSettings() {
   const router = useRouter();
 
@@ -97,6 +253,11 @@ export default function ProfileSettings() {
 
   const [tripCount, setTripCount] = useState(4);
 
+  // **@** In-Settings Search states for searching setting features/options
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<TextInput>(null);
+
   const [profile, setProfile] =
     useState<ProfileData>({
       name: "",
@@ -108,8 +269,44 @@ export default function ProfileSettings() {
       type: "",
     });
 
+  // **@** Dynamic theme integration matching system or user preference
+  let themeMode: "dark" | "light" | "system" = "system";
+  let toggleThemeFn: () => void = () => {};
+  try {
+    const themeContext = useThemeToggle();
+    if (themeContext) {
+      themeMode = themeContext.mode;
+      toggleThemeFn = themeContext.toggleTheme;
+    }
+  } catch (e) {
+    // safe fallback
+  }
+
+  const isDark =
+    themeMode === "dark" ||
+    (themeMode === "system" && Appearance.getColorScheme() === "dark");
+
+  // **@** Memoized — only rebuilds when theme changes, not on every render
+  const colors = useMemo(() => ({
+    bg: isDark ? "#0A0A0C" : "#F4F6F9",
+    card: isDark ? "#141418" : "#FFFFFF",
+    cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
+    divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
+    textPrimary: isDark ? "#FFFFFF" : "#11141A",
+    textSecondary: isDark ? "#8E95A2" : "#7E8590",
+    sectionHeader: isDark ? "#8E95A2" : "#7E8590",
+    coral: "#FF5A5F",
+    coralAccent: "#FF5A5F",
+    coralBg: isDark ? "rgba(255, 90, 95, 0.16)" : "rgba(255, 90, 95, 0.09)",
+    chevron: isDark ? "#555860" : "#B4B9C2",
+    logoutBorder: isDark ? "rgba(255, 90, 95, 0.45)" : "rgba(255, 90, 95, 0.4)",
+    logoutBg: isDark ? "rgba(255, 90, 95, 0.08)" : "rgba(255, 90, 95, 0.04)",
+  }), [isDark]);
+
   // =========================================================
-  // LOAD USER
+  // LOAD USER — **@** Optimized: profile loads instantly after nav
+  // animation completes via InteractionManager; trip count is
+  // deferred to a second pass so the UI isn't blocked.
   // =========================================================
 
   useEffect(() => {
@@ -120,7 +317,9 @@ export default function ProfileSettings() {
       return;
     }
 
-    const loadProfile = async () => {
+    // **@** Defer all Firestore work until after the navigation
+    // animation finishes so the transition feels instant.
+    const task = InteractionManager.runAfterInteractions(async () => {
       try {
         let profileData: ProfileData = {
           name:
@@ -195,11 +394,27 @@ export default function ProfileSettings() {
         }
 
         setProfile(profileData);
+      } catch (error) {
+        console.log(
+          "Profile fetch error:",
+          error
+        );
+      } finally {
+        setLoading(false);
+      }
+    });
 
-        // =====================================================
-        // TRIP COUNT
-        // =====================================================
+    return () => task.cancel();
+  }, [authLoading, user]);
 
+  // **@** Trip count is fetched in a SEPARATE effect, further deferred,
+  // so it never blocks the main settings render or initial navigation.
+  useEffect(() => {
+    if (authLoading || !user) return;
+
+    // Small delay to ensure settings page has fully rendered first.
+    const timer = setTimeout(() => {
+      const task = InteractionManager.runAfterInteractions(async () => {
         try {
           const tripsSnap =
             await getDocs(
@@ -234,17 +449,12 @@ export default function ProfileSettings() {
             tripError
           );
         }
-      } catch (error) {
-        console.log(
-          "Profile fetch error:",
-          error
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
+      });
 
-    loadProfile();
+      return () => task.cancel();
+    }, 500);
+
+    return () => clearTimeout(timer);
   }, [authLoading, user]);
 
   // Restore developer mode on this device, matching the web version's
@@ -404,14 +614,23 @@ export default function ProfileSettings() {
       return;
     }
 
-    router.back();
+    // **@** Navigate back, or fallback to home/tabs if history stack is empty
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)" as any);
+    }
   };
 
   // =========================================================
   // LOADING
   // =========================================================
 
-  if (authLoading || loading) {
+  // **@** Show skeleton/loading only while auth is resolving.
+  // Profile data now loads via InteractionManager so we show
+  // the settings layout ASAP with fallback values, rather than
+  // blocking the entire screen behind a spinner.
+  if (authLoading) {
     return (
       <View
         style={styles.loadingContainer}
@@ -443,8 +662,394 @@ export default function ProfileSettings() {
     "https://i.pravatar.cc/800?img=12";
 
   // =========================================================
-  // SETTING ITEM
+  // SETTING ROW (MODERN IOS / SCREENSHOT STYLE)
   // =========================================================
+
+  // **@** SettingRow is now defined outside the component as SettingRowMemo.
+  // This shim passes down the current theme colors so the externally-defined
+  // component renders correctly without needing context access.
+  const SettingRow = useCallback(
+    (props: Omit<SettingRowProps, "isDark" | "colors">) => (
+      <SettingRowMemo
+        {...props}
+        isDark={isDark}
+        colors={colors}
+      />
+    ),
+    [isDark, colors]
+  );
+
+  // **@** Comprehensive list of all searchable settings & features inside Settings
+  type SearchableSetting = {
+    id: string;
+    category: string;
+    title: string;
+    subtitle: string;
+    keywords: string[];
+    icon: any;
+    iconFamily?: "ionicons" | "material" | "feather";
+    iconColor?: string;
+    iconBg?: string;
+    badge?: string;
+    rightText?: string;
+    onPress: () => void;
+  };
+
+  // **@** Memoized so the massive array is only rebuilt when dependencies change
+  const searchableSettings: SearchableSetting[] = useMemo(() => [
+    // ACCOUNT
+    {
+      id: "edit-profile",
+      category: "ACCOUNT",
+      title: "Edit Profile",
+      subtitle: "Personal details, travel bio & contact",
+      keywords: ["edit profile", "profile", "bio", "name", "email", "phone", "avatar", "photo", "username"],
+      icon: "edit-3",
+      iconFamily: "feather" as const,
+      iconColor: "#FF5A5F",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/ProfileEdit" as any);
+      },
+    },
+    {
+      id: "account-security",
+      category: "ACCOUNT",
+      title: "Account & Security",
+      subtitle: "Password, Two-factor auth, session logs",
+      keywords: ["account", "security", "password", "two factor", "2fa", "session", "login", "auth"],
+      icon: "shield-checkmark-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/accounts" as any);
+      },
+    },
+    {
+      id: "privacy-data",
+      category: "ACCOUNT",
+      title: "Privacy & Data",
+      subtitle: "Profile visibility, location logs",
+      keywords: ["privacy", "data", "visibility", "tracking", "location", "logs"],
+      icon: "lock-closed-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Privacy & Data", "Profile visibility and tracking options are kept private.");
+      },
+    },
+    {
+      id: "connected-accounts",
+      category: "ACCOUNT",
+      title: "Connected Accounts",
+      subtitle: "Google, Apple, social integrations",
+      keywords: ["connected accounts", "google", "apple", "social", "integration", "link", "oauth"],
+      icon: "link-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Connected Accounts", "Google authentication is active.");
+      },
+    },
+    {
+      id: "qr-code",
+      category: "ACCOUNT",
+      title: "My QR Code",
+      subtitle: "Share profile & quick connect scanner",
+      keywords: ["qr", "code", "scan", "scanner", "share", "barcode"],
+      icon: "qr-code-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/qr-code" as any);
+      },
+    },
+
+    // TRIP EXPERIENCE
+    {
+      id: "notifications",
+      category: "TRIP EXPERIENCE",
+      title: "Notifications",
+      subtitle: "Trip updates, chat pings, alerts",
+      keywords: ["notifications", "alerts", "ping", "updates", "trip notification", "messages"],
+      icon: "notifications-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/notifications" as any);
+      },
+    },
+    {
+      id: "trip-preferences",
+      category: "TRIP EXPERIENCE",
+      title: "Trip Preferences",
+      subtitle: "Dietary rules, accommodation styles, travel pace",
+      keywords: ["preferences", "diet", "food", "accommodation", "hotel", "travel pace", "style"],
+      badge: "Hot",
+      icon: "compass-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Trip Preferences", "Configure your travel preferences and accommodation styles.");
+      },
+    },
+    {
+      id: "currency-expenses",
+      category: "TRIP EXPERIENCE",
+      title: "Currency & Expenses",
+      subtitle: "Default Split bills, home currency USD",
+      keywords: ["currency", "expenses", "split", "bills", "money", "budget", "cost", "dollar", "usd"],
+      icon: "cash-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/budget" as any);
+      },
+    },
+    {
+      id: "offline-downloads",
+      category: "TRIP EXPERIENCE",
+      title: "Offline & Downloads",
+      subtitle: "Storage management, offline maps",
+      keywords: ["offline", "downloads", "storage", "cache", "offline maps", "data saving"],
+      icon: "cloud-download-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Offline & Downloads", "Offline maps cache and local assets storage management.");
+      },
+    },
+    {
+      id: "maps-navigation",
+      category: "TRIP EXPERIENCE",
+      title: "Maps & Navigation",
+      subtitle: "Offline cache, route preferences",
+      keywords: ["maps", "navigation", "routes", "directions", "gps", "travel route"],
+      icon: "location-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Maps & Navigation", "Navigation route preferences and scenic route toggles.");
+      },
+    },
+    {
+      id: "weather-alerts",
+      category: "TRIP EXPERIENCE",
+      title: "Weather Alerts & AQI",
+      subtitle: "Local weather forecasts & rain warnings",
+      keywords: ["weather", "alerts", "aqi", "air quality", "rain", "temperature", "forecast"],
+      icon: "partly-sunny-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/(tabs)/aqi" as any);
+      },
+    },
+    {
+      id: "my-trips",
+      category: "TRIP EXPERIENCE",
+      title: "My Trips & Itineraries",
+      subtitle: "Explore, manage, and plan adventures",
+      keywords: ["trips", "my trips", "itinerary", "journey", "vacation", "planner"],
+      icon: "airplane-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/trips" as any);
+      },
+    },
+
+    // APP SETTINGS
+    {
+      id: "appearance",
+      category: "APP SETTINGS",
+      title: "Appearance",
+      subtitle: "Theme color, dark mode & light mode",
+      keywords: ["appearance", "theme", "dark mode", "light mode", "color", "display"],
+      rightText:
+        themeMode === "system"
+          ? "System (Auto)"
+          : themeMode === "dark"
+          ? "Dark Mode"
+          : "Light Mode",
+      icon: "color-filter-outline",
+      onPress: () => {
+        toggleThemeFn();
+      },
+    },
+    {
+      id: "language-region",
+      category: "APP SETTINGS",
+      title: "Language & Region",
+      subtitle: "English (US), locale settings",
+      keywords: ["language", "region", "country", "english", "locale", "timezone"],
+      rightText: "English (US)",
+      icon: "globe-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Language & Region", "Language is currently set to English (US).");
+      },
+    },
+    {
+      id: "accessibility",
+      category: "APP SETTINGS",
+      title: "Accessibility",
+      subtitle: "Font scale, high contrast features",
+      keywords: ["accessibility", "font", "contrast", "size", "zoom", "reader"],
+      icon: "accessibility-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Accessibility", "Dynamic font scaling and high contrast features active.");
+      },
+    },
+    {
+      id: "chats",
+      category: "APP SETTINGS",
+      title: "Chats",
+      subtitle: "Theme, Wallpapers, and Chat Settings",
+      keywords: ["chats", "chat", "messages", "wallpaper", "chat theme", "bubbles"],
+      icon: "chatbubble-ellipses-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/chat-settings" as any);
+      },
+    },
+    {
+      id: "general-settings",
+      category: "APP SETTINGS",
+      title: "General Settings",
+      subtitle: "App Theme, Language, and Location",
+      keywords: ["general", "settings", "default", "preferences"],
+      icon: "settings-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/general-settings" as any);
+      },
+    },
+    {
+      id: "ai-features",
+      category: "APP SETTINGS",
+      title: "AI Features",
+      subtitle: "Configure Groq API Key & AI settings",
+      keywords: ["ai", "groq", "artificial intelligence", "api key", "bot", "assistant", "model", "smart"],
+      icon: "sparkles",
+      iconColor: "#00e676",
+      iconBg: isDark ? "rgba(0, 230, 118, 0.16)" : "rgba(0, 230, 118, 0.10)",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/ai-settings" as any);
+      },
+    },
+
+    // SUPPORT
+    {
+      id: "help-support",
+      category: "SUPPORT",
+      title: "Help & Support",
+      subtitle: "Guides, FAQs, 24/7 BunkMates bot",
+      keywords: ["help", "support", "faq", "customer service", "guide", "problem", "ticket"],
+      icon: "chatbubble-question-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/help" as any);
+      },
+    },
+    {
+      id: "feedback",
+      category: "SUPPORT",
+      title: "Send Feedback",
+      subtitle: "Feature requests, report bugs",
+      keywords: ["feedback", "bug", "issue", "suggestion", "report", "feature request"],
+      icon: "megaphone-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/feedback" as any);
+      },
+    },
+    {
+      id: "rate-app",
+      category: "SUPPORT",
+      title: "Rate BunkMates",
+      subtitle: "Show us some love on the store",
+      keywords: ["rate", "review", "stars", "app store", "play store"],
+      icon: "ribbon-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Rate BunkMates", "Thank you for rating BunkMates 5 stars! ⭐⭐⭐⭐⭐");
+      },
+    },
+    {
+      id: "about-app",
+      category: "SUPPORT",
+      title: "About BunkMates",
+      subtitle: "Version 3.4.1 (Stable)",
+      keywords: ["about", "version", "build", "info", "release"],
+      icon: "information-circle-outline",
+      onPress: () => {
+        setIsSearching(false);
+        handleBuildTap();
+        setCurrentPage("about");
+      },
+    },
+    {
+      id: "licenses",
+      category: "SUPPORT",
+      title: "Third-Party Licenses",
+      subtitle: "Open source software & dependencies",
+      keywords: ["license", "licenses", "open source", "attribution", "third party", "libraries"],
+      icon: "license",
+      iconFamily: "material" as const,
+      onPress: () => {
+        setIsSearching(false);
+        setCurrentPage("licenses");
+      },
+    },
+    {
+      id: "invite-friend",
+      category: "SUPPORT",
+      title: "Invite a Friend",
+      subtitle: "Share BunkMates with travel companions",
+      keywords: ["invite", "friend", "referral", "share", "refer"],
+      icon: "person-add-outline",
+      onPress: () => {
+        setIsSearching(false);
+        router.push("/inviteFriend" as any);
+      },
+    },
+    ...(isDeveloper
+      ? [
+          {
+            id: "developer-tools",
+            category: "DEVELOPER",
+            title: "Developer Tools & Sandbox",
+            subtitle: "Access internal tools, sandboxes, and developer routes",
+            keywords: ["developer", "dev", "tools", "sandbox", "debug"],
+            icon: "code-slash-outline",
+            onPress: () => {
+              setIsSearching(false);
+              setCurrentPage("developers");
+            },
+          } as SearchableSetting,
+        ]
+      : []),
+    {
+      id: "logout",
+      category: "ACCOUNT",
+      title: "Log Out",
+      subtitle: "Sign out of your current session",
+      keywords: ["logout", "log out", "sign out", "exit"],
+      icon: "log-out-outline",
+      onPress: () => {
+        setIsSearching(false);
+        Alert.alert("Log Out", "Are you sure you want to log out of BunkMates?", [
+          { text: "Cancel", style: "cancel" },
+          { text: "Log Out", style: "destructive", onPress: handleLogout },
+        ]);
+      },
+    },
+  ], [isDark, isDeveloper, themeMode, toggleThemeFn]);
+
+  // **@** Memoized filter — only recalculates when query or settings list changes
+  const filteredSettings = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return searchableSettings.filter((item) => {
+      const titleMatch = item.title.toLowerCase().includes(q);
+      const subtitleMatch = item.subtitle?.toLowerCase().includes(q);
+      const categoryMatch = item.category.toLowerCase().includes(q);
+      const keywordMatch = item.keywords.some((k) => k.toLowerCase().includes(q));
+      return titleMatch || subtitleMatch || categoryMatch || keywordMatch;
+    });
+  }, [searchQuery, searchableSettings]);
 
   const SettingItem = ({
     icon,
@@ -1590,205 +2195,627 @@ export default function ProfileSettings() {
   // =========================================================
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.bg }]}
+      edges={["top", "left", "right"]}
+    >
       {renderDeveloperPasskeyModal()}
       <StatusBar
-        translucent
-        backgroundColor="transparent"
-        barStyle="light-content"
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={colors.bg}
       />
 
-      <ScrollView
-        style={styles.content}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.contentContainer}
-      >
-        {/* =====================================================
-            HERO
-        ====================================================== */}
-
-        <View style={styles.heroWrapper}>
-          <ImageBackground
-            source={{
-              uri: backgroundImage,
-            }}
-            style={styles.hero}
-            imageStyle={styles.heroImage}
-          >
-            <LinearGradient
-              colors={[
-                "rgba(0,0,0,0.08)",
-                "rgba(0,0,0,0.30)",
-                "rgba(0,0,0,0.80)",
-                "#000000",
+      {/* **@** Top Header: Standard mode with back button, left-aligned title, and action buttons */}
+      {!isSearching ? (
+        <View style={styles.modernHeader}>
+          {/* **@** Left side: Back navigation button + Settings Title (UI/UX aligned) */}
+          <View style={styles.modernHeaderLeft}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.modernHeaderBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
               ]}
-              locations={[0, 0.35, 0.72, 1]}
-              style={styles.heroOverlay}
-            />
+              onPress={handleInternalBack}
+              accessibilityLabel="Go back"
+              hitSlop={6}
+            >
+              <Ionicons
+                name="arrow-back"
+                size={20}
+                color={colors.textPrimary}
+              />
+            </Pressable>
 
-            {/* BACK */}
-            <SafeAreaView style={styles.topSafeArea}>
+            <Text
+              style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}
+              numberOfLines={1}
+            >
+              Settings
+            </Text>
+          </View>
+
+          {/* **@** Action buttons (QR Code & Search) on the right */}
+          <View style={styles.modernHeaderIcons}>
+            {/* QR Code Action Button */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.modernHeaderBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
+              ]}
+              onPress={() => router.push("/qr-code" as any)}
+              accessibilityLabel="QR Code"
+            >
+              <Ionicons
+                name="qr-code-outline"
+                size={20}
+                color={colors.textPrimary}
+              />
+            </Pressable>
+
+            {/* **@** Search Settings Action Button (Opens in-settings search) */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.modernHeaderBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
+              ]}
+              onPress={() => setIsSearching(true)}
+              accessibilityLabel="Search settings"
+            >
+              <Ionicons
+                name="search-outline"
+                size={20}
+                color={colors.textPrimary}
+              />
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.modernSearchHeader}>
+          <View
+            style={[
+              styles.modernSearchInputWrapper,
+              { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            ]}
+          >
+            <Ionicons
+              name="search-outline"
+              size={18}
+              color={colors.textSecondary}
+              style={{ marginRight: 8 }}
+            />
+            <TextInput
+              ref={searchInputRef}
+              style={[styles.modernSearchInput, { color: colors.textPrimary }]}
+              placeholder="Search settings & features..."
+              placeholderTextColor={colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
               <Pressable
-                onPress={() => router.back()}
-                style={({ pressed }) => [
-                  styles.backButton,
-                  pressed && styles.pressed,
-                ]}
+                onPress={() => setSearchQuery("")}
+                hitSlop={8}
+                style={styles.modernSearchClearBtn}
+                accessibilityLabel="Clear search"
               >
                 <Ionicons
-                  name="arrow-back"
-                  size={rs(24)}
-                  color="#ffffff"
+                  name="close-circle"
+                  size={18}
+                  color={colors.textSecondary}
                 />
               </Pressable>
-            </SafeAreaView>
+            )}
+          </View>
 
-            {/* NAME */}
-            <View style={styles.profileHeader}>
-              <Text style={styles.profileName}>
-                {displayName}
-              </Text>
-
-              <Text style={styles.username}>
-                @{username}
-              </Text>
-            </View>
-          </ImageBackground>
-        </View>
-
-        {/* =====================================================
-            ACTION BUTTONS
-        ====================================================== */}
-
-        <View style={styles.actionRow}>
-          {/* TRIPS */}
           <Pressable
             style={({ pressed }) => [
-              styles.actionCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => router.push("/trips" as any)}
-          >
-            <Text style={styles.tripNumber}>{tripCount}</Text>
-
-            <Text style={styles.actionLabel}>Trips</Text>
-          </Pressable>
-
-          {/* EDIT PROFILE */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionCard,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => router.push("/profile" as any)}
-          >
-            <MaterialCommunityIcons
-              name="pencil-outline"
-              size={19}
-              color="#ffffff"
-            />
-
-            <Text style={styles.actionLabel}>Edit Profile</Text>
-          </Pressable>
-
-          {/* QR CODE */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionCard,
-              styles.qrCard,
-              pressed && styles.pressed,
+              styles.modernSearchCancelBtn,
+              pressed && { opacity: 0.7 },
             ]}
             onPress={() => {
-              setQrTab("my");
-              setScanned(false);
-              setCurrentPage("qr");
+              setIsSearching(false);
+              setSearchQuery("");
+              Keyboard.dismiss();
             }}
+            accessibilityLabel="Cancel search"
           >
-            <MaterialCommunityIcons
-              name="qrcode"
-              size={19}
-              color="#ffffff"
-            />
-
-            <Text style={styles.actionLabel}>QR Code</Text>
+            <Text style={[styles.modernSearchCancelText, { color: colors.coral }]}>
+              Cancel
+            </Text>
           </Pressable>
+        </View>
+      )}
+
+      <ScrollView
+        style={styles.modernScroll}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.modernScrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {isSearching ? (
+          <View style={styles.modernSearchResultsContainer}>
+            {searchQuery.trim().length === 0 ? (
+              <View>
+                <Text
+                  style={[
+                    styles.modernSectionHeading,
+                    { color: colors.sectionHeader },
+                  ]}
+                >
+                  SUGGESTED SETTINGS
+                </Text>
+                <View
+                  style={[
+                    styles.modernCardGroup,
+                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                  ]}
+                >
+                  {searchableSettings.slice(0, 6).map((item, idx) => (
+                    <SettingRow
+                      key={item.id}
+                      icon={item.icon}
+                      iconFamily={item.iconFamily}
+                      iconColor={item.iconColor}
+                      iconBg={item.iconBg}
+                      title={item.title}
+                      subtitle={item.subtitle}
+                      category={item.category}
+                      badge={item.badge}
+                      rightText={item.rightText}
+                      isLast={idx === 5}
+                      onPress={item.onPress}
+                    />
+                  ))}
+                </View>
+                <Text style={[styles.modernSearchTip, { color: colors.textSecondary }]}>
+                  Type any setting name, feature, or keyword to find it instantly.
+                </Text>
+              </View>
+            ) : filteredSettings.length > 0 ? (
+              <View>
+                <Text
+                  style={[
+                    styles.modernSectionHeading,
+                    { color: colors.sectionHeader },
+                  ]}
+                >
+                  MATCHING SETTINGS ({filteredSettings.length})
+                </Text>
+                <View
+                  style={[
+                    styles.modernCardGroup,
+                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                  ]}
+                >
+                  {filteredSettings.map((item, idx) => (
+                    <SettingRow
+                      key={item.id}
+                      icon={item.icon}
+                      iconFamily={item.iconFamily}
+                      iconColor={item.iconColor}
+                      iconBg={item.iconBg}
+                      title={item.title}
+                      subtitle={item.subtitle}
+                      category={item.category}
+                      badge={item.badge}
+                      rightText={item.rightText}
+                      isLast={idx === filteredSettings.length - 1}
+                      onPress={item.onPress}
+                    />
+                  ))}
+                </View>
+              </View>
+            ) : (
+              <View style={styles.modernEmptySearchWrap}>
+                <View
+                  style={[
+                    styles.modernEmptySearchIconBox,
+                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                  ]}
+                >
+                  <Ionicons
+                    name="search-outline"
+                    size={30}
+                    color={colors.textSecondary}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.modernEmptySearchTitle,
+                    { color: colors.textPrimary },
+                  ]}
+                >
+                  No settings found
+                </Text>
+                <Text
+                  style={[
+                    styles.modernEmptySearchSubtitle,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  We couldn't find any settings matching "{searchQuery}". Try searching for theme, security, currency, or notifications.
+                </Text>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.modernEmptyClearBtn,
+                    { backgroundColor: colors.coralBg, borderColor: colors.coral },
+                    pressed && { opacity: 0.8 },
+                  ]}
+                  onPress={() => setSearchQuery("")}
+                >
+                  <Text style={[styles.modernEmptyClearBtnText, { color: colors.coral }]}>
+                    Clear Query
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        ) : (
+          <>
+            {/* **@** User Profile Card with Avatar, Name, Email, and Edit Profile Pen Icon */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.modernProfileCard,
+            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            pressed && styles.pressed,
+          ]}
+          onPress={() => router.push("/ProfileEdit" as any)}
+          accessibilityRole="button"
+          accessibilityLabel="Edit Profile"
+        >
+          <Image
+            source={{ uri: profile.photoURL || backgroundImage }}
+            style={styles.modernProfileAvatar}
+          />
+          <View style={styles.modernProfileDetails}>
+            <Text
+              style={[
+                styles.modernProfileName,
+                { color: colors.textPrimary },
+              ]}
+              numberOfLines={1}
+            >
+              {profile.name || user?.displayName || "Sasha Miller"}
+            </Text>
+            <Text
+              style={[
+                styles.modernProfileEmail,
+                { color: colors.textSecondary },
+              ]}
+              numberOfLines={1}
+            >
+              {profile.email ||
+                user?.email ||
+                (profile.username
+                  ? `${profile.username.toLowerCase()}@bunkmates.com`
+                  : "sasha.explorer@bunkmates.com")}
+            </Text>
+          </View>
+
+          {/* **@** Edit Profile Pen Icon Button */}
+          <View style={styles.modernProfileEditBtn}>
+            <Feather name="edit-3" size={19} color="#FF5A5F" />
+          </View>
+        </Pressable>
+
+        {/* =====================================================
+            1. ACCOUNT
+        ====================================================== */}
+        <Text
+          style={[
+            styles.modernSectionHeading,
+            { color: colors.sectionHeader },
+          ]}
+        >
+          ACCOUNT
+        </Text>
+        <View
+          style={[
+            styles.modernCardGroup,
+            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+          ]}
+        >
+          {/* **@** Edit Profile option removed from ACCOUNT as requested (accessible via the pen icon above) */}
+          <SettingRow
+            icon="shield-checkmark-outline"
+            title="Account & Security"
+            subtitle="Password, Two-factor auth, session logs"
+            onPress={() => router.push("/accounts" as any)}
+          />
+          <SettingRow
+            icon="lock-closed-outline"
+            title="Privacy & Data"
+            subtitle="Profile visibility, location logs"
+            onPress={() =>
+              Alert.alert(
+                "Privacy & Data",
+                "Profile visibility and tracking options are kept private."
+              )
+            }
+          />
+          <SettingRow
+            icon="link-outline"
+            title="Connected Accounts"
+            subtitle="Google, Apple, social integrations"
+            isLast
+            onPress={() =>
+              Alert.alert(
+                "Connected Accounts",
+                "Google authentication is active."
+              )
+            }
+          />
         </View>
 
         {/* =====================================================
-            SETTINGS
+            2. TRIP EXPERIENCE
         ====================================================== */}
-
-        <View style={styles.settingsList}>
-          <SettingItem
-            icon="account-circle-outline"
-            title="Accounts"
-            subtitle="User privacy and security"
-            onPress={() => router.push("/accounts" as any)}
+        <Text
+          style={[
+            styles.modernSectionHeading,
+            { color: colors.sectionHeader },
+          ]}
+        >
+          TRIP EXPERIENCE
+        </Text>
+        <View
+          style={[
+            styles.modernCardGroup,
+            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+          ]}
+        >
+          <SettingRow
+            icon="notifications-outline"
+            title="Notifications"
+            subtitle="Trip updates, chat pings, alerts"
+            onPress={() => router.push("/notifications" as any)}
           />
+          <SettingRow
+            icon="compass-outline"
+            title="Trip Preferences"
+            badge="Hot"
+            subtitle="Dietary rules, accommodation styles, travel pace"
+            onPress={() =>
+              Alert.alert(
+                "Trip Preferences",
+                "Configure your travel preferences and accommodation styles."
+              )
+            }
+          />
+          <SettingRow
+            icon="cash-outline"
+            title="Currency & Expenses"
+            subtitle="Default Split bills, home currency USD"
+            onPress={() => router.push("/budget" as any)}
+          />
+          <SettingRow
+            icon="cloud-download-outline"
+            title="Offline & Downloads"
+            subtitle="Storage management, offline maps"
+            onPress={() =>
+              Alert.alert(
+                "Offline & Downloads",
+                "Offline maps cache and local assets storage management."
+              )
+            }
+          />
+          <SettingRow
+            icon="location-outline"
+            title="Maps & Navigation"
+            subtitle="Offline cache, route preferences"
+            onPress={() =>
+              Alert.alert(
+                "Maps & Navigation",
+                "Navigation route preferences and scenic route toggles."
+              )
+            }
+          />
+          <SettingRow
+            icon="partly-sunny-outline"
+            title="Weather Alerts"
+            subtitle="Local weather forecasts & rain warnings"
+            isLast
+            onPress={() => router.push("/(tabs)/aqi" as any)}
+          />
+        </View>
 
-          <SettingItem
-            icon="message-outline"
+        {/* =====================================================
+            3. APP SETTINGS (Includes photo items + existing v2 items)
+        ====================================================== */}
+        <Text
+          style={[
+            styles.modernSectionHeading,
+            { color: colors.sectionHeader },
+          ]}
+        >
+          APP SETTINGS
+        </Text>
+        <View
+          style={[
+            styles.modernCardGroup,
+            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+          ]}
+        >
+          <SettingRow
+            icon="color-filter-outline"
+            title="Appearance"
+            rightText={
+              themeMode === "system"
+                ? "System (Auto)"
+                : themeMode === "dark"
+                ? "Dark Mode"
+                : "Light Mode"
+            }
+            onPress={toggleThemeFn}
+          />
+          <SettingRow
+            icon="globe-outline"
+            title="Language & Region"
+            rightText="English (US)"
+            onPress={() =>
+              Alert.alert(
+                "Language & Region",
+                "Language is currently set to English (US)."
+              )
+            }
+          />
+          <SettingRow
+            icon="accessibility-outline"
+            title="Accessibility"
+            subtitle="Font scale, high contrast features"
+            onPress={() =>
+              Alert.alert(
+                "Accessibility",
+                "Dynamic font scaling and high contrast features active."
+              )
+            }
+          />
+          {/* Preserved v2 feature: Chats */}
+          <SettingRow
+            icon="chatbubble-ellipses-outline"
             title="Chats"
             subtitle="Theme, Wallpapers, and Chat Settings"
             onPress={() => router.push("/chat-settings" as any)}
           />
-
-          <SettingItem
-            icon="cog"
+          {/* Preserved v2 feature: General Settings */}
+          <SettingRow
+            icon="settings-outline"
             title="General Settings"
             subtitle="App Theme, Language, and Location"
             onPress={() => router.push("/general-settings" as any)}
           />
-
-          <SettingItem
-            icon="creation"
+          {/* Preserved v2 feature: AI Features */}
+          <SettingRow
+            icon="sparkles"
+            iconColor="#00e676"
+            iconBg={
+              isDark
+                ? "rgba(0, 230, 118, 0.16)"
+                : "rgba(0, 230, 118, 0.10)"
+            }
             title="AI Features"
             subtitle="Configure Groq API Key & AI settings"
-            iconColor="#00e676"
+            isLast
             onPress={() => router.push("/ai-settings" as any)}
           />
+        </View>
 
-          <SettingItem
-            icon="help-circle-outline"
-            title="Help"
-            subtitle="Contact support and privacy policies"
+        {/* =====================================================
+            4. SUPPORT (Includes photo items + existing v2 items)
+        ====================================================== */}
+        <Text
+          style={[
+            styles.modernSectionHeading,
+            { color: colors.sectionHeader },
+          ]}
+        >
+          SUPPORT
+        </Text>
+        <View
+          style={[
+            styles.modernCardGroup,
+            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+          ]}
+        >
+          <SettingRow
+            icon="chatbubble-question-outline"
+            title="Help & Support"
+            subtitle="Guides, FAQs, 24/7 BunkMates bot"
             onPress={() => router.push("/help" as any)}
           />
-
-          <SettingItem
-            icon="message-alert-outline"
-            title="Send feedback"
-            subtitle="Report technical issues"
+          <SettingRow
+            icon="megaphone-outline"
+            title="Send Feedback"
+            subtitle="Feature requests, report bugs"
             onPress={() => router.push("/feedback" as any)}
           />
-
-          <SettingItem
-            icon="account-plus-outline"
+          <SettingRow
+            icon="ribbon-outline"
+            title="Rate BunkMates"
+            subtitle="Show us some love on the store"
+            onPress={() =>
+              Alert.alert(
+                "Rate BunkMates",
+                "Thank you for rating BunkMates 5 stars! ⭐⭐⭐⭐⭐"
+              )
+            }
+          />
+          <SettingRow
+            icon="information-circle-outline"
+            title="About BunkMates"
+            subtitle="Version 3.4.1 (Stable)"
+            onPress={() => {
+              handleBuildTap();
+              setCurrentPage("about");
+            }}
+          />
+          {/* Preserved v2 feature: Licenses */}
+          <SettingRow
+            icon="license"
+            iconFamily="material"
+            title="Third-Party Licenses"
+            subtitle="Open source software & dependencies"
+            onPress={() => setCurrentPage("licenses")}
+          />
+          {/* Preserved v2 feature: Invite Friend */}
+          <SettingRow
+            icon="person-add-outline"
             title="Invite a Friend"
+            subtitle="Share BunkMates with travel companions"
+            isLast={!isDeveloper}
             onPress={() => router.push("/inviteFriend" as any)}
           />
-
-          <SettingItem
-            icon="information-outline"
-            title="About"
-            subtitle="About BunkMates, policies, and app info"
-            showChevron
-            onPress={() => setCurrentPage("about")}
-          />
-
+          {/* Preserved v2 feature: Developer tools if unlocked */}
           {isDeveloper && (
-            <SettingItem
-              icon="account-cog-outline"
-              title="Testing Features & Other Routes"
+            <SettingRow
+              icon="code-slash-outline"
+              title="Developer Tools & Sandbox"
               subtitle="Access internal tools, sandboxes, and developer routes"
-              showChevron
+              isLast
               onPress={() => setCurrentPage("developers")}
             />
           )}
         </View>
-      </ScrollView>
 
-    </View>
+        {/* =====================================================
+            5. LOG OUT BUTTON
+        ====================================================== */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.modernLogoutBtn,
+            {
+              borderColor: colors.logoutBorder,
+              backgroundColor: colors.logoutBg,
+            },
+            pressed && { opacity: 0.75 },
+          ]}
+          onPress={() => {
+            Alert.alert(
+              "Log Out",
+              "Are you sure you want to log out of BunkMates?",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Log Out",
+                  style: "destructive",
+                  onPress: handleLogout,
+                },
+              ]
+            );
+          }}
+        >
+          <Ionicons name="log-out-outline" size={20} color="#FF5A5F" />
+          <Text style={styles.modernLogoutText}>Log Out</Text>
+        </Pressable>
+          </>
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -2750,7 +3777,7 @@ const styles = StyleSheet.create({
   },
 
   cameraPreview: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     width: "100%",
     height: "100%",
   },
@@ -3282,6 +4309,23 @@ const styles = StyleSheet.create({
     lineHeight: 18,
 
     marginBottom: 28,
+  },
+
+  // **@** Added missing licenseNotice & licenseSectionHeading styles
+  licenseNotice: {
+    color: "#999",
+    fontSize: 11,
+    lineHeight: 18,
+    marginBottom: 20,
+  },
+
+  licenseSectionHeading: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1,
+    marginBottom: 14,
+    marginTop: 10,
   },
 
   libraryItem: {
@@ -3843,5 +4887,352 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
     borderColor: "#1e1e1e",
+  },
+
+  // ==========================================================
+  // **@** MODERN SCREENSHOT-MATCHING SETTINGS STYLES
+  // ==========================================================
+
+  modernHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20, // **@** Equal 20px edge spacing as requested
+    paddingTop: Platform.OS === "android" ? 14 : 8,
+    paddingBottom: 8,
+    minHeight: 56,
+  },
+
+  // **@** Left container holding the back arrow and Settings title
+  modernHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    marginRight: 12,
+  },
+
+  // **@** Settings title positioned to the right of the arrow with clean visual hierarchy
+  modernHeaderTitle: {
+    fontSize: 22,
+    fontWeight: "600", // **@** Refined semi-bold weight for modern UI/UX visual balance
+    letterSpacing: -0.3,
+    marginLeft: 14, // **@** Clear breathing space between arrow and title
+  },
+
+  modernHeaderIcons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  modernHeaderBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  modernTripBadge: {
+    position: "absolute",
+    top: -3,
+    right: -3,
+    backgroundColor: "#FF5A5F",
+    borderRadius: 9,
+    minWidth: 18,
+    height: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+  },
+
+  modernTripBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
+  modernScroll: {
+    flex: 1,
+  },
+
+  modernScrollContent: {
+    paddingBottom: 40,
+  },
+
+  modernProfileCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 20,
+    marginTop: 14,
+    padding: 16,
+    borderRadius: 24,
+    borderWidth: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 1,
+  },
+
+  modernProfileAvatar: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: "#E2E8F0",
+  },
+
+  modernProfileDetails: {
+    flex: 1,
+    marginLeft: 14,
+    justifyContent: "center",
+  },
+
+  modernProfileName: {
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+  },
+
+  modernProfileEmail: {
+    fontSize: 13,
+    marginTop: 3,
+  },
+
+  modernProfileEditBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(255, 90, 95, 0.12)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  modernSectionHeading: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    marginTop: 24,
+    marginBottom: 8,
+    marginHorizontal: 22,
+  },
+
+  modernCardGroup: {
+    marginHorizontal: 20,
+    borderRadius: 22,
+    borderWidth: 1,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+
+  modernRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 16,
+    minHeight: 64,
+  },
+
+  modernIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+
+  modernRowContent: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingRight: 16,
+    paddingVertical: 14,
+  },
+
+  modernRowTextGroup: {
+    flex: 1,
+    justifyContent: "center",
+  },
+
+  modernRowTitleWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  modernRowTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    letterSpacing: -0.2,
+  },
+
+  modernHotBadge: {
+    backgroundColor: "rgba(255, 149, 0, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 149, 0, 0.45)",
+    paddingHorizontal: 7,
+    paddingVertical: 1.5,
+    borderRadius: 9,
+    marginLeft: 7,
+  },
+
+  modernHotBadgeText: {
+    color: "#FF9500",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
+  modernRowSubtitle: {
+    fontSize: 12.5,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+
+  modernRowRightGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 8,
+  },
+
+  modernRowRightText: {
+    fontSize: 13.5,
+    marginRight: 6,
+    fontWeight: "500",
+  },
+
+  modernLogoutBtn: {
+    height: 52,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginHorizontal: 20,
+    marginTop: 28,
+    marginBottom: 44,
+  },
+
+  modernLogoutText: {
+    color: "#FF5A5F",
+    fontWeight: "700",
+    fontSize: 15,
+    marginLeft: 8,
+  },
+
+  // **@** In-Settings Search Styles
+  modernSearchHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20, // **@** Exact 20px padding from screen edge
+    paddingTop: Platform.OS === "android" ? 14 : 8,
+    paddingBottom: 8,
+    gap: 12,
+  },
+
+  modernSearchInputWrapper: {
+    flex: 1,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+  },
+
+  modernSearchInput: {
+    flex: 1,
+    fontSize: 15,
+    paddingVertical: 0,
+    height: "100%",
+  },
+
+  modernSearchClearBtn: {
+    padding: 4,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  modernSearchCancelBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    justifyContent: "center",
+  },
+
+  modernSearchCancelText: {
+    fontSize: 15,
+    fontWeight: "600",
+  },
+
+  modernCategoryBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+
+  modernCategoryBadgeText: {
+    fontSize: 9.5,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+  },
+
+  modernSearchResultsContainer: {
+    paddingTop: 6,
+  },
+
+  modernSearchTip: {
+    fontSize: 12.5,
+    textAlign: "center",
+    marginTop: 18,
+    marginHorizontal: 30,
+    lineHeight: 18,
+  },
+
+  modernEmptySearchWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 56,
+    paddingHorizontal: 28,
+  },
+
+  modernEmptySearchIconBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+
+  modernEmptySearchTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+    marginBottom: 6,
+  },
+
+  modernEmptySearchSubtitle: {
+    fontSize: 13.5,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+
+  modernEmptyClearBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+
+  modernEmptyClearBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

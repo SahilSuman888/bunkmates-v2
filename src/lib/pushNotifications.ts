@@ -1,5 +1,4 @@
 import { Platform } from "react-native";
-import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
 import { doc, updateDoc } from "firebase/firestore";
@@ -7,42 +6,56 @@ import { db } from "./firebase";
 
 export const NOTIFICATION_CHANNEL_ID = "bunkmates-notifications";
 
-/**
- * Configure how notifications behave while BunkMates
- * is currently open.
- */
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// **@** Fixed for Expo Go SDK 53: expo-notifications Android Push support removed from Expo Go.
+// Lazy-load to prevent crash in Expo Go; works fully in dev/prod builds.
+let Notifications: typeof import("expo-notifications") | null = null;
+let handlerConfigured = false;
+
+async function getNotifications() {
+  if (Notifications !== null) return Notifications;
+  try {
+    Notifications = await import("expo-notifications");
+
+    // Configure notification handler once on first load
+    if (!handlerConfigured) {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        }),
+      });
+      handlerConfigured = true;
+    }
+  } catch (e) {
+    console.warn(
+      "[PushNotifications] expo-notifications not available (Expo Go). Notifications disabled."
+    );
+  }
+  return Notifications;
+}
 
 /**
  * Create Android notification channel.
  */
 export async function configureNotificationChannel() {
-  if (Platform.OS !== "android") {
-    return;
-  }
+  if (Platform.OS !== "android") return;
 
-  await Notifications.setNotificationChannelAsync(
-    NOTIFICATION_CHANNEL_ID,
-    {
-      name: "BunkMates Notifications",
-      description: "Chat, friend requests, feedback and other alerts",
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 250, 200, 250],
-      sound: "default",
-      enableVibrate: true,
-      enableLights: true,
-      lockscreenVisibility:
-        Notifications.AndroidNotificationVisibility.PUBLIC,
-    }
-  );
+  const N = await getNotifications();
+  if (!N) return;
+
+  await N.setNotificationChannelAsync(NOTIFICATION_CHANNEL_ID, {
+    name: "BunkMates Notifications",
+    description: "Chat, friend requests, feedback and other alerts",
+    importance: N.AndroidImportance.HIGH,
+    vibrationPattern: [0, 250, 200, 250],
+    sound: "default",
+    enableVibrate: true,
+    enableLights: true,
+    lockscreenVisibility: N.AndroidNotificationVisibility.PUBLIC,
+  });
 }
 
 /**
@@ -59,17 +72,19 @@ export async function registerForPushNotifications(
   uid: string
 ): Promise<string | null> {
   try {
-    if (!uid) {
-      return null;
-    }
+    if (!uid) return null;
 
     /**
      * Push notifications require a physical device.
      */
     if (!Device.isDevice) {
-      console.log(
-        "Push notifications require a physical device."
-      );
+      console.log("Push notifications require a physical device.");
+      return null;
+    }
+
+    const N = await getNotifications();
+    if (!N) {
+      console.log("[PushNotifications] Not available in this environment (Expo Go).");
       return null;
     }
 
@@ -82,8 +97,7 @@ export async function registerForPushNotifications(
     /**
      * Check existing permissions.
      */
-    const { status: existingStatus } =
-      await Notifications.getPermissionsAsync();
+    const { status: existingStatus } = await N.getPermissionsAsync();
 
     let finalStatus = existingStatus;
 
@@ -91,17 +105,12 @@ export async function registerForPushNotifications(
      * Ask user if permission hasn't been granted.
      */
     if (existingStatus !== "granted") {
-      const { status } =
-        await Notifications.requestPermissionsAsync();
-
+      const { status } = await N.requestPermissionsAsync();
       finalStatus = status;
     }
 
     if (finalStatus !== "granted") {
-      console.log(
-        "Notification permission was not granted."
-      );
-
+      console.log("Notification permission was not granted.");
       return null;
     }
 
@@ -113,53 +122,32 @@ export async function registerForPushNotifications(
       Constants.easConfig?.projectId;
 
     if (!projectId) {
-      console.error(
-        "EAS projectId was not found."
-      );
-
+      console.error("EAS projectId was not found.");
       return null;
     }
 
     /**
      * Get Expo Push Token.
      */
-    const token =
-      await Notifications.getExpoPushTokenAsync({
-        projectId,
-      });
-
+    const token = await N.getExpoPushTokenAsync({ projectId });
     const expoPushToken = token.data;
 
-    if (!expoPushToken) {
-      return null;
-    }
+    if (!expoPushToken) return null;
 
     /**
      * Save token in Firestore.
      */
-    await updateDoc(
-      doc(db, "users", uid),
-      {
-        expoPushToken,
-        expoPushTokenUpdatedAt:
-          new Date(),
-        pushNotificationsEnabled: true,
-        pushPlatform: Platform.OS,
-      }
-    );
+    await updateDoc(doc(db, "users", uid), {
+      expoPushToken,
+      expoPushTokenUpdatedAt: new Date(),
+      pushNotificationsEnabled: true,
+      pushPlatform: Platform.OS,
+    });
 
-    console.log(
-      "Expo Push Token:",
-      expoPushToken
-    );
-
+    console.log("Expo Push Token:", expoPushToken);
     return expoPushToken;
   } catch (error) {
-    console.error(
-      "Push notification registration error:",
-      error
-    );
-
+    console.error("Push notification registration error:", error);
     return null;
   }
 }
@@ -167,23 +155,15 @@ export async function registerForPushNotifications(
 /**
  * Remove/disable push notifications for this device.
  */
-export async function disablePushNotifications(
-  uid: string
-) {
+export async function disablePushNotifications(uid: string) {
   if (!uid) return;
 
   try {
-    await updateDoc(
-      doc(db, "users", uid),
-      {
-        expoPushToken: null,
-        pushNotificationsEnabled: false,
-      }
-    );
+    await updateDoc(doc(db, "users", uid), {
+      expoPushToken: null,
+      pushNotificationsEnabled: false,
+    });
   } catch (error) {
-    console.error(
-      "Failed to disable push notifications:",
-      error
-    );
+    console.error("Failed to disable push notifications:", error);
   }
 }

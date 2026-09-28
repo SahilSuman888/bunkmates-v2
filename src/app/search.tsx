@@ -23,7 +23,8 @@ import {
   query,
   where,
 } from "firebase/firestore";
-// ...existing code...
+// **@** Import Animated and FadeIn from react-native-reanimated
+import Animated, { FadeIn } from "react-native-reanimated";
 import { MotiView } from "moti";
 import placesData from "./data/data.json";
 
@@ -164,6 +165,14 @@ export default function SearchScreen() {
         {/* Fixed Search Bar */}
         {searchOpen && (
           <Animated.View entering={FadeIn} style={styles.searchBarContainer}>
+            {/* **@** Back Button */}
+            <Pressable
+              onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/home" as any))}
+              style={{ padding: 4 }}
+              accessibilityLabel="Go Back"
+            >
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </Pressable>
             <View style={styles.searchInputWrapper}>
               <Ionicons name="search-outline" size={20} color="#fff" />
               <TextInput
@@ -196,15 +205,31 @@ export default function SearchScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
-          {/* Search Button (when not open) */}
+          {/* **@** Search Button with Back Button (when not open) */}
           {!searchOpen && (
-            <Pressable
-              onPress={() => setSearchOpen(true)}
-              style={styles.searchButton}
-            >
-              <Ionicons name="search-outline" size={20} color="#888" />
-              <Text style={styles.searchButtonText}>Search Exploration</Text>
-            </Pressable>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <Pressable
+                onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/home" as any))}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: "rgba(255, 255, 255, 0.08)",
+                  justifyContent: "center",
+                  alignItems: "center",
+                }}
+                accessibilityLabel="Go Back"
+              >
+                <Ionicons name="arrow-back" size={22} color="#fff" />
+              </Pressable>
+              <Pressable
+                onPress={() => setSearchOpen(true)}
+                style={[styles.searchButton, { flex: 1, marginBottom: 0 }]}
+              >
+                <Ionicons name="search-outline" size={20} color="#888" />
+                <Text style={styles.searchButtonText}>Search Exploration</Text>
+              </Pressable>
+            </View>
           )}
 
           {searchOpen ? (

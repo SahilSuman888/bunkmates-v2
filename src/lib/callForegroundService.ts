@@ -1,5 +1,18 @@
 import { Platform, AppState, AppStateStatus } from "react-native";
-import * as Notifications from "expo-notifications";
+
+// **@** Fixed for Expo Go SDK 53: expo-notifications Android Push support removed from Expo Go.
+// Lazy-load to prevent crash in Expo Go; works fully in dev/prod builds.
+let Notifications: typeof import("expo-notifications") | null = null;
+
+async function getNotifications() {
+  if (Notifications !== null) return Notifications;
+  try {
+    Notifications = await import("expo-notifications");
+  } catch (e) {
+    console.warn("[CallForegroundService] expo-notifications not available (Expo Go). Notifications disabled.");
+  }
+  return Notifications;
+}
 
 /**
  * CallForegroundService:
@@ -37,21 +50,24 @@ class CallForegroundService {
 
     // On Android, setup high-priority persistent background notification channel
     if (Platform.OS === "android") {
+      const N = await getNotifications();
+      if (!N) return;
+
       try {
-        await Notifications.setNotificationChannelAsync("ongoing_call_foreground", {
+        await N.setNotificationChannelAsync("ongoing_call_foreground", {
           name: "Active Ongoing Call",
-          importance: Notifications.AndroidImportance.MAX,
+          importance: N.AndroidImportance.MAX,
           sound: undefined,
           vibrationPattern: [0],
           enableLights: true,
           lightColor: "#00e6b0",
-          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          lockscreenVisibility: N.AndroidNotificationVisibility.PUBLIC,
           bypassDnd: true,
           showBadge: true,
         });
 
         // Present persistent ongoing call notification
-        await Notifications.scheduleNotificationAsync({
+        await N.scheduleNotificationAsync({
           identifier: `ongoing_call_${callId}`,
           content: {
             title: `Ongoing ${callType === "video" ? "Video" : "Voice"} Call`,
@@ -59,7 +75,7 @@ class CallForegroundService {
             data: { callId, type: "ongoing_call", callType },
             sticky: true,
             autoDismiss: false,
-            priority: Notifications.AndroidNotificationPriority.MAX,
+            priority: N.AndroidNotificationPriority.MAX,
             categoryIdentifier: "ongoing_call",
             color: "#00e6b0",
           },
@@ -86,9 +102,12 @@ class CallForegroundService {
     }
 
     if (this.activeCallInfo && Platform.OS === "android") {
-      try {
-        await Notifications.dismissNotificationAsync(`ongoing_call_${this.activeCallInfo.callId}`);
-      } catch (err) {}
+      const N = await getNotifications();
+      if (N) {
+        try {
+          await N.dismissNotificationAsync(`ongoing_call_${this.activeCallInfo.callId}`);
+        } catch (err) {}
+      }
     }
 
     this.activeCallInfo = null;

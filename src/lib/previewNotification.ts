@@ -1,37 +1,44 @@
-import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
-export async function setupPreviewNotifications() {
-  if (Platform.OS !== "android") {
-    return;
+// **@** Fixed for Expo Go SDK 53: expo-notifications Android Push support removed from Expo Go.
+// Lazy-load to prevent crash in Expo Go; works fully in dev/prod builds.
+let Notifications: typeof import("expo-notifications") | null = null;
+
+async function getNotifications() {
+  if (Notifications !== null) return Notifications;
+  try {
+    Notifications = await import("expo-notifications");
+  } catch (e) {
+    console.warn(
+      "[PreviewNotification] expo-notifications not available (Expo Go). Notifications disabled."
+    );
   }
+  return Notifications;
+}
 
-  await Notifications.setNotificationChannelAsync(
-    "bunkmates-notifications",
-    {
-      name: "BunkMates Notifications",
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      sound: "default",
-      lockscreenVisibility:
-        Notifications.AndroidNotificationVisibility.PUBLIC,
-      enableVibrate: true,
-      enableLights: true,
-    }
-  );
+export async function setupPreviewNotifications() {
+  if (Platform.OS !== "android") return;
 
-  const permissions =
-    await Notifications.getPermissionsAsync();
+  const N = await getNotifications();
+  if (!N) return false;
+
+  await N.setNotificationChannelAsync("bunkmates-notifications", {
+    name: "BunkMates Notifications",
+    importance: N.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    sound: "default",
+    lockscreenVisibility: N.AndroidNotificationVisibility.PUBLIC,
+    enableVibrate: true,
+    enableLights: true,
+  });
+
+  const permissions = await N.getPermissionsAsync();
 
   if (permissions.status !== "granted") {
-    const requested =
-      await Notifications.requestPermissionsAsync();
+    const requested = await N.requestPermissionsAsync();
 
     if (requested.status !== "granted") {
-      console.log(
-        "Notification permission not granted"
-      );
-
+      console.log("Notification permission not granted");
       return false;
     }
   }
@@ -47,11 +54,14 @@ export async function sendPreviewNotification(
     | "like"
     | "general" = "general"
 ) {
+  const N = await getNotifications();
+  if (!N) return;
+
   await setupPreviewNotifications();
 
   const notification = getPreviewNotification(type);
 
-  await Notifications.scheduleNotificationAsync({
+  await N.scheduleNotificationAsync({
     content: {
       title: notification.title,
       body: notification.body,
@@ -63,15 +73,13 @@ export async function sendPreviewNotification(
     },
 
     trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      type: N.SchedulableTriggerInputTypes.TIME_INTERVAL,
       seconds: 2,
     },
   });
 }
 
-function getPreviewNotification(
-  type: string
-) {
+function getPreviewNotification(type: string) {
   switch (type) {
     case "chat":
       return {
