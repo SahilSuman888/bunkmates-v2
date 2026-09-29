@@ -71,11 +71,13 @@ export default function EditProfile() {
     textPrimary: isDark ? "#FFFFFF" : "#11141A",
     textSecondary: isDark ? "#8E95A2" : "#7E8590",
     sectionHeader: isDark ? "#8E95A2" : "#8E8E93",
-    coral: "#FF5A5F",
-    coralBg: isDark ? "rgba(255, 90, 95, 0.16)" : "rgba(255, 90, 95, 0.09)",
-    saveBtnBg: isDark ? "rgba(255, 90, 95, 0.22)" : "#FFEAE8",
-    saveBtnText: "#FF5A5F",
-    iconColor: isDark ? "#9CA3AF" : "#71717A",
+    greyishWhite: isDark ? "#E2E8F0" : "#4B5563", // **@** Greyish-white color matching icons
+    iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+    saveBtnBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+    saveBtnBorder: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
+    saveBtnText: isDark ? "#E2E8F0" : "#4B5563",
+    cameraBadgeBg: isDark ? "#26282E" : "#E2E8F0",
+    iconColor: isDark ? "#E2E8F0" : "#4B5563",
     warningBg: isDark ? "rgba(245, 158, 11, 0.09)" : "#FFF8ED",
     warningBorder: isDark ? "rgba(245, 158, 11, 0.35)" : "#FED7AA",
     warningText: isDark ? "#FCD34D" : "#9A3412",
@@ -216,7 +218,7 @@ export default function EditProfile() {
   if (loading) {
     return (
       <View style={[styles.loader, { backgroundColor: colors.bg }]}>
-        <ActivityIndicator size="large" color={colors.coral} />
+        <ActivityIndicator size="large" color={colors.greyishWhite} />
       </View>
     );
   }
@@ -229,15 +231,19 @@ export default function EditProfile() {
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {/* **@** Top Navigation Header matching reference image: Back Arrow, Title, and Save pill button */}
+        {/* **@** Top Navigation Header: Exact same modern circular back arrow matching Settings page */}
         <View style={styles.header}>
           <Pressable
             onPress={() => router.back()}
-            style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
-            hitSlop={8}
+            style={({ pressed }) => [
+              styles.modernHeaderBtn,
+              { backgroundColor: colors.card, borderColor: colors.cardBorder },
+              pressed && styles.pressed,
+            ]}
+            hitSlop={6}
             accessibilityLabel="Go back"
           >
-            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+            <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
           </Pressable>
 
           <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
@@ -249,7 +255,10 @@ export default function EditProfile() {
             disabled={saving}
             style={({ pressed }) => [
               styles.savePill,
-              { backgroundColor: colors.saveBtnBg },
+              {
+                backgroundColor: colors.saveBtnBg,
+                borderColor: colors.saveBtnBorder,
+              },
               saving && { opacity: 0.6 },
               pressed && styles.pressed,
             ]}
@@ -278,13 +287,13 @@ export default function EditProfile() {
                 }}
                 style={styles.avatar}
               />
-              <View style={[styles.cameraBadge, { borderColor: colors.card, backgroundColor: colors.coral }]}>
-                <Ionicons name="camera" size={16} color="#FFFFFF" />
+              <View style={[styles.cameraBadge, { borderColor: colors.card, backgroundColor: colors.cameraBadgeBg }]}>
+                <Ionicons name="camera" size={16} color={colors.greyishWhite} />
               </View>
             </Pressable>
 
             <Pressable onPress={pickImage} hitSlop={6}>
-              <Text style={[styles.changePhotoText, { color: colors.coral }]}>
+              <Text style={[styles.changePhotoText, { color: colors.greyishWhite }]}>
                 Change Profile Photo
               </Text>
             </Pressable>
@@ -487,26 +496,31 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === "android" ? 10 : 6,
+    paddingTop: Platform.OS === "android" ? 12 : 6,
     paddingBottom: 10,
-    minHeight: 52,
+    minHeight: 56,
   },
-  backBtn: {
-    padding: 6,
-    borderRadius: 20,
-    marginRight: 6,
+  // **@** Exact same circular button styling as Settings page modernHeaderBtn
+  modernHeaderBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
   },
   headerTitle: {
     flex: 1,
     fontSize: 20,
     fontWeight: "700",
     letterSpacing: -0.3,
-    marginLeft: 6,
   },
   savePill: {
     paddingHorizontal: 20,
     paddingVertical: 7,
     borderRadius: 20,
+    borderWidth: 1,
     minWidth: 64,
     alignItems: "center",
     justifyContent: "center",

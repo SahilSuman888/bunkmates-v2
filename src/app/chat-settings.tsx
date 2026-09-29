@@ -12,7 +12,7 @@ import {
   Appearance,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Feather, MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useChatSettings } from "../contexts/ChatSettingsContext";
 import { useThemeToggle } from "../contexts/ThemeContext";
@@ -87,8 +87,16 @@ export default function ChatSettings() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: themeColors.background }]}>
       <View style={[styles.header, { backgroundColor: themeColors.background }]}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Feather name="arrow-left" size={24} color={themeColors.text} />
+        <Pressable
+          onPress={() => router.back()}
+          style={({ pressed }) => [
+            styles.backButton,
+            pressed && { opacity: 0.7 },
+          ]}
+          hitSlop={6}
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="arrow-back" size={20} color={themeColors.text} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: themeColors.text }]}>Chat Settings</Text>
       </View>
@@ -278,7 +286,17 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     marginTop: 10,
   },
-  backButton: { marginRight: 20 },
+  backButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
   headerTitle: { fontSize: 28, fontWeight: "bold", color: "#fff" },
   content: { paddingHorizontal: 20, marginTop: 20 },
   sectionTitle: { color: "#aaa", fontSize: 12, marginBottom: 10 },

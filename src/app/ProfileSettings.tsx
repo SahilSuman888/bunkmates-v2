@@ -31,6 +31,7 @@ import {
   Keyboard, // **@** Added Keyboard for in-settings search dismissal
   Platform, // **@** Added Platform import
   Appearance, // **@** Added Appearance for theme detection
+  Animated, // **@** Added Animated for header mask gradient reveal on scroll
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -101,13 +102,15 @@ type SettingRowProps = {
     textSecondary: string;
     chevron: string;
     coralBg: string;
+    greyishWhite: string;
+    iconBoxBg: string;
   };
 };
 
 const SettingRowMemo = React.memo(function SettingRow({
   icon,
   iconFamily = "ionicons",
-  iconColor = "#FF5A5F",
+  iconColor,
   iconBg,
   title,
   subtitle,
@@ -123,7 +126,10 @@ const SettingRowMemo = React.memo(function SettingRow({
   const textPrimary = colors?.textPrimary ?? (isDark ? "#FFFFFF" : "#11141A");
   const textSecondary = colors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590");
   const chevronColor = colors?.chevron ?? (isDark ? "#555860" : "#B4B9C2");
-  const resolvedIconBg = iconBg ?? colors?.coralBg ?? (isDark ? "rgba(255, 90, 95, 0.16)" : "rgba(255, 90, 95, 0.09)");
+  // **@** All icons are greyish-white by default, not red
+  const defaultIconColor = colors?.greyishWhite ?? (isDark ? "#E2E8F0" : "#4B5563");
+  const finalIconColor = iconColor ?? defaultIconColor;
+  const resolvedIconBg = iconBg ?? (colors?.iconBoxBg ?? (isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)"));
 
   return (
     <Pressable
@@ -139,11 +145,11 @@ const SettingRowMemo = React.memo(function SettingRow({
     >
       <View style={[styles.modernIconBox, { backgroundColor: resolvedIconBg }]}>
         {iconFamily === "material" ? (
-          <MaterialCommunityIcons name={icon} size={20} color={iconColor} />
+          <MaterialCommunityIcons name={icon} size={20} color={finalIconColor} />
         ) : iconFamily === "feather" ? (
-          <Feather name={icon} size={19} color={iconColor} />
+          <Feather name={icon} size={19} color={finalIconColor} />
         ) : (
-          <Ionicons name={icon} size={20} color={iconColor} />
+          <Ionicons name={icon} size={20} color={finalIconColor} />
         )}
       </View>
 
@@ -298,10 +304,25 @@ export default function ProfileSettings() {
     coral: "#FF5A5F",
     coralAccent: "#FF5A5F",
     coralBg: isDark ? "rgba(255, 90, 95, 0.16)" : "rgba(255, 90, 95, 0.09)",
+    greyishWhite: isDark ? "#E2E8F0" : "#4B5563", // **@** Greyish-white icon color as requested
+    iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)", // **@** Subtle neutral icon box
     chevron: isDark ? "#555860" : "#B4B9C2",
     logoutBorder: isDark ? "rgba(255, 90, 95, 0.45)" : "rgba(255, 90, 95, 0.4)",
     logoutBg: isDark ? "rgba(255, 90, 95, 0.08)" : "rgba(255, 90, 95, 0.04)",
   }), [isDark]);
+
+  // **@** Track scroll position for header mask gradient reveal on slide/scroll
+  const scrollY = useRef(new Animated.Value(0)).current;
+
+  const headerMaskOpacity = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, 15, 45],
+        outputRange: [0, 0.7, 1],
+        extrapolate: "clamp",
+      }),
+    [scrollY]
+  );
 
   // =========================================================
   // LOAD USER — **@** Optimized: profile loads instantly after nav
@@ -706,7 +727,7 @@ export default function ProfileSettings() {
       keywords: ["edit profile", "profile", "bio", "name", "email", "phone", "avatar", "photo", "username"],
       icon: "edit-3",
       iconFamily: "feather" as const,
-      iconColor: "#FF5A5F",
+      iconColor: colors.greyishWhite,
       onPress: () => {
         setIsSearching(false);
         router.push("/ProfileEdit" as any);
@@ -922,8 +943,8 @@ export default function ProfileSettings() {
       subtitle: "Configure Groq API Key & AI settings",
       keywords: ["ai", "groq", "artificial intelligence", "api key", "bot", "assistant", "model", "smart"],
       icon: "sparkles",
-      iconColor: "#00e676",
-      iconBg: isDark ? "rgba(0, 230, 118, 0.16)" : "rgba(0, 230, 118, 0.10)",
+      iconColor: colors.greyishWhite,
+      iconBg: colors.iconBoxBg,
       onPress: () => {
         setIsSearching(false);
         router.push("/ai-settings" as any);
@@ -1151,23 +1172,29 @@ export default function ProfileSettings() {
         />
 
         <View style={styles.qrPageContent}>
-          {/* HEADER */}
-          <View style={styles.qrHeader}>
-            <Pressable
-              onPress={handleInternalBack}
-              style={({ pressed }) => [
-                styles.qrBackButton,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Ionicons
-                name="arrow-back"
-                size={rs(19)}
-                color="#ffffff"
-              />
-            </Pressable>
-
-            <Text style={styles.qrPageTitle}>QR Code</Text>
+          {/* **@** Unified Header matching Settings page back arrow */}
+          <View style={styles.modernHeader}>
+            <View style={styles.modernHeaderLeft}>
+              <Pressable
+                onPress={handleInternalBack}
+                style={({ pressed }) => [
+                  styles.modernHeaderBtn,
+                  { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                  pressed && styles.pressed,
+                ]}
+                accessibilityLabel="Go back"
+                hitSlop={6}
+              >
+                <Ionicons
+                  name="arrow-back"
+                  size={20}
+                  color={colors.textPrimary}
+                />
+              </Pressable>
+              <Text style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}>
+                QR Code
+              </Text>
+            </View>
           </View>
 
           {/* TABS */}
@@ -1324,34 +1351,37 @@ export default function ProfileSettings() {
           backgroundColor="#000000"
         />
 
+        {/* **@** Unified Header matching Settings page back arrow */}
+        <View style={styles.modernHeader}>
+          <View style={styles.modernHeaderLeft}>
+            <Pressable
+              onPress={handleInternalBack}
+              style={({ pressed }) => [
+                styles.modernHeaderBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
+              ]}
+              accessibilityLabel="Go back"
+              hitSlop={6}
+            >
+              <Ionicons
+                name="arrow-back"
+                size={20}
+                color={colors.textPrimary}
+              />
+            </Pressable>
+            <Text style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}>
+              About BunkMates
+            </Text>
+          </View>
+        </View>
+
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={
             styles.aboutScroll
           }
         >
-          <Pressable
-            onPress={
-              handleInternalBack
-            }
-            style={
-              styles.aboutBackButton
-            }
-          >
-            <Ionicons
-              name="arrow-back"
-              size={16}
-              color="#999"
-            />
-
-            <Text
-              style={
-                styles.aboutBackText
-              }
-            >
-              BACK
-            </Text>
-          </Pressable>
 
           <View
             style={styles.betaCard}
@@ -1672,40 +1702,37 @@ export default function ProfileSettings() {
           backgroundColor="#000000"
         />
 
+        {/* **@** Unified Header matching Settings page back arrow */}
+        <View style={styles.modernHeader}>
+          <View style={styles.modernHeaderLeft}>
+            <Pressable
+              onPress={handleInternalBack}
+              style={({ pressed }) => [
+                styles.modernHeaderBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
+              ]}
+              accessibilityLabel="Go back"
+              hitSlop={6}
+            >
+              <Ionicons
+                name="arrow-back"
+                size={20}
+                color={colors.textPrimary}
+              />
+            </Pressable>
+            <Text style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}>
+              App Information
+            </Text>
+          </View>
+        </View>
+
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={
             styles.appInfoScroll
           }
         >
-          <View
-            style={
-              styles.appInfoHeader
-            }
-          >
-            <Pressable
-              onPress={
-                handleInternalBack
-              }
-              style={
-                styles.appInfoBack
-              }
-            >
-              <Ionicons
-                name="arrow-back"
-                size={18}
-                color="#aaa"
-              />
-            </Pressable>
-
-            <Text
-              style={
-                styles.appInfoHeaderTitle
-              }
-            >
-              App Info
-            </Text>
-          </View>
 
           <View
             style={
@@ -1999,23 +2026,35 @@ export default function ProfileSettings() {
         {renderDeveloperPasskeyModal()}
         <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
+        {/* **@** Unified Header matching Settings page back arrow */}
+        <View style={styles.modernHeader}>
+          <View style={styles.modernHeaderLeft}>
+            <Pressable
+              onPress={handleInternalBack}
+              style={({ pressed }) => [
+                styles.modernHeaderBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
+              ]}
+              accessibilityLabel="Go back"
+              hitSlop={6}
+            >
+              <Ionicons
+                name="arrow-back"
+                size={20}
+                color={colors.textPrimary}
+              />
+            </Pressable>
+            <Text style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}>
+              Developer Tools
+            </Text>
+          </View>
+        </View>
+
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.developerScroll}
         >
-          <View style={styles.developerHeader}>
-            <Pressable
-              onPress={handleInternalBack}
-              style={({ pressed }) => [
-                styles.developerBackButton,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Ionicons name="arrow-back" size={19} color="#ffffff" />
-            </Pressable>
-
-            <Text style={styles.developerHeaderTitle}>Developer Tools</Text>
-          </View>
 
           <View style={styles.developerBadge}>
             <Text style={styles.developerBadgeText}>🧑‍💻 Developer Mode Active</Text>
@@ -2104,32 +2143,37 @@ export default function ProfileSettings() {
           backgroundColor="#000000"
         />
 
+        {/* **@** Unified Header matching Settings page back arrow */}
+        <View style={styles.modernHeader}>
+          <View style={styles.modernHeaderLeft}>
+            <Pressable
+              onPress={handleInternalBack}
+              style={({ pressed }) => [
+                styles.modernHeaderBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
+              ]}
+              accessibilityLabel="Go back"
+              hitSlop={6}
+            >
+              <Ionicons
+                name="arrow-back"
+                size={20}
+                color={colors.textPrimary}
+              />
+            </Pressable>
+            <Text style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}>
+              Open Source Licenses
+            </Text>
+          </View>
+        </View>
+
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={
             styles.licenseScroll
           }
         >
-          <Pressable
-            onPress={
-              handleInternalBack
-            }
-            style={styles.licenseBack}
-          >
-            <Ionicons
-              name="arrow-back"
-              size={18}
-              color="#aaa"
-            />
-
-            <Text
-              style={
-                styles.licenseBackText
-              }
-            >
-              Back
-            </Text>
-          </Pressable>
 
           <Text
             style={
@@ -2331,11 +2375,34 @@ export default function ProfileSettings() {
         </View>
       )}
 
-      <ScrollView
+      {/* **@** Header Mask Gradient that appears when sliding/scrolling the settings list */}
+      <Animated.View
+        style={[
+          styles.modernHeaderGradientMask,
+          { opacity: headerMaskOpacity },
+        ]}
+        pointerEvents="none"
+      >
+        <LinearGradient
+          colors={[
+            colors.bg,
+            isDark ? "rgba(10, 10, 12, 0.85)" : "rgba(244, 246, 249, 0.85)",
+            "transparent",
+          ]}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
+
+      <Animated.ScrollView
         style={styles.modernScroll}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.modernScrollContent}
         keyboardShouldPersistTaps="handled"
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: true }
+        )}
+        scrollEventThrottle={16}
       >
         {isSearching ? (
           <View style={styles.modernSearchResultsContainer}>
@@ -2497,9 +2564,9 @@ export default function ProfileSettings() {
             </Text>
           </View>
 
-          {/* **@** Edit Profile Pen Icon Button */}
-          <View style={styles.modernProfileEditBtn}>
-            <Feather name="edit-3" size={19} color="#FF5A5F" />
+          {/* **@** Edit Profile Pen Icon Button with greyish-white icon */}
+          <View style={[styles.modernProfileEditBtn, { backgroundColor: colors.iconBoxBg }]}>
+            <Feather name="edit-3" size={19} color={colors.greyishWhite} />
           </View>
         </Pressable>
 
@@ -2689,15 +2756,9 @@ export default function ProfileSettings() {
             subtitle="App Theme, Language, and Location"
             onPress={() => router.push("/general-settings" as any)}
           />
-          {/* Preserved v2 feature: AI Features */}
+          {/* Preserved v2 feature: AI Features with greyish-white icon */}
           <SettingRow
             icon="sparkles"
-            iconColor="#00e676"
-            iconBg={
-              isDark
-                ? "rgba(0, 230, 118, 0.16)"
-                : "rgba(0, 230, 118, 0.10)"
-            }
             title="AI Features"
             subtitle="Configure Groq API Key & AI settings"
             isLast
@@ -2809,12 +2870,12 @@ export default function ProfileSettings() {
             );
           }}
         >
-          <Ionicons name="log-out-outline" size={20} color="#FF5A5F" />
+          <Ionicons name="log-out-outline" size={20} color={colors.greyishWhite} />
           <Text style={styles.modernLogoutText}>Log Out</Text>
         </Pressable>
           </>
         )}
-      </ScrollView>
+      </Animated.ScrollView>
     </SafeAreaView>
   );
 }
@@ -2988,18 +3049,22 @@ function DevToolSandboxView({
       showsVerticalScrollIndicator={false}
       contentContainerStyle={styles.developerScroll}
     >
-      <View style={styles.developerHeader}>
-        <Pressable
-          onPress={onBack}
-          style={({ pressed }) => [
-            styles.developerBackButton,
-            pressed && styles.pressed,
-          ]}
-        >
-          <Ionicons name="arrow-back" size={19} color="#ffffff" />
-        </Pressable>
-
-        <Text style={styles.developerHeaderTitle}>{getToolTitle()}</Text>
+      {/* **@** Unified Header matching Settings page back arrow */}
+      <View style={styles.modernHeader}>
+        <View style={styles.modernHeaderLeft}>
+          <Pressable
+            onPress={onBack}
+            style={({ pressed }) => [
+              styles.modernHeaderBtn,
+              { backgroundColor: colors.card, borderColor: colors.cardBorder },
+              pressed && styles.pressed,
+            ]}
+            hitSlop={6}
+          >
+            <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+          </Pressable>
+          <Text style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}>{getToolTitle()}</Text>
+        </View>
       </View>
 
       {/* ACTIVE TOAST NOTIFICATION */}
@@ -4934,6 +4999,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
+  // **@** Header mask gradient pinned under header edge that reveals on scroll/slide
+  modernHeaderGradientMask: {
+    position: "absolute",
+    top: Platform.OS === "android" ? 64 : 58,
+    left: 0,
+    right: 0,
+    height: 28,
+    zIndex: 10,
+  },
+
   modernTripBadge: {
     position: "absolute",
     top: -3,
@@ -5004,7 +5079,8 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "rgba(255, 90, 95, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
     justifyContent: "center",
     alignItems: "center",
   },
