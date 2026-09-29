@@ -25,6 +25,9 @@ interface UserProviderProps {
   children: ReactNode;
 }
 
+import { recordDeviceSessionInFirestore } from '../utils/sessionTracker';
+import { AppState } from 'react-native';
+
 export const UserProvider = ({ children }: UserProviderProps) => {
   const [user, setUser] = useState<any>(null);
   const [userData, setUserData] = useState<any>(null);
@@ -34,6 +37,7 @@ export const UserProvider = ({ children }: UserProviderProps) => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
+        recordDeviceSessionInFirestore(firebaseUser).catch(console.error);
       } else {
         setUser(null);
         setUserData(null);
@@ -43,6 +47,20 @@ export const UserProvider = ({ children }: UserProviderProps) => {
 
     return () => unsubscribe();
   }, []);
+
+  // **@** Keep session active whenever app comes to foreground on any device
+  useEffect(() => {
+    if (!user?.uid) return;
+    recordDeviceSessionInFirestore(user).catch(console.error);
+
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && user?.uid) {
+        recordDeviceSessionInFirestore(user).catch(console.error);
+      }
+    });
+
+    return () => sub.remove();
+  }, [user]);
 
   // fetch the Firestore document whenever an authenticated user is available
   useEffect(() => {
