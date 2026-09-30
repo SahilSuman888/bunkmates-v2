@@ -1,7 +1,7 @@
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "./firebase";
 import { sendOneSignalPush } from "./onesignal";
-import { CALL_CHANNEL_ID } from "./callNotifications";
+import { CALL_CHANNEL_ID, MISSED_CALL_CHANNEL_ID } from "./callNotifications";
 
 /**
  * Send push notification and write Firestore in-app notification for 1:1 chat message
@@ -164,7 +164,7 @@ export async function sendCallPushAndFirestoreNotification({
     contents: { en: callSubtitle }, // Screenshot 1: "Incoming voice call"
     largeIcon: callerAvatar || "https://i.pravatar.cc/150", // Screenshot 1: Large contact avatar
     androidChannelId: CALL_CHANNEL_ID,
-    androidSound: "default",
+    androidSound: "call_ringtone",
     androidAccentColor: "FF00E6B0",
     priority: 10,
     contentAvailable: true,

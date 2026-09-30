@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 
 export const useNotifications = () => {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-  const [notification, setNotification] = useState<Notifications.Notification | null>(null);
+  const [notification, setNotification] = useState<any | null>(null);
   const [permissionGranted, setPermissionGranted] = useState(false);
 
   useEffect(() => {
@@ -57,7 +57,7 @@ export const useNotifications = () => {
           const token = await registerForPushNotificationsAsync();
           if (token) setExpoPushToken(token);
         } catch (e) {
-          console.warn('Push registration failed or is not supported in this environment:', e?.message || e);
+          console.warn('Push registration failed or is not supported in this environment:', (e as any)?.message || e);
         }
 
         subscription = Notifications.addNotificationReceivedListener((notif: any) => {

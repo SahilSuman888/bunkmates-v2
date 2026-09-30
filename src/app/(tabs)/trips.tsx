@@ -641,7 +641,7 @@ export default function TripsScreen() {
         .toLowerCase()
         .replace(/[^a-z0-9]/g, "_")
         .slice(0, 30);
-      const filePath = `${FileSystem.cacheDirectory}${cleanFileName}.ics`;
+      const filePath = `${(FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory || ""}${cleanFileName}.ics`;
 
       await FileSystem.writeAsStringAsync(filePath, icsString, {
         encoding: FileSystem.EncodingType.UTF8,
@@ -2057,6 +2057,11 @@ const s = StyleSheet.create({
   calDayPillToday: {
     backgroundColor: "#ffffff",
     borderColor: "#ffffff",
+  },
+  calDayName: {
+    color: "rgba(255, 255, 255, 0.6)",
+    fontSize: 11,
+    fontWeight: "700",
   },
   calDayNameToday: { color: "#000000", fontWeight: "900" },
   calDayNum: {

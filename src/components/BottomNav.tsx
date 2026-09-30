@@ -70,7 +70,7 @@ export default function BottomNav() {
           // works, and strip the group name if present.  `router.push` behaves
           // more predictably when switching between tabs.
           const path = route.replace("/(tabs)", "");
-          router.push(path);
+          router.push(path as any);
         }}
         style={[styles.navItem, active && styles.activeItemPill]}
       >

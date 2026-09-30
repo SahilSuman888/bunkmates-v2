@@ -8,9 +8,9 @@ onSnapshot
 
 import {db} from "../lib/firebase"
 
-export const useUserGroups = (userId) => {
+export const useUserGroups = (userId?: string | null) => {
 
-const [groups,setGroups] = useState([])
+const [groups,setGroups] = useState<any[]>([])
 const [loading,setLoading] = useState(true)
 
 useEffect(()=>{

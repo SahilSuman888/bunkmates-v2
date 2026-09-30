@@ -1,3 +1,4 @@
+import { Platform, NativeModules } from "react-native";
 import Constants from "expo-constants";
 import { router } from "expo-router";
 import { doc, updateDoc } from "firebase/firestore";
@@ -56,7 +57,20 @@ export function initOneSignal() {
     OneSignal.initialize(ONESIGNAL_APP_ID);
 
     // Prompt user for push notification permission
-    OneSignal.Notifications.requestPermission(true);
+    OneSignal.Notifications.requestPermission(true).then((granted: boolean) => {
+      console.log("[OneSignal] Push permission status:", granted);
+      try {
+        if (OneSignal.User?.pushSubscription?.optIn) {
+          OneSignal.User.pushSubscription.optIn();
+        }
+      } catch (e) {}
+    });
+
+    try {
+      if (OneSignal.User?.pushSubscription?.optIn) {
+        OneSignal.User.pushSubscription.optIn();
+      }
+    } catch (e) {}
 
     // 1. Foreground notification display listener
     OneSignal.Notifications.addEventListener("foregroundWillDisplay", (event: any) => {
@@ -190,6 +204,13 @@ export async function sendOneSignalPush({
   if (targetIds.length === 0) return;
 
   try {
+    const isCallType = data?.type === "call" || data?.type === "group_call" || data?.type === "incoming_call";
+    const resolvedSound = androidSound && androidSound !== "default"
+      ? androidSound
+      : isCallType
+      ? "call_ringtone"
+      : "default";
+
     const payload: any = {
       app_id: ONESIGNAL_APP_ID,
       include_aliases: {
@@ -200,9 +221,9 @@ export async function sendOneSignalPush({
       contents,
       data: data || {},
       priority,
-      android_sound: "default",
+      android_sound: resolvedSound,
       android_visibility: 1, // Show on lockscreen
-      ios_sound: "default",
+      ios_sound: isCallType ? "call_ringtone.wav" : "default",
     };
 
     if (largeIcon) {
@@ -214,9 +235,7 @@ export async function sendOneSignalPush({
     }
 
     // Route to dedicated Android NotificationChannel configured in client code
-    if (androidChannelId) {
-      payload.existing_android_channel_id = androidChannelId;
-    }
+    payload.existing_android_channel_id = androidChannelId || "bunkmates_default_channel_v1";
 
     if (typeof ttl === "number") {
       payload.ttl = ttl;
@@ -250,6 +269,25 @@ export async function sendOneSignalPush({
   } catch (err) {
     console.error("[OneSignal REST] Push request failed:", err);
   }
+}
+
+export async function getNativeCallAction(): Promise<{
+  action?: string | null;
+  callId?: string | null;
+  callType?: string | null;
+  callerName?: string | null;
+} | null> {
+  if (Platform.OS === "android" && NativeModules.BunkMatesRingtone?.getInitialCallAction) {
+    try {
+      const res = await NativeModules.BunkMatesRingtone.getInitialCallAction();
+      if (res && res.action && res.callId) {
+        return res;
+      }
+    } catch (e) {
+      console.warn("[OneSignal] getNativeCallAction error:", e);
+    }
+  }
+  return null;
 }
 
 export { OneSignal };

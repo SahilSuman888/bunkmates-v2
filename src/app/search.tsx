@@ -17,6 +17,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useUser } from "../contexts/UserContext";
 import { db } from "../lib/firebase";
+import Animated, { FadeIn } from "react-native-reanimated";
 import {
   collection,
   getDocs,
@@ -37,7 +38,7 @@ export default function SearchScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("all");
-  const [results, setResults] = useState({ users: [], places: [], trips: [] });
+  const [results, setResults] = useState<{ users: any[]; places: any[]; trips: any[] }>({ users: [], places: [], trips: [] });
   const [loading, setLoading] = useState(false);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [selectedItem, setSelectedItem] = useState<any>(null);

@@ -16,7 +16,7 @@ export const pickImage = async () => {
     base64: true,
   });
 
-  if (!result.cancelled) {
+  if (!result.canceled) {
     return result;
   }
   return null;
@@ -37,7 +37,7 @@ export const takePhoto = async () => {
     base64: true,
   });
 
-  if (!result.cancelled) {
+  if (!result.canceled) {
     return result;
   }
   return null;

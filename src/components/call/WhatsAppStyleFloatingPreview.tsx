@@ -323,7 +323,7 @@ export default function WhatsAppStyleFloatingPreview({
             hitSlop={8}
           >
             <MaterialCommunityIcons
-              name="wand"
+              name={"wand" as any}
               size={14}
               color={filtersActive ? "#25D366" : "#ffffff"}
             />

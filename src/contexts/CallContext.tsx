@@ -115,6 +115,7 @@ interface CallContextType {
   expandCall: () => void;
   sendReaction: (emoji: string) => Promise<void>;
   loadAndShowCall: (callId: string) => Promise<void>;
+  acceptCallById: (callId: string) => Promise<void>;
   hasPermissions: boolean;
   requestPermissions: () => Promise<boolean>;
 }
@@ -844,6 +845,101 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [activeCall, requestPermissions, triggerHaptic]);
 
+  // 8b. Accept Incoming Call directly by Call ID (for notification action click when app is opened)
+  const acceptCallById = useCallback(
+    async (callId: string) => {
+      if (!callId) return;
+      try {
+        console.log("[CallContext] acceptCallById connecting directly:", callId);
+        triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+        AudioRouteManager.stopRingtone();
+        cancelCallNotification(callId);
+        await requestPermissions();
+
+        const snap = await getDoc(doc(db, "calls", callId));
+        if (!snap.exists()) return;
+        const data = snap.data();
+        if (data.status === "ended" || data.status === "declined") {
+          console.log("[CallContext] Call is no longer active:", callId, data.status);
+          return;
+        }
+
+        const isVideoCall = data.callType === "video";
+        const initialRoute: AudioRoute = isVideoCall ? "speaker" : "earpiece";
+        setIsSpeaker(isVideoCall);
+        setAudioRouteState(initialRoute);
+
+        currentCallIdRef.current = snap.id;
+        const callObj: ActiveCallData = {
+          id: snap.id,
+          callerId: data.callerId,
+          callerName: data.callerName || "BunkMate",
+          callerAvatar: data.callerAvatar || "https://i.pravatar.cc/150",
+          callerHandle: data.callerHandle || "traveler",
+          receiverId: data.receiverId,
+          receiverName: data.receiverName || "BunkMate",
+          receiverAvatar: data.receiverAvatar || "https://i.pravatar.cc/150",
+          receiverHandle: data.receiverHandle || "traveler",
+          callType: data.callType || "audio",
+          status: "accepted",
+          isIncoming: data.callerId !== user?.uid,
+          createdAt: data.createdAt,
+          acceptedAt: serverTimestamp(),
+          isGroupCall: data.isGroupCall || false,
+          groupName: data.groupName || undefined,
+          groupMembers: data.groupMembers || [],
+        };
+
+        setActiveCall(callObj);
+        setIsMinimized(false);
+
+        AudioRouteManager.start(isVideoCall ? "video" : "audio");
+        AudioRouteManager.setRoute(initialRoute);
+
+        callForegroundService.start(
+          snap.id,
+          data.callerName || "BunkMate",
+          data.callType || "audio"
+        );
+
+        const rtc = new WebRTCManager(snap.id);
+        rtcRef.current = rtc;
+
+        rtc.setOnLocalStream((stream) => {
+          console.log("[CallContext] Local stream set in callee (by ID)");
+          setLocalStream(stream);
+        });
+
+        rtc.setOnRemoteStream((stream) => {
+          console.log("[CallContext] Remote stream received in callee (by ID)");
+          setRemoteStream(stream);
+          setConnectionQuality("good");
+        });
+
+        rtc.setOnConnectionStateChange((state) => {
+          console.log(`[CallContext] Callee connection state changed (by ID): ${state}`);
+          if (state === "connected") setConnectionQuality("good");
+          else if (state === "connecting") setConnectionQuality("connecting");
+          else if (state === "disconnected" || state === "failed")
+            setConnectionQuality("poor");
+        });
+
+        await rtc.startCallee(isVideoCall);
+
+        await updateDoc(doc(db, "calls", snap.id), {
+          status: "accepted",
+          acceptedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+
+        setConnectionQuality("good");
+      } catch (e) {
+        console.error("[CallContext] acceptCallById error:", e);
+      }
+    },
+    [user?.uid, requestPermissions, triggerHaptic]
+  );
+
   // 9. Decline Incoming Call
   const declineCall = useCallback(
     async (reason?: string) => {
@@ -1016,6 +1112,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         expandCall,
         sendReaction,
         loadAndShowCall,
+        acceptCallById,
         hasPermissions,
         requestPermissions,
       }}

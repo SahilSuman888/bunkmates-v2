@@ -98,7 +98,7 @@ export default function GeneralSettings() {
             <Text style={[styles.settingSubtitle, { color: themeColors.textSecondary }]}>{accent.charAt(0).toUpperCase() + accent.slice(1)}</Text>
           </View>
           <View style={styles.valueContainer}>
-            <View style={[styles.bgCircle, { backgroundColor: ACCENT_COLORS[accent] || '#fff', borderWidth: 0 }]} />
+            <View style={[styles.bgCircle, { backgroundColor: (ACCENT_COLORS as any)[accent] || '#fff', borderWidth: 0 }]} />
             <Feather name="chevron-right" size={18} color="#888" />
           </View>
         </Pressable>
@@ -189,7 +189,7 @@ export default function GeneralSettings() {
         />
         <View style={styles.accentModalContent}>
           <View style={styles.handle} />
-          <View style={[styles.accentPreview, { backgroundColor: ACCENT_COLORS[accent] || "#fff" }]}
+          <View style={[styles.accentPreview, { backgroundColor: (ACCENT_COLORS as any)[accent] || "#fff" }]}
           >
             <Text style={styles.accentPreviewText}>THIS IS THE ACCENT PREVIEW</Text>
           </View>

@@ -1,19 +1,95 @@
 {
   "expo": {
-    "name": "bunkmates-v2",
+    "name": "BunkMates",
     "slug": "bunkmates-v2",
     "version": "1.0.0",
+    "description": "BunkMates - Ultimate travel and trip planning app for friends, trips, and bunking together.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "bunkmates",
     "owner": "mohithac",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.bm.bunkmates",
+      "infoPlist": {
+        "LSApplicationCategoryType": "public.app-category.travel"
+      },
+      "associatedDomains": [
+        "applinks:bunk-mates-beccc.firebaseapp.com",
+        "applinks:bunk-mates-beccc.web.app",
+        "applinks:bunk-mates.vercel.app",
+        "applinks:app.bunkmates.xyz",
+        "applinks:bunkmates.xyz"
+      ]
     },
     "android": {
       "package": "com.bm.bunkmates",
       "googleServicesFile": "./google-services.json",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "bunk-mates-beccc.firebaseapp.com"
+            },
+            {
+              "scheme": "https",
+              "host": "bunk-mates-beccc.web.app"
+            },
+            {
+              "scheme": "https",
+              "host": "bunk-mates.vercel.app"
+            },
+            {
+              "scheme": "https",
+              "host": "app.bunkmates.xyz"
+            },
+            {
+              "scheme": "https",
+              "host": "bunkmates.xyz"
+            },
+            {
+              "scheme": "http",
+              "host": "bunk-mates-beccc.firebaseapp.com"
+            },
+            {
+              "scheme": "http",
+              "host": "bunk-mates-beccc.web.app"
+            },
+            {
+              "scheme": "http",
+              "host": "bunk-mates.vercel.app"
+            },
+            {
+              "scheme": "http",
+              "host": "app.bunkmates.xyz"
+            },
+            {
+              "scheme": "http",
+              "host": "bunkmates.xyz"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "geo"
+            }
+          ],
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ]
+        }
+      ],
       "permissions": [
         "NOTIFICATIONS",
         "CAMERA",

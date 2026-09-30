@@ -23,6 +23,7 @@ import {
   Text,
   View,
   Alert,
+  Platform,
   Modal,
   TextInput,
 } from "react-native";
@@ -3843,5 +3844,20 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
     borderColor: "#1e1e1e",
+  },
+
+  licenseNotice: {
+    color: "#a0a0a0",
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 20,
+  },
+
+  licenseSectionHeading: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    marginBottom: 12,
   },
 });

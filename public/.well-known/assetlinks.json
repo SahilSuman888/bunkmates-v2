@@ -1,0 +1,24 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.bm.bunkmates",
+      "sha256_cert_fingerprints": [
+        "37:89:53:5B:D7:C0:FA:EE:87:BF:BF:CE:EE:5C:8A:23:8C:E7:1A:A7:7A:34:4E:43:8C:94:12:4F:D7:FE:48:42",
+        "FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C",
+        "E9:A0:08:DE:03:6E:F1:67:13:52:7C:32:FF:3B:DE:10:5C:4E:86:4D:B2:B9:3C:60:59:24:17:B3:CD:BA:FF:22"
+      ]
+    }
+  },
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.bm.bunkmate",
+      "sha256_cert_fingerprints": [
+        "E9:A0:08:DE:03:6E:F1:67:13:52:7C:32:FF:3B:DE:10:5C:4E:86:4D:B2:B9:3C:60:59:24:17:B3:CD:BA:FF:22"
+      ]
+    }
+  }
+]

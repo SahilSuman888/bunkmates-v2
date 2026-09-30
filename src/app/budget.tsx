@@ -56,7 +56,7 @@ const CATEGORIES = [
 
 export default function BudgetScreen() {
   const [authInitialized, setAuthInitialized] = useState(false);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [showModal, setShowModal] = useState(false);

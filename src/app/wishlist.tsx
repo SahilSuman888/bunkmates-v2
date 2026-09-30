@@ -252,7 +252,7 @@ function Icon({ name, text }: { name: string; text: string }) {
       style={styles.iconInfo}
     >
       <View style={styles.iconBox}>
-        <MaterialCommunityIcons name={name} size={20} color="#00f721" />
+        <MaterialCommunityIcons name={name as any} size={20} color="#00f721" />
       </View>
       <Text style={styles.iconText}>{text}</Text>
     </MotiView>

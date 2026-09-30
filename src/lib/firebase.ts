@@ -1,9 +1,11 @@
 import { initializeApp, getApps } from "firebase/app";
 import {
   initializeAuth,
+  // @ts-ignore
   getReactNativePersistence
 } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const firebaseConfig = {
@@ -26,6 +28,7 @@ export const auth = initializeAuth(app, {
 });
 
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 
 // Note: For React Native, Firebase Messaging should be initialized using:
 // import messaging from '@react-native-firebase/messaging';

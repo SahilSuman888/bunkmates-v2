@@ -169,7 +169,7 @@ export default function PlaceDetails() {
             {/* Image dots */}
             {place.images.length > 1 && (
               <View style={styles.imageDots}>
-                {place.images.map((_, index) => (
+                {place.images.map((_: any, index: number) => (
                   <Pressable
                     key={index}
                     onPress={() => setCurrentImageIndex(index)}

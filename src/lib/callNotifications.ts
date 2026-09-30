@@ -1,7 +1,7 @@
 import { Platform, NativeModules } from "react-native";
 import Notifications from "./safeNotifications";
 
-export const CALL_CHANNEL_ID = "bunkmates-incoming-calls-v5";
+export const CALL_CHANNEL_ID = "bunkmates_call_ringtone_channel_v7";
 export const ONGOING_CALL_CHANNEL_ID = "bunkmates-ongoing-calls-v5";
 export const MISSED_CALL_CHANNEL_ID = "bunkmates-missed-calls-v5";
 
@@ -75,7 +75,7 @@ export async function setupCallNotificationCategories() {
         name: "Incoming Calls",
         description: "Heads-up banner alerts and ringtone for incoming voice & video calls",
         importance: Notifications.AndroidImportance.MAX,
-        sound: "default",
+        sound: "call_ringtone.wav",
         audioAttributes: {
           usage: Notifications?.AndroidAudioUsage?.RINGTONE ?? 6,
           contentType: Notifications?.AndroidAudioContentType?.SONIFICATION ?? 4,
@@ -312,7 +312,7 @@ export async function sendOneSignalCallNotification({
       },
 
       existing_android_channel_id: CALL_CHANNEL_ID,
-      android_sound: "default",
+      android_sound: "call_ringtone",
       android_visibility: 1, // PUBLIC — show on lock screen
       priority: 10,          // max urgency
       ttl: 35,               // expire after 35 s if not delivered (call timeout)
