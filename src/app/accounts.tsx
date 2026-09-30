@@ -590,22 +590,21 @@ export default function AccountAndSecurity() {
           <Text style={[styles.sectionLabel, { color: colors.sectionHeader, marginTop: 0, marginBottom: 0 }]}>
             LOGIN ACTIVITY
           </Text>
-          <View style={{ flexDirection: "row", gap: 10 }}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
             <Pressable
               onPress={handleManualRefresh}
-              style={[styles.chipBtn, { backgroundColor: colors.iconBoxBg, borderColor: colors.cardBorder }]}
+              hitSlop={6}
             >
-              <Ionicons name="refresh-outline" size={12} color={colors.greyishWhite} style={{ marginRight: 4 }} />
-              <Text style={[styles.chipBtnText, { color: colors.greyishWhite }]}>
-                {isSyncing ? "Syncing..." : "Sync"}
-              </Text>
+              {isSyncing
+                ? <ActivityIndicator size="small" color={colors.textSecondary} />
+                : <Ionicons name="refresh-outline" size={18} color={colors.textSecondary} />
+              }
             </Pressable>
             <Pressable
               onPress={() => setShowAddDeviceModal(true)}
-              style={[styles.chipBtn, { backgroundColor: colors.coralBg, borderColor: colors.coralBorder }]}
+              hitSlop={6}
             >
-              <Ionicons name="add" size={12} color={colors.coral} style={{ marginRight: 2 }} />
-              <Text style={[styles.chipBtnText, { color: colors.coral }]}>Add Device</Text>
+              <Ionicons name="add-circle-outline" size={18} color={colors.textSecondary} />
             </Pressable>
           </View>
         </View>
@@ -621,91 +620,40 @@ export default function AccountAndSecurity() {
           ) : (
             loginActivity.map((session, idx) => {
               const isThisDevice = session.id === currentDeviceId;
+              const isOnline = isThisDevice || session.isActive;
               const trusted = isDeviceTrusted(session.id, session.deviceName);
+
+              // Build the display name: append "(Active Now)" inline like the reference image
+              const displayName = isThisDevice
+                ? `${session.deviceName} (Active Now)`
+                : session.deviceName;
+
+              // Build the subtitle: "Location, Country • time" in green if active
+              const locationPart = session.location.split("•")[0].trim();
+              const timePart = isThisDevice ? "Just now" : formatTimestamp(session.lastActiveTimestamp);
+              const subtitle = `${locationPart} • ${timePart}`;
 
               return (
                 <React.Fragment key={session.id}>
                   {idx > 0 && <View style={[styles.divider, { backgroundColor: colors.divider }]} />}
                   <Pressable
-                    style={({ pressed }) => [styles.deviceRow, pressed && styles.pressed]}
+                    style={({ pressed }) => [styles.activityRow, pressed && styles.pressed]}
                     onPress={() => handleDeviceSessionPress(session)}
                   >
-                    {/* Device Icon */}
-                    <View
-                      style={[
-                        styles.deviceIconWrap,
-                        {
-                          backgroundColor: isThisDevice
-                            ? colors.greenBg
-                            : colors.iconBoxBg,
-                          borderColor: isThisDevice ? colors.greenBorder : "transparent",
-                        },
-                      ]}
-                    >
-                      {getDeviceIcon(session.deviceType, 22, isThisDevice ? colors.activeGreen : colors.greyishWhite)}
+                    {/* Plain device icon — no box, just the icon itself */}
+                    <View style={styles.activityIconWrap}>
+                      {getDeviceIcon(session.deviceType, 24, colors.textPrimary)}
                     </View>
 
-                    {/* Device Info */}
-                    <View style={styles.deviceInfo}>
-                      <View style={styles.deviceNameRow}>
-                        <Text style={[styles.deviceName, { color: colors.textPrimary }]} numberOfLines={1}>
-                          {session.deviceName}
-                        </Text>
-                        {/* Active / Online badge */}
-                        {isThisDevice && (
-                          <View style={[styles.statusDot, { backgroundColor: colors.activeGreen }]} />
-                        )}
-                        {!isThisDevice && session.isActive && (
-                          <View style={[styles.statusDot, { backgroundColor: "#F59E0B" }]} />
-                        )}
-                      </View>
-
-                      {/* Location row */}
-                      <Text style={[styles.deviceLocation, { color: colors.textSecondary }]} numberOfLines={1}>
-                        <Ionicons name="location-outline" size={11} color={colors.textSecondary} />
-                        {" "}{session.location.split("•")[0].trim()}
+                    {/* Name + location/time */}
+                    <View style={styles.activityInfo}>
+                      <Text style={[styles.activityName, { color: colors.textPrimary }]} numberOfLines={1}>
+                        {displayName}
                       </Text>
-
-                      {/* Badge row */}
-                      <View style={styles.badgeRow}>
-                        {/* Status badge */}
-                        {isThisDevice ? (
-                          <View style={[styles.badge, { backgroundColor: colors.greenBg, borderColor: colors.greenBorder }]}>
-                            <Text style={[styles.badgeText, { color: colors.activeGreen }]}>Active Now</Text>
-                          </View>
-                        ) : session.isActive ? (
-                          <View style={[styles.badge, { backgroundColor: "rgba(245,158,11,0.1)", borderColor: "rgba(245,158,11,0.3)" }]}>
-                            <Text style={[styles.badgeText, { color: "#F59E0B" }]}>
-                              Online • {formatTimestamp(session.lastActiveTimestamp)}
-                            </Text>
-                          </View>
-                        ) : (
-                          <View style={[styles.badge, { backgroundColor: colors.mutedBadge, borderColor: colors.mutedBadgeBorder }]}>
-                            <Text style={[styles.badgeText, { color: colors.textSecondary }]}>
-                              {formatTimestamp(session.lastActiveTimestamp)}
-                            </Text>
-                          </View>
-                        )}
-
-                        {/* Trust badge */}
-                        {trusted ? (
-                          <View style={[styles.badge, { backgroundColor: colors.greenBg, borderColor: colors.greenBorder }]}>
-                            <Ionicons name="shield-checkmark" size={9} color={colors.activeGreen} style={{ marginRight: 3 }} />
-                            <Text style={[styles.badgeText, { color: colors.activeGreen }]}>Trusted</Text>
-                          </View>
-                        ) : (
-                          <Pressable
-                            onPress={() => handleTrustDevice(session.id, session.deviceName, session.deviceType)}
-                            style={[styles.badge, { backgroundColor: colors.mutedBadge, borderColor: colors.mutedBadgeBorder }]}
-                          >
-                            <Ionicons name="shield-outline" size={9} color={colors.textSecondary} style={{ marginRight: 3 }} />
-                            <Text style={[styles.badgeText, { color: colors.textSecondary }]}>Not Trusted</Text>
-                          </Pressable>
-                        )}
-                      </View>
+                      <Text style={[styles.activitySub, { color: isOnline ? colors.activeGreen : colors.textSecondary }]} numberOfLines={1}>
+                        {subtitle}
+                      </Text>
                     </View>
-
-                    <Feather name="chevron-right" size={16} color={colors.chevron} />
                   </Pressable>
                 </React.Fragment>
               );
@@ -721,10 +669,9 @@ export default function AccountAndSecurity() {
           {!isCurrentDeviceAlreadyTrusted && (
             <Pressable
               onPress={() => handleTrustDevice(currentDeviceId, currentDeviceName, "phone")}
-              style={[styles.chipBtn, { backgroundColor: colors.coralBg, borderColor: colors.coralBorder }]}
+              hitSlop={6}
             >
-              <Ionicons name="shield-checkmark-outline" size={12} color={colors.coral} style={{ marginRight: 3 }} />
-              <Text style={[styles.chipBtnText, { color: colors.coral }]}>Trust This Device</Text>
+              <Text style={[styles.sectionAction, { color: colors.coral }]}>+ Trust This Device</Text>
             </Pressable>
           )}
         </View>
@@ -732,8 +679,8 @@ export default function AccountAndSecurity() {
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {trustedDevices.length === 0 ? (
             <View style={styles.emptyTrusted}>
-              <View style={[styles.emptyTrustedIcon, { backgroundColor: colors.iconBoxBg }]}>
-                <Ionicons name="shield-outline" size={26} color={colors.greyishWhite} />
+              <View style={[styles.emptyTrustedIcon, { backgroundColor: colors.coralBg }]}>
+                <Ionicons name="shield-outline" size={26} color={colors.coral} />
               </View>
               <Text style={[styles.emptyTrustedTitle, { color: colors.textPrimary }]}>
                 No Trusted Devices
@@ -760,32 +707,29 @@ export default function AccountAndSecurity() {
               <React.Fragment key={dev.id}>
                 {idx > 0 && <View style={[styles.divider, { backgroundColor: colors.divider }]} />}
                 <Pressable
-                  style={({ pressed }) => [styles.deviceRow, pressed && styles.pressed]}
+                  style={({ pressed }) => [styles.trustedRow, pressed && styles.pressed]}
                   onPress={() => handleRevokeDevice(dev.id, dev.name)}
                 >
-                  <View style={[styles.deviceIconWrap, { backgroundColor: colors.greenBg, borderColor: colors.greenBorder }]}>
-                    {getDeviceIcon(dev.deviceType, 22, colors.activeGreen)}
+                  {/* Coral filled circle with shield-check — exactly like the reference image */}
+                  <View style={[styles.trustedIconCircle, { backgroundColor: colors.coralBg }]}>
+                    <Ionicons name="shield-checkmark" size={22} color={colors.coral} />
                   </View>
-                  <View style={styles.deviceInfo}>
-                    <View style={styles.deviceNameRow}>
-                      <Text style={[styles.deviceName, { color: colors.textPrimary }]}>{dev.name}</Text>
+
+                  <View style={styles.trustedInfo}>
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                      <Text style={[styles.trustedName, { color: colors.textPrimary }]} numberOfLines={1}>
+                        {dev.name}
+                      </Text>
                       {dev.id === currentDeviceId && (
-                        <View style={[styles.badge, { backgroundColor: colors.greenBg, borderColor: colors.greenBorder, marginLeft: 6 }]}>
-                          <Text style={[styles.badgeText, { color: colors.activeGreen }]}>This Device</Text>
-                        </View>
+                        <View style={[styles.thisDeviceDot, { backgroundColor: colors.activeGreen }]} />
                       )}
                     </View>
-                    <Text style={[styles.deviceLocation, { color: colors.textSecondary }]}>
+                    <Text style={[styles.trustedSub, { color: colors.textSecondary }]}>
                       {dev.approvedAt}
                     </Text>
-                    <View style={styles.badgeRow}>
-                      <View style={[styles.badge, { backgroundColor: colors.greenBg, borderColor: colors.greenBorder }]}>
-                        <Ionicons name="shield-checkmark" size={9} color={colors.activeGreen} style={{ marginRight: 3 }} />
-                        <Text style={[styles.badgeText, { color: colors.activeGreen }]}>Trusted Device</Text>
-                      </View>
-                    </View>
                   </View>
-                  <Feather name="chevron-right" size={16} color={colors.chevron} />
+
+                  <Feather name="chevron-right" size={18} color={colors.chevron} />
                 </Pressable>
               </React.Fragment>
             ))
@@ -1206,13 +1150,70 @@ const styles = StyleSheet.create({
   rowSub: { fontSize: 12.5, marginTop: 2, lineHeight: 17 },
   divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
 
-  // Device row (login activity / trusted)
-  deviceRow: {
+  // ── LOGIN ACTIVITY rows (matches reference image: plain icon, name+status inline, green subtitle) ──
+  activityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 15,
+    paddingHorizontal: 16,
+  },
+  activityIconWrap: {
+    width: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+  },
+  activityInfo: { flex: 1 },
+  activityName: {
+    fontSize: 15,
+    fontWeight: "600",
+    letterSpacing: -0.2,
+    marginBottom: 3,
+  },
+  activitySub: {
+    fontSize: 12.5,
+    fontWeight: "500",
+  },
+
+  // ── TRUSTED DEVICE rows (matches reference image: coral circle, name, approved date, chevron) ──
+  trustedRow: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 14,
     paddingHorizontal: 16,
   },
+  trustedIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+  trustedInfo: { flex: 1, marginRight: 8 },
+  trustedName: {
+    fontSize: 15,
+    fontWeight: "600",
+    letterSpacing: -0.2,
+  },
+  trustedSub: {
+    fontSize: 12.5,
+    marginTop: 2,
+  },
+  thisDeviceDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginLeft: 7,
+  },
+
+  // kept for emptyState references
+  deviceInfo: { flex: 1, marginRight: 8 },
+  deviceNameRow: { flexDirection: "row", alignItems: "center", marginBottom: 3 },
+  deviceName: { fontSize: 14.5, fontWeight: "600", letterSpacing: -0.2, flex: 1 },
+  statusDot: { width: 7, height: 7, borderRadius: 4, marginLeft: 6 },
+  deviceLocation: { fontSize: 11.5, marginBottom: 6 },
+  badgeRow: { flexDirection: "row", flexWrap: "wrap", gap: 5 },
   deviceIconWrap: {
     width: 44,
     height: 44,
@@ -1222,12 +1223,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 12,
   },
-  deviceInfo: { flex: 1, marginRight: 8 },
-  deviceNameRow: { flexDirection: "row", alignItems: "center", marginBottom: 3 },
-  deviceName: { fontSize: 14.5, fontWeight: "600", letterSpacing: -0.2, flex: 1 },
-  statusDot: { width: 7, height: 7, borderRadius: 4, marginLeft: 6 },
-  deviceLocation: { fontSize: 11.5, marginBottom: 6 },
-  badgeRow: { flexDirection: "row", flexWrap: "wrap", gap: 5 },
+  deviceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
 
   // Badge
   badge: {
@@ -1239,6 +1240,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   badgeText: { fontSize: 10, fontWeight: "700" },
+
+  // sectionAction text (used in Trust This Device header link)
+  sectionAction: { fontSize: 12.5, fontWeight: "700" },
 
   // Empty states
   emptyState: {
