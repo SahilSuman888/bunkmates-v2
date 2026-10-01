@@ -1127,10 +1127,23 @@ export default function Notifications() {
         </Pressable>
 
         <Text
-          style={styles.headerTitle}
+          style={[styles.headerTitle, { flex: 1 }]}
         >
           Notifications
         </Text>
+
+        <Pressable
+          onPress={() => router.push("/notification" as any)}
+          hitSlop={8}
+          style={{ padding: 4 }}
+          accessibilityLabel="Notification Settings"
+        >
+          <Ionicons
+            name="options-outline"
+            size={22}
+            color="#eeeeee"
+          />
+        </Pressable>
       </View>
 
       {/* ======================================================

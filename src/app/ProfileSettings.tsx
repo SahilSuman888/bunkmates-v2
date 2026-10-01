@@ -815,7 +815,6 @@ export default function ProfileSettings() {
       },
     },
 
-    // TRIP EXPERIENCE
     {
       id: "notifications",
       category: "TRIP EXPERIENCE",
@@ -825,7 +824,7 @@ export default function ProfileSettings() {
       icon: "notifications-outline",
       onPress: () => {
         setIsSearching(false);
-        smoothNavigate("/notifications");
+        smoothNavigate("/notification");
       },
     },
     {
@@ -2668,7 +2667,7 @@ export default function ProfileSettings() {
             icon="notifications-outline"
             title="Notifications"
             subtitle="Trip updates, chat pings, alerts"
-            onPress={() => smoothNavigate("/notifications")}
+            onPress={() => smoothNavigate("/notification")}
           />
           <SettingRow
             icon="compass-outline"
