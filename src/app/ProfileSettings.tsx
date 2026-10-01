@@ -837,7 +837,7 @@ export default function ProfileSettings() {
       icon: "compass-outline",
       onPress: () => {
         setIsSearching(false);
-        Alert.alert("Trip Preferences", "Configure your travel preferences and accommodation styles.");
+        smoothNavigate("/trip-preference");
       },
     },
     {
@@ -2674,12 +2674,7 @@ export default function ProfileSettings() {
             title="Trip Preferences"
             badge="Hot"
             subtitle="Dietary rules, accommodation styles, travel pace"
-            onPress={() =>
-              Alert.alert(
-                "Trip Preferences",
-                "Configure your travel preferences and accommodation styles."
-              )
-            }
+            onPress={() => smoothNavigate("/trip-preference")}
           />
           <SettingRow
             icon="cash-outline"
