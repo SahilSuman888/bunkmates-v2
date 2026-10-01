@@ -849,7 +849,7 @@ export default function ProfileSettings() {
       icon: "cash-outline",
       onPress: () => {
         setIsSearching(false);
-        smoothNavigate("/budget");
+        smoothNavigate("/currency-expenses");
       },
     },
     {
@@ -2680,7 +2680,7 @@ export default function ProfileSettings() {
             icon="cash-outline"
             title="Currency & Expenses"
             subtitle="Default Split bills, home currency USD"
-            onPress={() => smoothNavigate("/budget")}
+            onPress={() => smoothNavigate("/currency-expenses")}
           />
           <SettingRow
             icon="cloud-download-outline"
