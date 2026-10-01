@@ -1,4 +1,4 @@
-// **@** Trip Preferences — Pixel-perfect reference UI matching Settings design system with greyish-white icons, circular back button, dynamic theme accent colors, and real Firestore persistence
+// **@** Trip Preferences — Pixel-perfect UI matching Settings design system with greyish-white accents, circular back button, dynamic theme adaptability (zero red), and real Firestore persistence
 import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
@@ -10,6 +10,7 @@ import {
   Modal,
   StatusBar,
   Appearance,
+  Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,6 +20,7 @@ import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { ACCENT_COLORS } from "../theme/theme";
 
 type TravelStyle = "Budget" | "Mid-Range" | "Luxury";
 
@@ -72,7 +74,7 @@ export default function TripPreferences() {
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // States matching reference image defaults
+  // States matching reference defaults
   const [travelStyle, setTravelStyle] = useState<TravelStyle>("Budget");
   const [accommodations, setAccommodations] = useState<string[]>([
     "Hostel",
@@ -92,33 +94,65 @@ export default function TripPreferences() {
   // Modal pickers state
   const [activeModal, setActiveModal] = useState<"duration" | "groupSize" | null>(null);
 
-  // Helper for dynamic alpha tints
-  const hexToRgba = (hex: string, alpha: number) => {
-    const cleanHex = hex.replace("#", "");
-    const fullHex = cleanHex.length === 3 ? cleanHex.split("").map((c) => c + c).join("") : cleanHex;
-    const r = parseInt(fullHex.substring(0, 2), 16) || 255;
-    const g = parseInt(fullHex.substring(2, 4), 16) || 90;
-    const b = parseInt(fullHex.substring(4, 6), 16) || 95;
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  // Feedback banner state for showing real saving confirmation
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastOpacity = useMemo(() => new Animated.Value(0), []);
+
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    Animated.sequence([
+      Animated.timing(toastOpacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.delay(1600),
+      Animated.timing(toastOpacity, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start(() => setToastMessage(null));
   };
 
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
-  let dynamicAccent = "#FF5A5F";
+  let userAccent = "default";
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
-      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
+      if (themeContext.accent) userAccent = themeContext.accent;
     }
-  } catch (e) {}
+  } catch (e) {
+    // fallback safe
+  }
 
   const isDark =
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
+  // Dynamic colors derived from the old settings page (zero red, greyish-white accents)
   const colors = useMemo(() => {
-    const accent = dynamicAccent;
+    // If user explicitly chose a custom accent from General Settings that is not red/coral, respect it
+    const hasCustomNonRedAccent =
+      userAccent &&
+      userAccent !== "default" &&
+      userAccent !== "coral" &&
+      userAccent !== "red" &&
+      (ACCENT_COLORS as any)[userAccent];
+
+    const customAccent = hasCustomNonRedAccent
+      ? (ACCENT_COLORS as any)[userAccent]
+      : null;
+
+    const greyishWhite = isDark ? "#E2E8F0" : "#4B5563";
+    const activeText = customAccent || (isDark ? "#FFFFFF" : "#11141A");
+    const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
+    const activeChipBg = customAccent
+      ? (isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.06)")
+      : (isDark ? "rgba(226, 232, 240, 0.14)" : "rgba(17, 20, 26, 0.08)");
+
     return {
       bg: isDark ? "#0A0A0C" : "#F4F6F9",
       card: isDark ? "#141418" : "#FFFFFF",
@@ -127,19 +161,26 @@ export default function TripPreferences() {
       textPrimary: isDark ? "#FFFFFF" : "#11141A",
       textSecondary: isDark ? "#8E95A2" : "#7E8590",
       sectionHeader: isDark ? "#8E95A2" : "#7E8590",
-      accent: accent,
-      accentBg: isDark ? hexToRgba(accent, 0.12) : hexToRgba(accent, 0.06),
-      accentBorder: isDark ? hexToRgba(accent, 0.45) : accent,
       // Greyish-white icon color matching Settings page
-      greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
+      greyishWhite: greyishWhite,
       // Subtle neutral circular icon box matching Settings page modernIconBox
       iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
       chevron: isDark ? "#555860" : "#B4B9C2",
       segmentBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#F2F4F7",
-      segmentActiveBg: isDark ? "#222228" : "#FFFFFF",
+      segmentActiveBg: isDark ? "#24242A" : "#FFFFFF",
+      segmentActiveText: activeText,
+      // Selected Chip Colors (greyish-white / dark contrast, zero red)
+      chipSelectedBg: activeChipBg,
+      chipSelectedBorder: activeBorder,
+      chipSelectedText: activeText,
+      // Unselected Chip Colors
       chipUnselectedBg: isDark ? "rgba(255, 255, 255, 0.03)" : "#FFFFFF",
+      chipUnselectedBorder: isDark ? "rgba(255, 255, 255, 0.09)" : "#EBECEF",
+      chipUnselectedText: isDark ? "#94A3B8" : "#64748B",
+      toastBg: isDark ? "#1F2937" : "#111827",
+      toastText: "#F9FAFB",
     };
-  }, [isDark, dynamicAccent]);
+  }, [isDark, userAccent]);
 
   // Auth observer
   useEffect(() => {
@@ -195,17 +236,19 @@ export default function TripPreferences() {
     return () => unsubscribe();
   }, [authLoading, user]);
 
-  // Sync preference helper
+  // Sync preference helper saving to both AsyncStorage and Firestore
   const syncPreference = async (field: string, value: any) => {
-    // Cache locally
+    // 1. Cache locally in AsyncStorage
     try {
       const current = await AsyncStorage.getItem("@bunkmates_trip_preferences");
       const currentObj = current ? JSON.parse(current) : {};
       currentObj[field] = value;
       await AsyncStorage.setItem("@bunkmates_trip_preferences", JSON.stringify(currentObj));
-    } catch (e) {}
+    } catch (e) {
+      console.log("Failed to cache preference in AsyncStorage:", e);
+    }
 
-    // Sync to Firestore
+    // 2. Sync to Firestore in real-time
     if (!user) return;
     try {
       await updateDoc(doc(db, "users", user.uid), {
@@ -217,15 +260,17 @@ export default function TripPreferences() {
     }
   };
 
-  // Toggle multi-select chips
+  // Toggle multi-select chips: Accommodations
   const toggleAccommodation = (item: string) => {
     const next = accommodations.includes(item)
       ? accommodations.filter((a) => a !== item)
       : [...accommodations, item];
     setAccommodations(next);
     syncPreference("accommodations", next);
+    triggerToast(`Accommodations updated`);
   };
 
+  // Toggle multi-select chips: Dietary Preferences
   const toggleDietary = (item: string) => {
     let next: string[];
     if (item === "No Restrictions") {
@@ -239,31 +284,37 @@ export default function TripPreferences() {
     }
     setDietary(next);
     syncPreference("dietary", next);
+    triggerToast(`Dietary preferences updated`);
   };
 
+  // Toggle multi-select chips: Activity Interests
   const toggleActivity = (item: string) => {
     const next = activities.includes(item)
       ? activities.filter((a) => a !== item)
       : [...activities, item];
     setActivities(next);
     syncPreference("activities", next);
+    triggerToast(`Interests updated`);
   };
 
   const handleSelectStyle = (style: TravelStyle) => {
     setTravelStyle(style);
     syncPreference("travelStyle", style);
+    triggerToast(`Travel style set to ${style}`);
   };
 
   const handleSelectDuration = (duration: string) => {
     setTripDuration(duration);
     syncPreference("tripDuration", duration);
     setActiveModal(null);
+    triggerToast(`Duration set to ${duration}`);
   };
 
   const handleSelectGroupSize = (size: string) => {
     setGroupSize(size);
     syncPreference("groupSize", size);
     setActiveModal(null);
+    triggerToast(`Group size set to ${size}`);
   };
 
   return (
@@ -279,7 +330,7 @@ export default function TripPreferences() {
             { backgroundColor: colors.card, borderColor: colors.cardBorder },
             pressed && styles.pressed,
           ]}
-          hitSlop={6}
+          hitSlop={8}
           accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
@@ -321,8 +372,8 @@ export default function TripPreferences() {
                     style={[
                       styles.segmentText,
                       isSelected
-                        ? [styles.segmentTextActive, { color: colors.accent }]
-                        : { color: colors.textPrimary },
+                        ? [styles.segmentTextActive, { color: colors.segmentActiveText }]
+                        : { color: colors.textSecondary },
                     ]}
                   >
                     {style}
@@ -349,8 +400,8 @@ export default function TripPreferences() {
                   style={({ pressed }) => [
                     styles.chipPill,
                     {
-                      backgroundColor: isSelected ? colors.accentBg : colors.chipUnselectedBg,
-                      borderColor: isSelected ? colors.accentBorder : colors.cardBorder,
+                      backgroundColor: isSelected ? colors.chipSelectedBg : colors.chipUnselectedBg,
+                      borderColor: isSelected ? colors.chipSelectedBorder : colors.chipUnselectedBorder,
                     },
                     pressed && styles.pressed,
                   ]}
@@ -360,7 +411,7 @@ export default function TripPreferences() {
                     style={[
                       styles.chipText,
                       {
-                        color: isSelected ? colors.accent : colors.textPrimary,
+                        color: isSelected ? colors.chipSelectedText : colors.chipUnselectedText,
                         fontWeight: isSelected ? "700" : "500",
                       },
                     ]}
@@ -429,8 +480,8 @@ export default function TripPreferences() {
                   style={({ pressed }) => [
                     styles.chipPill,
                     {
-                      backgroundColor: isSelected ? colors.accentBg : colors.chipUnselectedBg,
-                      borderColor: isSelected ? colors.accentBorder : colors.cardBorder,
+                      backgroundColor: isSelected ? colors.chipSelectedBg : colors.chipUnselectedBg,
+                      borderColor: isSelected ? colors.chipSelectedBorder : colors.chipUnselectedBorder,
                     },
                     pressed && styles.pressed,
                   ]}
@@ -440,7 +491,7 @@ export default function TripPreferences() {
                     style={[
                       styles.chipText,
                       {
-                        color: isSelected ? colors.accent : colors.textPrimary,
+                        color: isSelected ? colors.chipSelectedText : colors.chipUnselectedText,
                         fontWeight: isSelected ? "700" : "500",
                       },
                     ]}
@@ -469,8 +520,8 @@ export default function TripPreferences() {
                   style={({ pressed }) => [
                     styles.chipPill,
                     {
-                      backgroundColor: isSelected ? colors.accentBg : colors.chipUnselectedBg,
-                      borderColor: isSelected ? colors.accentBorder : colors.cardBorder,
+                      backgroundColor: isSelected ? colors.chipSelectedBg : colors.chipUnselectedBg,
+                      borderColor: isSelected ? colors.chipSelectedBorder : colors.chipUnselectedBorder,
                     },
                     pressed && styles.pressed,
                   ]}
@@ -480,7 +531,7 @@ export default function TripPreferences() {
                     style={[
                       styles.chipText,
                       {
-                        color: isSelected ? colors.accent : colors.textPrimary,
+                        color: isSelected ? colors.chipSelectedText : colors.chipUnselectedText,
                         fontWeight: isSelected ? "700" : "500",
                       },
                     ]}
@@ -494,7 +545,21 @@ export default function TripPreferences() {
         </View>
       </ScrollView>
 
-      {/* ── MODAL PICKER (Duration & Group Size) ── */}
+      {/* ── Floating Real-time Save Toast Indicator ── */}
+      {toastMessage && (
+        <Animated.View
+          style={[
+            styles.toastContainer,
+            { backgroundColor: colors.toastBg, opacity: toastOpacity },
+          ]}
+          pointerEvents="none"
+        >
+          <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+          <Text style={[styles.toastText, { color: colors.toastText }]}>{toastMessage}</Text>
+        </Animated.View>
+      )}
+
+      {/* ── Interactive Selection Modal (Duration & Group Size) ── */}
       <Modal
         visible={activeModal !== null}
         transparent
@@ -529,8 +594,8 @@ export default function TripPreferences() {
                     style={({ pressed }) => [
                       styles.modalOptionItem,
                       {
-                        backgroundColor: isSelected ? colors.accentBg : colors.segmentBg,
-                        borderColor: isSelected ? colors.accent : colors.cardBorder,
+                        backgroundColor: isSelected ? colors.chipSelectedBg : colors.segmentBg,
+                        borderColor: isSelected ? colors.chipSelectedBorder : colors.cardBorder,
                       },
                       pressed && styles.pressed,
                     ]}
@@ -542,15 +607,15 @@ export default function TripPreferences() {
                       style={[
                         styles.modalOptionText,
                         {
-                          color: isSelected ? colors.accent : colors.textPrimary,
-                          fontWeight: isSelected ? "700" : "600",
+                          color: isSelected ? colors.chipSelectedText : colors.textPrimary,
+                          fontWeight: isSelected ? "700" : "500",
                         },
                       ]}
                     >
                       {opt}
                     </Text>
                     {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.accent} />
+                      <Ionicons name="checkmark-circle" size={20} color={colors.chipSelectedBorder} />
                     )}
                   </Pressable>
                 );
@@ -560,12 +625,12 @@ export default function TripPreferences() {
             <Pressable
               style={({ pressed }) => [
                 styles.modalCloseBtn,
-                { borderColor: colors.cardBorder },
+                { borderColor: colors.cardBorder, backgroundColor: colors.segmentBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setActiveModal(null)}
             >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textSecondary }]}>Close</Text>
+              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>Close</Text>
             </Pressable>
           </View>
         </View>
@@ -721,6 +786,29 @@ const styles = StyleSheet.create({
   divider: {
     height: StyleSheet.hairlineWidth,
     marginHorizontal: 16,
+  },
+
+  // Toast container
+  toastContainer: {
+    position: "absolute",
+    bottom: 24,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+    zIndex: 999,
+  },
+  toastText: {
+    fontSize: 13,
+    fontWeight: "600",
   },
 
   // Modal styles
