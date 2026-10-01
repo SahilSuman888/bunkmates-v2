@@ -20,19 +20,25 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
+import { registerForPushNotifications, disablePushNotifications } from "../lib/pushNotifications";
 import { useThemeToggle } from "../contexts/ThemeContext";
 
 const TIME_OPTIONS = [
   "08:00 PM",
   "09:00 PM",
+  "09:30 PM",
   "10:00 PM",
+  "10:30 PM",
   "11:00 PM",
+  "11:30 PM",
   "12:00 AM",
   "01:00 AM",
-  "05:00 AM",
   "06:00 AM",
+  "06:30 AM",
   "07:00 AM",
+  "07:30 AM",
   "08:00 AM",
+  "08:30 AM",
   "09:00 AM",
   "10:00 AM",
 ];
@@ -100,7 +106,7 @@ export default function NotificationSettings() {
       accentBorder: isDark ? hexToRgba(accent, 0.35) : hexToRgba(accent, 0.25),
       switchActive: accent,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
-      // Greyish-white icon color matching Settings page
+      // Greyish-white icon & title color matching Settings page
       greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
       // Subtle neutral circular icon box matching Settings page modernIconBox
       iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
@@ -192,9 +198,16 @@ export default function NotificationSettings() {
   };
 
   // Toggle handlers
-  const handleToggleAllPush = (val: boolean) => {
+  const handleToggleAllPush = async (val: boolean) => {
     setAllPushEnabled(val);
     syncNotificationSetting("allPushEnabled", val);
+    if (user) {
+      if (val) {
+        registerForPushNotifications(user.uid).catch(() => {});
+      } else {
+        disablePushNotifications(user.uid).catch(() => {});
+      }
+    }
   };
 
   const handleToggleTripUpdates = (val: boolean) => {
@@ -266,19 +279,19 @@ export default function NotificationSettings() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── TOP HERO CARD: All Push Notifications ── */}
+        {/* ── TOP HERO CARD: All Push Notifications with Greyish-White Title ── */}
         <View
           style={[
             styles.heroCard,
             {
-              backgroundColor: colors.accentBg,
-              borderColor: colors.accentBorder,
+              backgroundColor: colors.card,
+              borderColor: colors.cardBorder,
             },
           ]}
         >
           <View style={styles.heroTextWrap}>
-            <Text style={[styles.heroTitle, { color: colors.accent }]}>All Push Notifications</Text>
-            <Text style={[styles.heroSub, { color: isDark ? "#D1D5DB" : "#6B7280" }]}>
+            <Text style={[styles.heroTitle, { color: colors.greyishWhite }]}>All Push Notifications</Text>
+            <Text style={[styles.heroSub, { color: colors.textSecondary }]}>
               Quickly silence or enable all mobile alerts
             </Text>
           </View>
@@ -571,13 +584,18 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 6,
     marginBottom: 6,
-    borderRadius: 20,
-    borderWidth: 1.5,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 18,
     paddingVertical: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 5,
+    elevation: 1,
   },
   heroTextWrap: {
     flex: 1,
