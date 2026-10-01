@@ -134,13 +134,17 @@ const SettingRowMemo = React.memo(function SettingRow({
   return (
     <Pressable
       onPress={onPress}
+      android_ripple={{
+        color: isDark ? "rgba(255, 255, 255, 0.07)" : "rgba(0, 0, 0, 0.05)",
+      }}
       style={({ pressed }) => [
         styles.modernRow,
-        pressed && {
-          backgroundColor: isDark
-            ? "rgba(255,255,255,0.04)"
-            : "rgba(0,0,0,0.03)",
-        },
+        Platform.OS === "ios" &&
+          pressed && {
+            backgroundColor: isDark
+              ? "rgba(255,255,255,0.04)"
+              : "rgba(0,0,0,0.03)",
+          },
       ]}
     >
       <View style={[styles.modernIconBox, { backgroundColor: resolvedIconBg }]}>
@@ -238,6 +242,23 @@ const SettingRowMemo = React.memo(function SettingRow({
 export default function ProfileSettings() {
   const router = useRouter();
 
+  // **@** Ultra-smooth navigation helper to eliminate touch freezes & jitter
+  const isNavigatingRef = useRef(false);
+  const smoothNavigate = useCallback(
+    (route: string) => {
+      if (isNavigatingRef.current) return;
+      isNavigatingRef.current = true;
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 550);
+
+      requestAnimationFrame(() => {
+        router.push(route as any);
+      });
+    },
+    [router]
+  );
+
   const { user, loading: authLoading } = useUser();
 
   const [loading, setLoading] = useState(true);
@@ -276,13 +297,25 @@ export default function ProfileSettings() {
     });
 
   // **@** Dynamic theme integration matching system or user preference
+  // Helper for dynamic alpha tints
+  const hexToRgba = (hex: string, alpha: number) => {
+    const cleanHex = hex.replace("#", "");
+    const fullHex = cleanHex.length === 3 ? cleanHex.split("").map((c) => c + c).join("") : cleanHex;
+    const r = parseInt(fullHex.substring(0, 2), 16) || 255;
+    const g = parseInt(fullHex.substring(2, 4), 16) || 90;
+    const b = parseInt(fullHex.substring(4, 6), 16) || 95;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+
   let themeMode: "dark" | "light" | "system" = "system";
   let toggleThemeFn: () => void = () => {};
+  let dynamicAccent = "#FF5A5F";
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       themeMode = themeContext.mode;
       toggleThemeFn = themeContext.toggleTheme;
+      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
     }
   } catch (e) {
     // safe fallback
@@ -292,7 +325,7 @@ export default function ProfileSettings() {
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  // **@** Memoized — only rebuilds when theme changes, not on every render
+  // **@** Memoized — only rebuilds when theme or accent changes, not on every render
   const colors = useMemo(() => ({
     bg: isDark ? "#0A0A0C" : "#F4F6F9",
     card: isDark ? "#141418" : "#FFFFFF",
@@ -301,15 +334,15 @@ export default function ProfileSettings() {
     textPrimary: isDark ? "#FFFFFF" : "#11141A",
     textSecondary: isDark ? "#8E95A2" : "#7E8590",
     sectionHeader: isDark ? "#8E95A2" : "#7E8590",
-    coral: "#FF5A5F",
-    coralAccent: "#FF5A5F",
-    coralBg: isDark ? "rgba(255, 90, 95, 0.16)" : "rgba(255, 90, 95, 0.09)",
+    coral: dynamicAccent,
+    coralAccent: dynamicAccent,
+    coralBg: isDark ? hexToRgba(dynamicAccent, 0.16) : hexToRgba(dynamicAccent, 0.09),
     greyishWhite: isDark ? "#E2E8F0" : "#4B5563", // **@** Greyish-white icon color as requested
     iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)", // **@** Subtle neutral icon box
     chevron: isDark ? "#555860" : "#B4B9C2",
     logoutBorder: isDark ? "rgba(255, 90, 95, 0.45)" : "rgba(255, 90, 95, 0.4)",
     logoutBg: isDark ? "rgba(255, 90, 95, 0.08)" : "rgba(255, 90, 95, 0.04)",
-  }), [isDark]);
+  }), [isDark, dynamicAccent]);
 
   // **@** Track scroll position for header mask gradient reveal on slide/scroll
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -730,7 +763,7 @@ export default function ProfileSettings() {
       iconColor: colors.greyishWhite,
       onPress: () => {
         setIsSearching(false);
-        router.push("/ProfileEdit" as any);
+        smoothNavigate("/ProfileEdit");
       },
     },
     {
@@ -742,7 +775,7 @@ export default function ProfileSettings() {
       icon: "shield-checkmark-outline",
       onPress: () => {
         setIsSearching(false);
-        router.push("/accounts" as any);
+        smoothNavigate("/accounts");
       },
     },
     {
@@ -754,7 +787,7 @@ export default function ProfileSettings() {
       icon: "lock-closed-outline",
       onPress: () => {
         setIsSearching(false);
-        Alert.alert("Privacy & Data", "Profile visibility and tracking options are kept private.");
+        smoothNavigate("/privacy");
       },
     },
     {
@@ -778,7 +811,7 @@ export default function ProfileSettings() {
       icon: "qr-code-outline",
       onPress: () => {
         setIsSearching(false);
-        router.push("/qr-code" as any);
+        smoothNavigate("/qr-code");
       },
     },
 
@@ -792,7 +825,7 @@ export default function ProfileSettings() {
       icon: "notifications-outline",
       onPress: () => {
         setIsSearching(false);
-        router.push("/notifications" as any);
+        smoothNavigate("/notifications");
       },
     },
     {
@@ -817,7 +850,7 @@ export default function ProfileSettings() {
       icon: "cash-outline",
       onPress: () => {
         setIsSearching(false);
-        router.push("/budget" as any);
+        smoothNavigate("/budget");
       },
     },
     {
@@ -853,7 +886,7 @@ export default function ProfileSettings() {
       icon: "partly-sunny-outline",
       onPress: () => {
         setIsSearching(false);
-        router.push("/(tabs)/aqi" as any);
+        smoothNavigate("/(tabs)/aqi");
       },
     },
     {
@@ -865,7 +898,7 @@ export default function ProfileSettings() {
       icon: "airplane-outline",
       onPress: () => {
         setIsSearching(false);
-        router.push("/trips" as any);
+        smoothNavigate("/trips");
       },
     },
 
@@ -921,7 +954,7 @@ export default function ProfileSettings() {
       icon: "chatbubble-ellipses-outline",
       onPress: () => {
         setIsSearching(false);
-        router.push("/chat-settings" as any);
+        smoothNavigate("/chat-settings");
       },
     },
     {
@@ -933,7 +966,7 @@ export default function ProfileSettings() {
       icon: "settings-outline",
       onPress: () => {
         setIsSearching(false);
-        router.push("/general-settings" as any);
+        smoothNavigate("/general-settings");
       },
     },
     {
@@ -947,7 +980,7 @@ export default function ProfileSettings() {
       iconBg: colors.iconBoxBg,
       onPress: () => {
         setIsSearching(false);
-        router.push("/ai-settings" as any);
+        smoothNavigate("/ai-settings");
       },
     },
 
@@ -961,7 +994,7 @@ export default function ProfileSettings() {
       icon: "chatbubble-question-outline",
       onPress: () => {
         setIsSearching(false);
-        router.push("/help" as any);
+        smoothNavigate("/help");
       },
     },
     {
@@ -973,7 +1006,7 @@ export default function ProfileSettings() {
       icon: "megaphone-outline",
       onPress: () => {
         setIsSearching(false);
-        router.push("/feedback" as any);
+        smoothNavigate("/feedback");
       },
     },
     {
@@ -1023,7 +1056,7 @@ export default function ProfileSettings() {
       icon: "person-add-outline",
       onPress: () => {
         setIsSearching(false);
-        router.push("/inviteFriend" as any);
+        smoothNavigate("/inviteFriend");
       },
     },
     ...(isDeveloper
@@ -2288,7 +2321,7 @@ export default function ProfileSettings() {
                 { backgroundColor: colors.card, borderColor: colors.cardBorder },
                 pressed && styles.pressed,
               ]}
-              onPress={() => router.push("/qr-code" as any)}
+              onPress={() => smoothNavigate("/qr-code")}
               accessibilityLabel="QR Code"
             >
               <Ionicons
@@ -2531,7 +2564,7 @@ export default function ProfileSettings() {
             { backgroundColor: colors.card, borderColor: colors.cardBorder },
             pressed && styles.pressed,
           ]}
-          onPress={() => router.push("/ProfileEdit" as any)}
+          onPress={() => smoothNavigate("/ProfileEdit")}
           accessibilityRole="button"
           accessibilityLabel="Edit Profile"
         >
@@ -2592,18 +2625,13 @@ export default function ProfileSettings() {
             icon="shield-checkmark-outline"
             title="Account & Security"
             subtitle="Password, Two-factor auth, session logs"
-            onPress={() => router.push("/accounts" as any)}
+            onPress={() => smoothNavigate("/accounts")}
           />
           <SettingRow
             icon="lock-closed-outline"
             title="Privacy & Data"
             subtitle="Profile visibility, location logs"
-            onPress={() =>
-              Alert.alert(
-                "Privacy & Data",
-                "Profile visibility and tracking options are kept private."
-              )
-            }
+            onPress={() => smoothNavigate("/privacy")}
           />
           <SettingRow
             icon="link-outline"
@@ -2640,7 +2668,7 @@ export default function ProfileSettings() {
             icon="notifications-outline"
             title="Notifications"
             subtitle="Trip updates, chat pings, alerts"
-            onPress={() => router.push("/notifications" as any)}
+            onPress={() => smoothNavigate("/notifications")}
           />
           <SettingRow
             icon="compass-outline"
@@ -2658,7 +2686,7 @@ export default function ProfileSettings() {
             icon="cash-outline"
             title="Currency & Expenses"
             subtitle="Default Split bills, home currency USD"
-            onPress={() => router.push("/budget" as any)}
+            onPress={() => smoothNavigate("/budget")}
           />
           <SettingRow
             icon="cloud-download-outline"
@@ -2687,7 +2715,7 @@ export default function ProfileSettings() {
             title="Weather Alerts"
             subtitle="Local weather forecasts & rain warnings"
             isLast
-            onPress={() => router.push("/(tabs)/aqi" as any)}
+            onPress={() => smoothNavigate("/(tabs)/aqi")}
           />
         </View>
 
@@ -2747,14 +2775,14 @@ export default function ProfileSettings() {
             icon="chatbubble-ellipses-outline"
             title="Chats"
             subtitle="Theme, Wallpapers, and Chat Settings"
-            onPress={() => router.push("/chat-settings" as any)}
+            onPress={() => smoothNavigate("/chat-settings")}
           />
           {/* Preserved v2 feature: General Settings */}
           <SettingRow
             icon="settings-outline"
             title="General Settings"
             subtitle="App Theme, Language, and Location"
-            onPress={() => router.push("/general-settings" as any)}
+            onPress={() => smoothNavigate("/general-settings")}
           />
           {/* Preserved v2 feature: AI Features with greyish-white icon */}
           <SettingRow
@@ -2762,7 +2790,7 @@ export default function ProfileSettings() {
             title="AI Features"
             subtitle="Configure Groq API Key & AI settings"
             isLast
-            onPress={() => router.push("/ai-settings" as any)}
+            onPress={() => smoothNavigate("/ai-settings")}
           />
         </View>
 
@@ -2787,13 +2815,13 @@ export default function ProfileSettings() {
             icon="chatbubble-question-outline"
             title="Help & Support"
             subtitle="Guides, FAQs, 24/7 BunkMates bot"
-            onPress={() => router.push("/help" as any)}
+            onPress={() => smoothNavigate("/help")}
           />
           <SettingRow
             icon="megaphone-outline"
             title="Send Feedback"
             subtitle="Feature requests, report bugs"
-            onPress={() => router.push("/feedback" as any)}
+            onPress={() => smoothNavigate("/feedback")}
           />
           <SettingRow
             icon="ribbon-outline"
@@ -2829,7 +2857,7 @@ export default function ProfileSettings() {
             title="Invite a Friend"
             subtitle="Share BunkMates with travel companions"
             isLast={!isDeveloper}
-            onPress={() => router.push("/inviteFriend" as any)}
+            onPress={() => smoothNavigate("/inviteFriend")}
           />
           {/* Preserved v2 feature: Developer tools if unlocked */}
           {isDeveloper && (

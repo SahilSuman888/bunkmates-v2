@@ -4,7 +4,7 @@ import {
   GestureHandlerRootView,
 } from "react-native-gesture-handler";
 
-import { View } from "react-native";
+import { View, Platform } from "react-native";
 
 import { UserProvider } from "../contexts/UserContext";
 
@@ -42,7 +42,8 @@ function LayoutContent() {
               <Stack
                 screenOptions={{
                   headerShown: false,
-                  contentStyle: { backgroundColor: "transparent" },
+                  contentStyle: { backgroundColor: themeColors.background },
+                  animation: Platform.OS === "ios" ? "default" : "slide_from_right",
                 }}
               />
 

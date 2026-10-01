@@ -192,14 +192,6 @@ export default function AISettingsScreen() {
       ? styles.statusInvalid
       : styles.statusWaiting;
 
-  if (loading) {
-    return (
-      <View style={styles.loadingScreen}>
-        <ActivityIndicator size="small" color="#00d9a6" />
-      </View>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <ScrollView

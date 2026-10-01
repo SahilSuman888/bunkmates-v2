@@ -12,6 +12,7 @@ import {
   Alert,
   Dimensions,
   Modal,
+  InteractionManager,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -36,7 +37,8 @@ interface QRCodeScreenProps {
 export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
   const router = useRouter();
   const { user, userData } = useUser();
-  const [activeTab, setActiveTab] = useState<"my" | "scan">("scan");
+  const [activeTab, setActiveTab] = useState<"my" | "scan">("my");
+  const [cameraReady, setCameraReady] = useState(false);
 
   // Scan state
   const [permission, requestPermission] = useCameraPermissions();
@@ -48,6 +50,13 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
   const [showScannedUserModal, setShowScannedUserModal] = useState(false);
 
   const qrValue = user?.uid ?? "unknown";
+
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setCameraReady(true);
+    });
+    return () => task.cancel();
+  }, []);
 
   useEffect(() => {
     if (activeTab === "scan" && permission && !permission.granted) {
@@ -145,7 +154,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
       {/* FULL-SCREEN CAMERA FEED BEHIND EVERYTHING WHEN ON SCAN TAB */}
       {activeTab === "scan" && (
         <View style={StyleSheet.absoluteFill}>
-          {permission?.granted ? (
+          {cameraReady && permission?.granted ? (
             <CameraView
               style={StyleSheet.absoluteFill}
               facing="back"

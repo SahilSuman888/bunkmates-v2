@@ -69,11 +69,25 @@ export default function AccountAndSecurity() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
 
+  // Helper for dynamic alpha tints
+  const hexToRgba = (hex: string, alpha: number) => {
+    const cleanHex = hex.replace("#", "");
+    const fullHex = cleanHex.length === 3 ? cleanHex.split("").map((c) => c + c).join("") : cleanHex;
+    const r = parseInt(fullHex.substring(0, 2), 16) || 255;
+    const g = parseInt(fullHex.substring(2, 4), 16) || 90;
+    const b = parseInt(fullHex.substring(4, 6), 16) || 95;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+
   // **@** Dynamic theme integration matching ProfileSettings & ProfileEdit
   let themeMode: "dark" | "light" | "system" = "system";
+  let dynamicAccent = "#FF5A5F";
   try {
     const themeContext = useThemeToggle();
-    if (themeContext) themeMode = themeContext.mode;
+    if (themeContext) {
+      if (themeContext.mode) themeMode = themeContext.mode;
+      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
+    }
   } catch (e) {}
 
   const isDark =
@@ -89,15 +103,15 @@ export default function AccountAndSecurity() {
       textPrimary: isDark ? "#FFFFFF" : "#11141A",
       textSecondary: isDark ? "#8E95A2" : "#7E8590",
       sectionHeader: isDark ? "#8E95A2" : "#7E8590",
-      coral: "#FF5A5F",
-      coralAccent: "#FF5A5F",
-      coralBg: isDark ? "rgba(255, 90, 95, 0.16)" : "rgba(255, 90, 95, 0.09)",
-      coralSquareBg: isDark ? "rgba(255, 90, 95, 0.14)" : "#FFF1F2",
+      coral: dynamicAccent,
+      coralAccent: dynamicAccent,
+      coralBg: isDark ? hexToRgba(dynamicAccent, 0.16) : hexToRgba(dynamicAccent, 0.09),
+      coralSquareBg: isDark ? hexToRgba(dynamicAccent, 0.14) : hexToRgba(dynamicAccent, 0.07),
       greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
       iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
       chevron: isDark ? "#555860" : "#B4B9C2",
       activeGreen: "#10B981",
-      switchActive: "#FF5A5F",
+      switchActive: dynamicAccent,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
       dangerCardBg: isDark ? "rgba(255, 90, 95, 0.08)" : "#FFF1F2",
       dangerCardBorder: isDark ? "rgba(255, 90, 95, 0.22)" : "#FECDD3",
@@ -107,7 +121,7 @@ export default function AccountAndSecurity() {
       modalOverlay: "rgba(0,0,0,0.72)",
       selectedPill: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
     }),
-    [isDark]
+    [isDark, dynamicAccent]
   );
 
   // **@** Setup current device & register dynamic session in Firestore

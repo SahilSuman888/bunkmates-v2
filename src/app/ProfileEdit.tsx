@@ -30,20 +30,20 @@ export default function EditProfile() {
   const router = useRouter();
   const { user } = useUser();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!user);
   const [saving, setSaving] = useState(false);
 
   // **@** Comprehensive profile state supporting both new UI fields and preserved v2 fields
   const [data, setData] = useState({
-    firstName: "",
-    lastName: "",
-    displayName: "",
+    firstName: user?.displayName?.split(" ")[0] || "",
+    lastName: user?.displayName?.split(" ").slice(1).join(" ") || "",
+    displayName: user?.displayName || "",
     username: "",
-    email: "",
-    mobile: "",
+    email: user?.email || "",
+    mobile: user?.phoneNumber || "",
     bio: "",
     homeCity: "",
-    photoURL: "",
+    photoURL: user?.photoURL || "",
   });
 
   // **@** Dynamic theme integration matching settings page
@@ -215,7 +215,7 @@ export default function EditProfile() {
     }
   };
 
-  if (loading) {
+  if (loading && !user) {
     return (
       <View style={[styles.loader, { backgroundColor: colors.bg }]}>
         <ActivityIndicator size="large" color={colors.greyishWhite} />

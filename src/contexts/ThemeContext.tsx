@@ -87,7 +87,7 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
     }
     return getTheme(mode);
   }, [mode, systemColorScheme]);
-  const accentColor = ACCENT_COLORS[accent as keyof typeof ACCENT_COLORS] || themeColors.primary;
+  const accentColor = ACCENT_COLORS[accent as keyof typeof ACCENT_COLORS] || ACCENT_COLORS.coral;
 
   const setBackground = (bg: BackgroundSettings) => {
     setBackgroundState(bg);

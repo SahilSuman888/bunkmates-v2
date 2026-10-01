@@ -39,13 +39,13 @@ const darkTheme: ThemeColors = {
 };
 
 export const ACCENT_COLORS = {
+  coral: '#FF5A5F',
   blue: '#1976d2',
   green: '#43a047',
   orange: '#f9971f',
   turquoise: '#00bcd6',
   skyblue: '#009de6',
   yellow: '#fbc02d',
-  coral: '#ff7043',
   red: '#d32f2f',
   aqua: '#00897b',
   lime: '#afb42b',
