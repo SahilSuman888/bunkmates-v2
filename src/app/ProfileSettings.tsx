@@ -861,7 +861,7 @@ export default function ProfileSettings() {
       icon: "cloud-download-outline",
       onPress: () => {
         setIsSearching(false);
-        Alert.alert("Offline & Downloads", "Offline maps cache and local assets storage management.");
+        smoothNavigate("/offline-downloads");
       },
     },
     {
@@ -2686,12 +2686,7 @@ export default function ProfileSettings() {
             icon="cloud-download-outline"
             title="Offline & Downloads"
             subtitle="Storage management, offline maps"
-            onPress={() =>
-              Alert.alert(
-                "Offline & Downloads",
-                "Offline maps cache and local assets storage management."
-              )
-            }
+            onPress={() => smoothNavigate("/offline-downloads")}
           />
           <SettingRow
             icon="location-outline"
