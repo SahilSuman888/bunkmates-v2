@@ -38,6 +38,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useUser } from "../contexts/UserContext";
 import { useThemeToggle } from "../contexts/ThemeContext"; // **@** Added dynamic theme hook
+import { useLanguage } from "../contexts/LanguageContext"; // **@** Dynamic language hook
 import { auth, db } from "../lib/firebase";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -280,6 +281,7 @@ export default function ProfileSettings() {
 
   const [tripCount, setTripCount] = useState(4);
   const [selectedLanguage, setSelectedLanguage] = useState("English (US)");
+  const { language: activeLanguage, t: tr } = useLanguage();
 
   useEffect(() => {
     (async () => {
@@ -2727,7 +2729,7 @@ export default function ProfileSettings() {
         >
           <SettingRow
             icon="color-filter-outline"
-            title="Appearance"
+            title={tr("appearance", "Appearance")}
             rightText={
               themeMode === "system"
                 ? "System (Auto)"
@@ -2739,8 +2741,8 @@ export default function ProfileSettings() {
           />
           <SettingRow
             icon="globe-outline"
-            title="Language & Region"
-            rightText={selectedLanguage}
+            title={tr("language_region_title", "Language & Region")}
+            rightText={activeLanguage || selectedLanguage}
             onPress={() => smoothNavigate("/language-region")}
           />
           <SettingRow

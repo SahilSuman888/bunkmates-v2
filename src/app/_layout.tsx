@@ -19,6 +19,7 @@ import { CallProvider } from "../contexts/CallContext";
 import NotificationsHandler from "../components/NotificationsHandler";
 import IncomingCallHandler from "../components/IncomingCallHandler";
 import { GradientProvider } from "../contexts/GradientContext";
+import { LanguageProvider } from "../contexts/LanguageContext";
 
 function LayoutContent() {
   const { themeColors } = useThemeToggle();
@@ -62,7 +63,9 @@ export default function RootLayout() {
       style={{ flex: 1 }}
     >
       <ThemeToggleProvider>
-        <LayoutContent />
+        <LanguageProvider>
+          <LayoutContent />
+        </LanguageProvider>
       </ThemeToggleProvider>
     </GestureHandlerRootView>
   );

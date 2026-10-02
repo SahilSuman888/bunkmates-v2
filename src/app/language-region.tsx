@@ -24,6 +24,7 @@ import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../theme/theme";
 
 export interface LanguageOption {
@@ -151,18 +152,32 @@ export function formatDynamicTime(is24Hour: boolean, date: Date = new Date(), sh
 export default function LanguageRegionSettings() {
   const router = useRouter();
 
+  // Language & Translation Context
+  const {
+    language: contextLang,
+    languageCode: contextLangCode,
+    changeLanguage,
+    t,
+  } = useLanguage();
+
   // Auth & user state
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   // States matching reference image defaults
-  const [language, setLanguage] = useState<string>("English (US)");
-  const [languageCode, setLanguageCode] = useState<string>("en-US");
+  const [language, setLanguage] = useState<string>(contextLang || "English (US)");
+  const [languageCode, setLanguageCode] = useState<string>(contextLangCode || "en-US");
   const [region, setRegion] = useState<string>("United States");
   const [regionCode, setRegionCode] = useState<string>("US");
   const [dateFormat, setDateFormat] = useState<string>("MM/DD/YYYY");
   const [timeFormat24, setTimeFormat24] = useState<boolean>(false);
   const [firstDayOfWeek, setFirstDayOfWeek] = useState<"Sunday" | "Monday" | "Saturday">("Sunday");
+
+  // Synchronize with global language context
+  useEffect(() => {
+    if (contextLang) setLanguage(contextLang);
+    if (contextLangCode) setLanguageCode(contextLangCode);
+  }, [contextLang, contextLangCode]);
 
   // Dynamic ticking clock state (ticks every second)
   const [currentClock, setCurrentClock] = useState<Date>(new Date());
@@ -361,12 +376,13 @@ export default function LanguageRegionSettings() {
   };
 
   // Selection handlers with dynamic smart logic
-  const handleSelectLanguage = (lang: LanguageOption) => {
+  const handleSelectLanguage = async (lang: LanguageOption) => {
     setLanguage(lang.name);
     setLanguageCode(lang.code);
-    savePreferences({ language: lang.name, languageCode: lang.code });
+    await changeLanguage(lang.name, lang.code as any);
+    await savePreferences({ language: lang.name, languageCode: lang.code });
     setLanguageModalVisible(false);
-    triggerToast(`Language set to ${lang.name}`);
+    triggerToast(`${t("app_language", "Language")}: ${lang.name}`);
   };
 
   const handleSelectRegion = (reg: RegionOption) => {
@@ -512,13 +528,13 @@ export default function LanguageRegionSettings() {
               opacity: pressed ? 0.7 : 1,
             },
           ]}
-          accessibilityLabel="Back"
+          accessibilityLabel={t("back", "Back")}
           accessibilityRole="button"
         >
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          Language & Region
+          {t("language_region_title", "Language & Region")}
         </Text>
         <View style={styles.headerRightSpacer} />
       </View>
@@ -532,7 +548,9 @@ export default function LanguageRegionSettings() {
           <View style={styles.previewTopRow}>
             <View style={styles.previewLabelRow}>
               <Ionicons name="sparkles" size={14} color={colors.textSecondary} style={{ marginRight: 6 }} />
-              <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>LIVE DYNAMIC PREVIEW</Text>
+              <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>
+                {t("live_preview", "LIVE DYNAMIC PREVIEW")}
+              </Text>
             </View>
             <View style={[styles.previewChip, { backgroundColor: colors.chipBg }]}>
               <Text style={[styles.previewChipText, { color: colors.textPrimary }]}>{regionCode}</Text>
@@ -550,7 +568,7 @@ export default function LanguageRegionSettings() {
           </Text>
 
           <Text style={[styles.previewDetails, { color: colors.textSecondary }]}>
-            Language: {language} • Week begins on {firstDayOfWeek}
+            {t("app_language", "Language")}: {language} • {t("week_begins_on", "Week begins on")} {firstDayOfWeek === "Sunday" ? t("sunday", "Sunday") : firstDayOfWeek === "Monday" ? t("monday", "Monday") : t("saturday", "Saturday")}
           </Text>
 
           {/* Dynamic 7-day Week Strip Preview */}
@@ -582,7 +600,9 @@ export default function LanguageRegionSettings() {
         {/* ========================================================
             1. LOCALE SECTION
         ========================================================= */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>LOCALE</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("locale_section", "LOCALE")}
+        </Text>
         <View style={[styles.cardGroup, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* App Language */}
           <Pressable
@@ -596,7 +616,9 @@ export default function LanguageRegionSettings() {
               <Ionicons name="globe-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={[styles.rowContent, { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>App Language</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("app_language", "App Language")}
+              </Text>
               <View style={styles.rightGroup}>
                 <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>{language}</Text>
                 <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
@@ -616,7 +638,9 @@ export default function LanguageRegionSettings() {
               <Feather name="map" size={19} color={colors.greyishWhite} />
             </View>
             <View style={[styles.rowContent, { borderBottomWidth: 0 }]}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Region</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("region", "Region")}
+              </Text>
               <View style={styles.rightGroup}>
                 <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>{region}</Text>
                 <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
@@ -628,7 +652,9 @@ export default function LanguageRegionSettings() {
         {/* ========================================================
             2. SYSTEM FORMATS SECTION
         ========================================================= */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>SYSTEM FORMATS</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("system_formats_section", "SYSTEM FORMATS")}
+        </Text>
         <View style={[styles.cardGroup, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Date Format */}
           <Pressable
@@ -639,7 +665,9 @@ export default function LanguageRegionSettings() {
               <Ionicons name="calendar-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={[styles.rowContent, { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Date Format</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("date_format", "Date Format")}
+              </Text>
               <View style={styles.rightGroup}>
                 <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>{dateFormat}</Text>
                 <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
@@ -654,9 +682,11 @@ export default function LanguageRegionSettings() {
             </View>
             <View style={[styles.rowContent, { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}>
               <View style={styles.labelGroup}>
-                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Time Format (24-Hour)</Text>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                  {t("time_format_24", "Time Format (24-Hour)")}
+                </Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                  Use 24-hour clock instead of 12-hour
+                  {t("time_format_desc", "Use 24-hour clock instead of 12-hour")}
                 </Text>
               </View>
               <Switch
@@ -677,9 +707,13 @@ export default function LanguageRegionSettings() {
               <Ionicons name="calendar" size={20} color={colors.greyishWhite} />
             </View>
             <View style={[styles.rowContent, { borderBottomWidth: 0 }]}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>First Day of Week</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("first_day_of_week", "First Day of Week")}
+              </Text>
               <View style={styles.rightGroup}>
-                <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>{firstDayOfWeek}</Text>
+                <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>
+                  {firstDayOfWeek === "Sunday" ? t("sunday", "Sunday") : firstDayOfWeek === "Monday" ? t("monday", "Monday") : t("saturday", "Saturday")}
+                </Text>
                 <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
               </View>
             </View>
@@ -703,7 +737,9 @@ export default function LanguageRegionSettings() {
           <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
             <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>Select App Language</Text>
+              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+                {t("select_language", "Select App Language")}
+              </Text>
               <Pressable
                 onPress={() => setLanguageModalVisible(false)}
                 style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
@@ -717,7 +753,7 @@ export default function LanguageRegionSettings() {
               <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
               <TextInput
                 style={[styles.searchInput, { color: colors.textPrimary }]}
-                placeholder="Search languages..."
+                placeholder={t("search_languages", "Search languages...")}
                 placeholderTextColor={colors.textSecondary}
                 value={langSearch}
                 onChangeText={setLangSearch}
@@ -780,7 +816,9 @@ export default function LanguageRegionSettings() {
           <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
             <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>Select Region</Text>
+              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+                {t("select_region", "Select Region")}
+              </Text>
               <Pressable
                 onPress={() => setRegionModalVisible(false)}
                 style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
@@ -794,7 +832,7 @@ export default function LanguageRegionSettings() {
               <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
               <TextInput
                 style={[styles.searchInput, { color: colors.textPrimary }]}
-                placeholder="Search country or region..."
+                placeholder={t("search_region", "Search country or region...")}
                 placeholderTextColor={colors.textSecondary}
                 value={regionSearch}
                 onChangeText={setRegionSearch}
@@ -857,7 +895,9 @@ export default function LanguageRegionSettings() {
           <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
             <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>Choose Date Format</Text>
+              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+                {t("choose_date_format", "Choose Date Format")}
+              </Text>
               <Pressable
                 onPress={() => setDateFormatModalVisible(false)}
                 style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
@@ -888,7 +928,7 @@ export default function LanguageRegionSettings() {
                         {item.format}
                       </Text>
                       <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
-                        Today: {liveSample} • {item.label}
+                        {t("today", "Today")}: {liveSample} • {item.label}
                       </Text>
                     </View>
                     {isSelected && (
@@ -916,7 +956,9 @@ export default function LanguageRegionSettings() {
           <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
             <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>First Day of Week</Text>
+              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+                {t("first_day_of_week", "First Day of Week")}
+              </Text>
               <Pressable
                 onPress={() => setFirstDayModalVisible(false)}
                 style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
