@@ -279,6 +279,21 @@ export default function ProfileSettings() {
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [tripCount, setTripCount] = useState(4);
+  const [selectedLanguage, setSelectedLanguage] = useState("English (US)");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const cached = await AsyncStorage.getItem("@bunkmates_locale_preferences");
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed.language) setSelectedLanguage(parsed.language);
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, []);
 
   // **@** In-Settings Search states for searching setting features/options
   const [isSearching, setIsSearching] = useState(false);
@@ -924,13 +939,13 @@ export default function ProfileSettings() {
       id: "language-region",
       category: "APP SETTINGS",
       title: "Language & Region",
-      subtitle: "English (US), locale settings",
-      keywords: ["language", "region", "country", "english", "locale", "timezone"],
-      rightText: "English (US)",
+      subtitle: `${selectedLanguage}, locale formats`,
+      keywords: ["language", "region", "country", "english", "locale", "timezone", "hindi", "date", "time"],
+      rightText: selectedLanguage,
       icon: "globe-outline",
       onPress: () => {
         setIsSearching(false);
-        Alert.alert("Language & Region", "Language is currently set to English (US).");
+        smoothNavigate("/language-region");
       },
     },
     {
@@ -2725,13 +2740,8 @@ export default function ProfileSettings() {
           <SettingRow
             icon="globe-outline"
             title="Language & Region"
-            rightText="English (US)"
-            onPress={() =>
-              Alert.alert(
-                "Language & Region",
-                "Language is currently set to English (US)."
-              )
-            }
+            rightText={selectedLanguage}
+            onPress={() => smoothNavigate("/language-region")}
           />
           <SettingRow
             icon="accessibility-outline"
