@@ -885,7 +885,7 @@ export default function ProfileSettings() {
       icon: "partly-sunny-outline",
       onPress: () => {
         setIsSearching(false);
-        smoothNavigate("/(tabs)/aqi");
+        smoothNavigate("/weather");
       },
     },
     {
@@ -2696,10 +2696,10 @@ export default function ProfileSettings() {
           />
           <SettingRow
             icon="partly-sunny-outline"
-            title="Weather Alerts"
+            title="Weather"
             subtitle="Local weather forecasts & rain warnings"
             isLast
-            onPress={() => smoothNavigate("/(tabs)/aqi")}
+            onPress={() => smoothNavigate("/weather")}
           />
         </View>
 
