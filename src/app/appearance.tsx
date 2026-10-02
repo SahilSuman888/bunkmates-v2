@@ -1,4 +1,4 @@
-// **@** Appearance Settings — Pixel-perfect UI matching Settings design system with greyish-white accents, circular back button, dynamic theme adaptability (zero red), Theme Select, Accent Colors, and Typography & Motion
+// **@** Appearance Settings — Complete unified UI combining all image features (Theme Select, Accent Colors, Typography & Motion) and all General Settings features (Background Canvas & Atmosphere, Location Mode), with zero red, greyish-white accents, circular back button, and dynamic theme adaptability
 import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
@@ -13,13 +13,13 @@ import {
   Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
-import { useThemeToggle } from "../contexts/ThemeContext";
+import { useThemeToggle, BackgroundMode, LocationMode } from "../contexts/ThemeContext";
 import { ACCENT_COLORS } from "../theme/theme";
 
 type FontSize = "Small" | "Medium" | "Large";
@@ -30,7 +30,18 @@ const SWATCH_PALETTE = [
   { key: "green", color: "#43a047", label: "Emerald Green" },
   { key: "blue", color: "#1976d2", label: "Ocean Blue" },
   { key: "purple", color: "#7c3aed", label: "Royal Purple" },
+  { key: "turquoise", color: "#00bcd6", label: "Turquoise" },
+  { key: "skyblue", color: "#009de6", label: "Sky Blue" },
+  { key: "yellow", color: "#fbc02d", label: "Warm Gold" },
+  { key: "aqua", color: "#00897b", label: "Deep Aqua" },
 ];
+
+const BACKGROUND_SWATCHES = {
+  neutral: ["#0c0c0c", "#1c1c1e", "#2c2c2e", "#3a3a3c"],
+  cool: ["#001f3f", "#003566", "#00557f", "#0077b6"],
+  warm: ["#482314", "#6d3b20", "#8c4b2f", "#a55c3f"],
+  vibrant: ["#d500f9", "#aa00ff", "#6200ea", "#304ffe"],
+};
 
 export default function AppearanceScreen() {
   const router = useRouter();
@@ -39,12 +50,16 @@ export default function AppearanceScreen() {
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // Hook into ThemeContext
+  // Hook into ThemeContext (Theme, Accent, Background, Location)
   const {
     mode,
     setMode,
     accent,
     setAccent,
+    background,
+    setBackground,
+    locationMode,
+    setLocationMode,
   } = useThemeToggle();
 
   // Typography & Motion states
@@ -210,6 +225,21 @@ export default function AppearanceScreen() {
     triggerToast(val ? "Transitional animations reduced" : "Smooth animations active");
   };
 
+  const handleSelectBgMode = (modeVal: BackgroundMode) => {
+    setBackground({ ...background, mode: modeVal });
+    triggerToast(`Background canvas: ${modeVal}`);
+  };
+
+  const handlePickBgColor = (cat: "neutral" | "cool" | "warm" | "vibrant", colorHex: string) => {
+    setBackground({ mode: background.mode, color: colorHex, category: cat });
+    triggerToast(`Atmosphere hue updated`);
+  };
+
+  const handleSelectLocationMode = (loc: LocationMode) => {
+    setLocationMode(loc);
+    triggerToast(`Location mode: ${loc}`);
+  };
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
@@ -238,7 +268,7 @@ export default function AppearanceScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── 1. THEME SELECT ── */}
+        {/* ── 1. THEME SELECT (From Screenshot) ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>THEME SELECT</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
           <View style={styles.themeSelectRow}>
@@ -326,10 +356,14 @@ export default function AppearanceScreen() {
           </View>
         </View>
 
-        {/* ── 2. ACCENT COLOR ── */}
+        {/* ── 2. ACCENT COLOR (From Screenshot) ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>ACCENT COLOR</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 18 }]}>
-          <View style={styles.swatchRow}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.swatchRow}
+          >
             {SWATCH_PALETTE.map((s) => {
               const isSelected = accent === s.key;
               return (
@@ -348,10 +382,10 @@ export default function AppearanceScreen() {
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
         </View>
 
-        {/* ── 3. TYPOGRAPHY & MOTION ── */}
+        {/* ── 3. TYPOGRAPHY & MOTION (From Screenshot) ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>TYPOGRAPHY & MOTION</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Font Size */}
@@ -408,6 +442,104 @@ export default function AppearanceScreen() {
               thumbColor="#FFFFFF"
               accessibilityLabel="Toggle Reduce Animations"
             />
+          </View>
+        </View>
+
+        {/* ── 4. BACKGROUND & ATMOSPHERE (Integrated from General Settings) ── */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>BACKGROUND & ATMOSPHERE</Text>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
+          <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>Canvas Style</Text>
+          <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg, marginBottom: 16 }]}>
+            {(["solid", "gradient", "mesh"] as BackgroundMode[]).map((bm) => {
+              const isSelected = background.mode === bm;
+              return (
+                <Pressable
+                  key={bm}
+                  style={[
+                    styles.segmentItem,
+                    isSelected && [
+                      styles.segmentItemActive,
+                      { backgroundColor: colors.segmentActiveBg },
+                    ],
+                  ]}
+                  onPress={() => handleSelectBgMode(bm)}
+                >
+                  <Text
+                    style={[
+                      styles.segmentText,
+                      isSelected
+                        ? [styles.segmentTextActive, { color: colors.activeText }]
+                        : { color: colors.textSecondary },
+                    ]}
+                  >
+                    {bm.charAt(0).toUpperCase() + bm.slice(1)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Text style={[styles.blockLabel, { color: colors.textPrimary, marginBottom: 10 }]}>Palette Hue</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bgSwatchesRow}>
+            {Object.entries(BACKGROUND_SWATCHES).flatMap(([cat, arr]) =>
+              arr.map((cHex) => {
+                const isSelected = background.color === cHex;
+                return (
+                  <Pressable
+                    key={cHex}
+                    style={({ pressed }) => [
+                      styles.bgSwatchCircle,
+                      { backgroundColor: cHex },
+                      isSelected && styles.bgSwatchSelectedRing,
+                      pressed && styles.pressed,
+                    ]}
+                    onPress={() => handlePickBgColor(cat as any, cHex)}
+                  >
+                    {isSelected && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                  </Pressable>
+                );
+              })
+            )}
+          </ScrollView>
+        </View>
+
+        {/* ── 5. LOCATION TRACKING (Integrated from General Settings) ── */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>LOCATION TRACKING</Text>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={styles.row}>
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <MaterialCommunityIcons name="map-marker-radius-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Location Mode</Text>
+              <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
+                Auto-detect or manual travel region
+              </Text>
+            </View>
+            <View style={[styles.miniSegment, { backgroundColor: colors.segmentBg }]}>
+              {(["auto", "manual"] as LocationMode[]).map((l) => {
+                const isSelected = locationMode === l;
+                return (
+                  <Pressable
+                    key={l}
+                    style={[
+                      styles.miniSegmentItem,
+                      isSelected && [styles.miniSegmentItemActive, { backgroundColor: colors.segmentActiveBg }],
+                    ]}
+                    onPress={() => handleSelectLocationMode(l)}
+                  >
+                    <Text
+                      style={[
+                        styles.miniSegmentText,
+                        isSelected ? { color: colors.activeText, fontWeight: "700" } : { color: colors.textSecondary },
+                      ]}
+                    >
+                      {l.charAt(0).toUpperCase() + l.slice(1)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -530,13 +662,13 @@ const styles = StyleSheet.create({
   swatchRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
+    gap: 14,
     paddingVertical: 4,
   },
   swatchCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     justifyContent: "center",
     alignItems: "center",
     shadowColor: "#000",
@@ -549,6 +681,24 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "#FFFFFF",
     transform: [{ scale: 1.1 }],
+  },
+
+  // Background Atmosphere Swatches
+  bgSwatchesRow: {
+    flexDirection: "row",
+    gap: 10,
+    paddingVertical: 4,
+  },
+  bgSwatchCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  bgSwatchSelectedRing: {
+    borderWidth: 2.5,
+    borderColor: "#FFFFFF",
   },
 
   // Typography Segment
@@ -621,6 +771,28 @@ const styles = StyleSheet.create({
   divider: {
     height: StyleSheet.hairlineWidth,
     marginHorizontal: 16,
+  },
+
+  // Mini segment for Location
+  miniSegment: {
+    flexDirection: "row",
+    borderRadius: 12,
+    padding: 3,
+  },
+  miniSegmentItem: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 9,
+  },
+  miniSegmentItemActive: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  miniSegmentText: {
+    fontSize: 12.5,
   },
 
   // Toast Container
