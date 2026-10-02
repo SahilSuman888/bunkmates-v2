@@ -954,12 +954,12 @@ export default function ProfileSettings() {
       id: "accessibility",
       category: "APP SETTINGS",
       title: "Accessibility",
-      subtitle: "Font scale, high contrast features",
-      keywords: ["accessibility", "font", "contrast", "size", "zoom", "reader"],
+      subtitle: "High contrast, motion, touch targets & color blind filters",
+      keywords: ["accessibility", "font", "contrast", "size", "zoom", "reader", "haptic", "motion", "color blind", "vision"],
       icon: "accessibility-outline",
       onPress: () => {
         setIsSearching(false);
-        Alert.alert("Accessibility", "Dynamic font scaling and high contrast features active.");
+        smoothNavigate("/accessibility");
       },
     },
     {
@@ -2748,13 +2748,8 @@ export default function ProfileSettings() {
           <SettingRow
             icon="accessibility-outline"
             title="Accessibility"
-            subtitle="Font scale, high contrast features"
-            onPress={() =>
-              Alert.alert(
-                "Accessibility",
-                "Dynamic font scaling and high contrast features active."
-              )
-            }
+            subtitle="Vision support, high contrast, motion & haptics"
+            onPress={() => smoothNavigate("/accessibility")}
           />
           {/* Preserved v2 feature: Chats */}
           <SettingRow
