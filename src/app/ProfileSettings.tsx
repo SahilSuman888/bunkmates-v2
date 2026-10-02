@@ -1036,8 +1036,7 @@ export default function ProfileSettings() {
       icon: "information-circle-outline",
       onPress: () => {
         setIsSearching(false);
-        handleBuildTap();
-        setCurrentPage("about");
+        smoothNavigate("/about");
       },
     },
     {
@@ -2813,10 +2812,7 @@ export default function ProfileSettings() {
             icon="information-circle-outline"
             title="About BunkMates"
             subtitle="Version 3.4.1 (Stable)"
-            onPress={() => {
-              handleBuildTap();
-              setCurrentPage("about");
-            }}
+            onPress={() => smoothNavigate("/about")}
           />
           {/* Preserved v2 feature: Licenses */}
           <SettingRow
