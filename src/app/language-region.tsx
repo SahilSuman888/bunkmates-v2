@@ -1,5 +1,5 @@
 // **@** Language & Region Settings — Pixel-perfect UI matching design system with greyish-white icons, circular back button, dynamic theme adaptability (zero red), and real Firestore & AsyncStorage persistence
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   Animated,
   TextInput,
   FlatList,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, Feather } from "@expo/vector-icons";
@@ -30,6 +31,7 @@ export interface LanguageOption {
   name: string;
   nativeName: string;
   flag: string;
+  greeting: string;
 }
 
 export interface RegionOption {
@@ -38,70 +40,113 @@ export interface RegionOption {
   flag: string;
   defaultFirstDay: "Sunday" | "Monday" | "Saturday";
   defaultDateFormat: string;
+  default24Hour: boolean;
 }
 
 export interface DateFormatOption {
   format: string;
-  sample: string;
   label: string;
 }
 
 export interface FirstDayOption {
   day: "Sunday" | "Monday" | "Saturday";
   desc: string;
+  weekDays: string[];
 }
 
-const LANGUAGES: LanguageOption[] = [
-  { code: "en-US", name: "English (US)", nativeName: "English (United States)", flag: "🇺🇸" },
-  { code: "en-GB", name: "English (UK)", nativeName: "English (United Kingdom)", flag: "🇬🇧" },
-  { code: "en-IN", name: "English (IN)", nativeName: "English (India)", flag: "🇮🇳" },
-  { code: "hi", name: "Hindi", nativeName: "हिन्दी", flag: "🇮🇳" },
-  { code: "es", name: "Spanish", nativeName: "Español", flag: "🇪🇸" },
-  { code: "fr", name: "French", nativeName: "Français", flag: "🇫🇷" },
-  { code: "de", name: "German", nativeName: "Deutsch", flag: "🇩🇪" },
-  { code: "ja", name: "Japanese", nativeName: "日本語", flag: "🇯🇵" },
-  { code: "zh-CN", name: "Chinese (Simplified)", nativeName: "简体中文", flag: "🇨🇳" },
-  { code: "pt-BR", name: "Portuguese (Brazil)", nativeName: "Português", flag: "🇧🇷" },
-  { code: "it", name: "Italian", nativeName: "Italiano", flag: "🇮🇹" },
-  { code: "ar", name: "Arabic", nativeName: "العربية", flag: "🇦🇪" },
-  { code: "ru", name: "Russian", nativeName: "Русский", flag: "🇷🇺" },
-  { code: "ko", name: "Korean", nativeName: "한국어", flag: "🇰🇷" },
-  { code: "nl", name: "Dutch", nativeName: "Nederlands", flag: "🇳🇱" },
-  { code: "bn", name: "Bengali", nativeName: "বাংলা", flag: "🇧🇩" },
+export const LANGUAGES: LanguageOption[] = [
+  { code: "en-US", name: "English (US)", nativeName: "English (United States)", flag: "🇺🇸", greeting: "Welcome to Bunkmates" },
+  { code: "en-GB", name: "English (UK)", nativeName: "English (United Kingdom)", flag: "🇬🇧", greeting: "Welcome to Bunkmates" },
+  { code: "en-IN", name: "English (IN)", nativeName: "English (India)", flag: "🇮🇳", greeting: "Welcome to Bunkmates" },
+  { code: "hi", name: "Hindi", nativeName: "हिन्दी", flag: "🇮🇳", greeting: "बंकमेट्स में आपका स्वागत है" },
+  { code: "es", name: "Spanish", nativeName: "Español", flag: "🇪🇸", greeting: "Bienvenido a Bunkmates" },
+  { code: "fr", name: "French", nativeName: "Français", flag: "🇫🇷", greeting: "Bienvenue sur Bunkmates" },
+  { code: "de", name: "German", nativeName: "Deutsch", flag: "🇩🇪", greeting: "Willkommen bei Bunkmates" },
+  { code: "ja", name: "Japanese", nativeName: "日本語", flag: "🇯🇵", greeting: "Bunkmatesへようこそ" },
+  { code: "zh-CN", name: "Chinese (Simplified)", nativeName: "简体中文", flag: "🇨🇳", greeting: "欢迎使用 Bunkmates" },
+  { code: "pt-BR", name: "Portuguese (Brazil)", nativeName: "Português", flag: "🇧🇷", greeting: "Bem-vindo ao Bunkmates" },
+  { code: "it", name: "Italian", nativeName: "Italiano", flag: "🇮🇹", greeting: "Benvenuto su Bunkmates" },
+  { code: "ar", name: "Arabic", nativeName: "العربية", flag: "🇦🇪", greeting: "مرحبًا بك في بانكميتس" },
+  { code: "ru", name: "Russian", nativeName: "Русский", flag: "🇷🇺", greeting: "Добро пожаловать в Bunkmates" },
+  { code: "ko", name: "Korean", nativeName: "한국어", flag: "🇰🇷", greeting: "Bunkmates에 오신 것을 환영합니다" },
+  { code: "nl", name: "Dutch", nativeName: "Nederlands", flag: "🇳🇱", greeting: "Welkom bij Bunkmates" },
+  { code: "bn", name: "Bengali", nativeName: "বাংলা", flag: "🇧🇩", greeting: "বাঙ্কমেইটসে স্বাগতম" },
 ];
 
-const REGIONS: RegionOption[] = [
-  { code: "US", name: "United States", flag: "🇺🇸", defaultFirstDay: "Sunday", defaultDateFormat: "MM/DD/YYYY" },
-  { code: "IN", name: "India", flag: "🇮🇳", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "GB", name: "United Kingdom", flag: "🇬🇧", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "CA", name: "Canada", flag: "🇨🇦", defaultFirstDay: "Sunday", defaultDateFormat: "YYYY-MM-DD" },
-  { code: "AU", name: "Australia", flag: "🇦🇺", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "DE", name: "Germany", flag: "🇩🇪", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "FR", name: "France", flag: "🇫🇷", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "JP", name: "Japan", flag: "🇯🇵", defaultFirstDay: "Sunday", defaultDateFormat: "YYYY-MM-DD" },
-  { code: "SG", name: "Singapore", flag: "🇸🇬", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "AE", name: "United Arab Emirates", flag: "🇦🇪", defaultFirstDay: "Saturday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "ES", name: "Spain", flag: "🇪🇸", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "IT", name: "Italy", flag: "🇮🇹", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "BR", name: "Brazil", flag: "🇧🇷", defaultFirstDay: "Sunday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "NZ", name: "New Zealand", flag: "🇳🇿", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "CH", name: "Switzerland", flag: "🇨🇭", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY" },
-  { code: "NL", name: "Netherlands", flag: "🇳🇱", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY" },
+export const REGIONS: RegionOption[] = [
+  { code: "US", name: "United States", flag: "🇺🇸", defaultFirstDay: "Sunday", defaultDateFormat: "MM/DD/YYYY", default24Hour: false },
+  { code: "IN", name: "India", flag: "🇮🇳", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: false },
+  { code: "GB", name: "United Kingdom", flag: "🇬🇧", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
+  { code: "CA", name: "Canada", flag: "🇨🇦", defaultFirstDay: "Sunday", defaultDateFormat: "YYYY-MM-DD", default24Hour: false },
+  { code: "AU", name: "Australia", flag: "🇦🇺", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: false },
+  { code: "DE", name: "Germany", flag: "🇩🇪", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
+  { code: "FR", name: "France", flag: "🇫🇷", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
+  { code: "JP", name: "Japan", flag: "🇯🇵", defaultFirstDay: "Sunday", defaultDateFormat: "YYYY-MM-DD", default24Hour: true },
+  { code: "SG", name: "Singapore", flag: "🇸🇬", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
+  { code: "AE", name: "United Arab Emirates", flag: "🇦🇪", defaultFirstDay: "Saturday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
+  { code: "ES", name: "Spain", flag: "🇪🇸", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
+  { code: "IT", name: "Italy", flag: "🇮🇹", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
+  { code: "BR", name: "Brazil", flag: "🇧🇷", defaultFirstDay: "Sunday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
+  { code: "NZ", name: "New Zealand", flag: "🇳🇿", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: false },
+  { code: "CH", name: "Switzerland", flag: "🇨🇭", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
+  { code: "NL", name: "Netherlands", flag: "🇳🇱", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
 ];
 
-const DATE_FORMATS: DateFormatOption[] = [
-  { format: "MM/DD/YYYY", sample: "10/02/2026", label: "Month / Day / Year (US Standard)" },
-  { format: "DD/MM/YYYY", sample: "02/10/2026", label: "Day / Month / Year (UK, India, Global)" },
-  { format: "YYYY-MM-DD", sample: "2026-10-02", label: "Year-Month-Day (ISO 8601 Standard)" },
-  { format: "DD MMM YYYY", sample: "02 Oct 2026", label: "Day Month Name Year" },
-  { format: "MMM DD, YYYY", sample: "Oct 02, 2026", label: "Month Name Day, Year" },
+export const DATE_FORMATS: DateFormatOption[] = [
+  { format: "MM/DD/YYYY", label: "Month / Day / Year (US Standard)" },
+  { format: "DD/MM/YYYY", label: "Day / Month / Year (UK, India, Global)" },
+  { format: "YYYY-MM-DD", label: "Year-Month-Day (ISO 8601 Standard)" },
+  { format: "DD MMM YYYY", label: "Day Month Name Year" },
+  { format: "MMM DD, YYYY", label: "Month Name Day, Year" },
 ];
 
-const FIRST_DAY_OPTIONS: FirstDayOption[] = [
-  { day: "Sunday", desc: "Common in United States, Canada, Japan" },
-  { day: "Monday", desc: "Standard in Europe, India, ISO 8601" },
-  { day: "Saturday", desc: "Standard in Middle Eastern regions" },
+export const FIRST_DAY_OPTIONS: FirstDayOption[] = [
+  { day: "Sunday", desc: "Common in United States, Canada, Japan", weekDays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] },
+  { day: "Monday", desc: "Standard in Europe, India, ISO 8601", weekDays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+  { day: "Saturday", desc: "Standard in Middle Eastern regions", weekDays: ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"] },
 ];
+
+// Helper to format any date dynamically
+export function formatDynamicDate(format: string, date: Date = new Date()): string {
+  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+  const day = pad(date.getDate());
+  const monthNum = pad(date.getMonth() + 1);
+  const year = date.getFullYear();
+  const monthNamesShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const monthShort = monthNamesShort[date.getMonth()];
+
+  switch (format) {
+    case "MM/DD/YYYY":
+      return `${monthNum}/${day}/${year}`;
+    case "DD/MM/YYYY":
+      return `${day}/${monthNum}/${year}`;
+    case "YYYY-MM-DD":
+      return `${year}-${monthNum}-${day}`;
+    case "DD MMM YYYY":
+      return `${day} ${monthShort} ${year}`;
+    case "MMM DD, YYYY":
+      return `${monthShort} ${day}, ${year}`;
+    default:
+      return `${monthNum}/${day}/${year}`;
+  }
+}
+
+// Helper to format any time dynamically
+export function formatDynamicTime(is24Hour: boolean, date: Date = new Date(), showSeconds: boolean = true): string {
+  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+  let hours = date.getHours();
+  const mins = pad(date.getMinutes());
+  const secs = pad(date.getSeconds());
+
+  if (is24Hour) {
+    return showSeconds ? `${pad(hours)}:${mins}:${secs}` : `${pad(hours)}:${mins}`;
+  } else {
+    const ampm = hours >= 12 ? "PM" : "AM";
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    return showSeconds ? `${hours}:${mins}:${secs} ${ampm}` : `${hours}:${mins} ${ampm}`;
+  }
+}
 
 export default function LanguageRegionSettings() {
   const router = useRouter();
@@ -119,6 +164,15 @@ export default function LanguageRegionSettings() {
   const [timeFormat24, setTimeFormat24] = useState<boolean>(false);
   const [firstDayOfWeek, setFirstDayOfWeek] = useState<"Sunday" | "Monday" | "Saturday">("Sunday");
 
+  // Dynamic ticking clock state (ticks every second)
+  const [currentClock, setCurrentClock] = useState<Date>(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentClock(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Modals state
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
   const [regionModalVisible, setRegionModalVisible] = useState(false);
@@ -131,24 +185,24 @@ export default function LanguageRegionSettings() {
 
   // Floating save/action toast state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const toastOpacity = useMemo(() => new Animated.Value(0), []);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
 
-  const triggerToast = (msg: string) => {
+  const triggerToast = useCallback((msg: string) => {
     setToastMessage(msg);
     Animated.sequence([
       Animated.timing(toastOpacity, {
         toValue: 1,
-        duration: 200,
+        duration: 180,
         useNativeDriver: true,
       }),
       Animated.delay(1600),
       Animated.timing(toastOpacity, {
         toValue: 0,
-        duration: 250,
+        duration: 220,
         useNativeDriver: true,
       }),
     ]).start(() => setToastMessage(null));
-  };
+  }, [toastOpacity]);
 
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
@@ -207,6 +261,7 @@ export default function LanguageRegionSettings() {
       previewBg: isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.02)",
       previewBorder: isDark ? "rgba(255, 255, 255, 0.07)" : "#E5E7EB",
       chipBg: isDark ? "rgba(255, 255, 255, 0.08)" : "#EEF2F6",
+      weekdayActiveBg: isDark ? "rgba(255, 255, 255, 0.15)" : "#E5E7EB",
     };
   }, [isDark, userAccent]);
 
@@ -305,7 +360,7 @@ export default function LanguageRegionSettings() {
     }
   };
 
-  // Selection handlers
+  // Selection handlers with dynamic smart logic
   const handleSelectLanguage = (lang: LanguageOption) => {
     setLanguage(lang.name);
     setLanguageCode(lang.code);
@@ -317,16 +372,49 @@ export default function LanguageRegionSettings() {
   const handleSelectRegion = (reg: RegionOption) => {
     setRegion(reg.name);
     setRegionCode(reg.code);
-    savePreferences({ region: reg.name, regionCode: reg.code });
+
+    // Dynamic Regional auto-preset suggestion:
+    // When changing region, offer to also match typical date format and week start
+    Alert.alert(
+      `Set Regional Formats for ${reg.name}?`,
+      `Would you like to automatically update your date format (${reg.defaultDateFormat}), 24-hour time (${reg.default24Hour ? "On" : "Off"}), and first day of week (${reg.defaultFirstDay}) to match ${reg.name}?`,
+      [
+        {
+          text: "Keep Current Formats",
+          style: "cancel",
+          onPress: () => {
+            savePreferences({ region: reg.name, regionCode: reg.code });
+            triggerToast(`Region set to ${reg.name}`);
+          },
+        },
+        {
+          text: "Apply Regional Defaults",
+          style: "default",
+          onPress: () => {
+            setDateFormat(reg.defaultDateFormat);
+            setTimeFormat24(reg.default24Hour);
+            setFirstDayOfWeek(reg.defaultFirstDay);
+            savePreferences({
+              region: reg.name,
+              regionCode: reg.code,
+              dateFormat: reg.defaultDateFormat,
+              timeFormat24: reg.default24Hour,
+              firstDayOfWeek: reg.defaultFirstDay,
+            });
+            triggerToast(`Region & formats updated for ${reg.name}`);
+          },
+        },
+      ]
+    );
+
     setRegionModalVisible(false);
-    triggerToast(`Region set to ${reg.name}`);
   };
 
   const handleSelectDateFormat = (df: DateFormatOption) => {
     setDateFormat(df.format);
     savePreferences({ dateFormat: df.format });
     setDateFormatModalVisible(false);
-    triggerToast(`Date format set to ${df.format}`);
+    triggerToast(`Date format: ${df.format}`);
   };
 
   const handleTimeFormatToggle = (val: boolean) => {
@@ -342,7 +430,7 @@ export default function LanguageRegionSettings() {
     triggerToast(`First day of week: ${day}`);
   };
 
-  // Filtered lists for modals
+  // Filtered lists for search modals
   const filteredLanguages = useMemo(() => {
     const q = langSearch.trim().toLowerCase();
     if (!q) return LANGUAGES;
@@ -364,51 +452,32 @@ export default function LanguageRegionSettings() {
     );
   }, [regionSearch]);
 
-  // Formatted date-time live example
-  const formattedPreview = useMemo(() => {
-    const now = new Date();
-    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
-    const month = pad(now.getMonth() + 1);
-    const day = pad(now.getDate());
-    const year = now.getFullYear();
-    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthName = monthNames[now.getMonth()];
+  // Dynamic greetings translation for the currently selected language
+  const activeGreeting = useMemo(() => {
+    const found = LANGUAGES.find((l) => l.name === language || l.code === languageCode);
+    return found ? found.greeting : "Welcome to Bunkmates";
+  }, [language, languageCode]);
 
-    let dateStr = "";
-    switch (dateFormat) {
-      case "MM/DD/YYYY":
-        dateStr = `${month}/${day}/${year}`;
-        break;
-      case "DD/MM/YYYY":
-        dateStr = `${day}/${month}/${year}`;
-        break;
-      case "YYYY-MM-DD":
-        dateStr = `${year}-${month}-${day}`;
-        break;
-      case "DD MMM YYYY":
-        dateStr = `${day} ${monthName} ${year}`;
-        break;
-      case "MMM DD, YYYY":
-        dateStr = `${monthName} ${day}, ${year}`;
-        break;
-      default:
-        dateStr = `${month}/${day}/${year}`;
-    }
+  // Formatted date-time live example that dynamically ticks
+  const liveDateString = useMemo(() => {
+    return formatDynamicDate(dateFormat, currentClock);
+  }, [dateFormat, currentClock]);
 
-    let hours = now.getHours();
-    const mins = pad(now.getMinutes());
-    let timeStr = "";
-    if (timeFormat24) {
-      timeStr = `${pad(hours)}:${mins}`;
-    } else {
-      const ampm = hours >= 12 ? "PM" : "AM";
-      hours = hours % 12;
-      hours = hours ? hours : 12;
-      timeStr = `${hours}:${mins} ${ampm}`;
-    }
+  const liveTimeString = useMemo(() => {
+    return formatDynamicTime(timeFormat24, currentClock, true);
+  }, [timeFormat24, currentClock]);
 
-    return `${dateStr} • ${timeStr}`;
-  }, [dateFormat, timeFormat24]);
+  // Dynamic 7-day week sequence based on selected firstDayOfWeek
+  const dynamicWeekDays = useMemo(() => {
+    const option = FIRST_DAY_OPTIONS.find((f) => f.day === firstDayOfWeek);
+    return option ? option.weekDays : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  }, [firstDayOfWeek]);
+
+  // Today's day abbreviation to highlight
+  const todayDayAbbr = useMemo(() => {
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return days[currentClock.getDay()];
+  }, [currentClock]);
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top"]}>
@@ -458,21 +527,56 @@ export default function LanguageRegionSettings() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Live Locale Preview Card */}
+        {/* Dynamic Live Locale & Formats Preview Card */}
         <View style={[styles.previewCard, { backgroundColor: colors.previewBg, borderColor: colors.previewBorder }]}>
           <View style={styles.previewTopRow}>
             <View style={styles.previewLabelRow}>
               <Ionicons name="sparkles" size={14} color={colors.textSecondary} style={{ marginRight: 6 }} />
-              <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>FORMATTED PREVIEW</Text>
+              <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>LIVE DYNAMIC PREVIEW</Text>
             </View>
             <View style={[styles.previewChip, { backgroundColor: colors.chipBg }]}>
               <Text style={[styles.previewChipText, { color: colors.textPrimary }]}>{regionCode}</Text>
             </View>
           </View>
-          <Text style={[styles.previewDateTime, { color: colors.textPrimary }]}>{formattedPreview}</Text>
-          <Text style={[styles.previewDetails, { color: colors.textSecondary }]}>
-            {language} • Week begins on {firstDayOfWeek}
+
+          {/* Dynamic Ticking Time & Date */}
+          <Text style={[styles.previewDateTime, { color: colors.textPrimary }]}>
+            {liveDateString} • {liveTimeString}
           </Text>
+
+          {/* Localized Greeting & Details */}
+          <Text style={[styles.previewGreeting, { color: colors.textPrimary }]}>
+            "{activeGreeting}"
+          </Text>
+
+          <Text style={[styles.previewDetails, { color: colors.textSecondary }]}>
+            Language: {language} • Week begins on {firstDayOfWeek}
+          </Text>
+
+          {/* Dynamic 7-day Week Strip Preview */}
+          <View style={styles.weekStrip}>
+            {dynamicWeekDays.map((d) => {
+              const isToday = d === todayDayAbbr;
+              return (
+                <View
+                  key={d}
+                  style={[
+                    styles.weekDayPill,
+                    { backgroundColor: isToday ? colors.switchActive : colors.chipBg },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.weekDayPillText,
+                      { color: isToday ? "#FFFFFF" : colors.textSecondary, fontWeight: isToday ? "700" : "500" },
+                    ]}
+                  >
+                    {d}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
         </View>
 
         {/* ========================================================
@@ -630,7 +734,7 @@ export default function LanguageRegionSettings() {
               data={filteredLanguages}
               keyExtractor={(item) => item.code}
               showsVerticalScrollIndicator={false}
-              style={{ maxHeight: 360 }}
+              style={{ maxHeight: 380 }}
               renderItem={({ item }) => {
                 const isSelected = language === item.name;
                 return (
@@ -648,7 +752,7 @@ export default function LanguageRegionSettings() {
                         {item.name}
                       </Text>
                       <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
-                        {item.nativeName}
+                        {item.nativeName} • "{item.greeting}"
                       </Text>
                     </View>
                     {isSelected && (
@@ -707,7 +811,7 @@ export default function LanguageRegionSettings() {
               data={filteredRegions}
               keyExtractor={(item) => item.code}
               showsVerticalScrollIndicator={false}
-              style={{ maxHeight: 360 }}
+              style={{ maxHeight: 380 }}
               renderItem={({ item }) => {
                 const isSelected = region === item.name;
                 return (
@@ -725,7 +829,7 @@ export default function LanguageRegionSettings() {
                         {item.name}
                       </Text>
                       <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
-                        Region code: {item.code}
+                        Format: {item.defaultDateFormat} • Starts {item.defaultFirstDay}
                       </Text>
                     </View>
                     {isSelected && (
@@ -740,7 +844,7 @@ export default function LanguageRegionSettings() {
       </Modal>
 
       {/* ========================================================
-          MODAL 3: DATE FORMAT PICKER
+          MODAL 3: DATE FORMAT PICKER (Dynamic live today's date sample)
       ========================================================= */}
       <Modal
         visible={dateFormatModalVisible}
@@ -765,6 +869,7 @@ export default function LanguageRegionSettings() {
             <ScrollView showsVerticalScrollIndicator={false}>
               {DATE_FORMATS.map((item) => {
                 const isSelected = dateFormat === item.format;
+                const liveSample = formatDynamicDate(item.format, currentClock);
                 return (
                   <Pressable
                     key={item.format}
@@ -783,7 +888,7 @@ export default function LanguageRegionSettings() {
                         {item.format}
                       </Text>
                       <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
-                        Example: {item.sample} • {item.label}
+                        Today: {liveSample} • {item.label}
                       </Text>
                     </View>
                     {isSelected && (
@@ -843,6 +948,30 @@ export default function LanguageRegionSettings() {
                       <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
                         {item.desc}
                       </Text>
+                      {/* Mini week day sequence preview */}
+                      <View style={{ flexDirection: "row", gap: 4, marginTop: 4 }}>
+                        {item.weekDays.map((wd, i) => (
+                          <View
+                            key={wd}
+                            style={{
+                              paddingHorizontal: 4,
+                              paddingVertical: 1,
+                              borderRadius: 4,
+                              backgroundColor: i === 0 ? colors.switchActive : colors.chipBg,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 9,
+                                fontWeight: "600",
+                                color: i === 0 ? "#FFFFFF" : colors.textSecondary,
+                              }}
+                            >
+                              {wd}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
                     </View>
                     {isSelected && (
                       <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
@@ -927,9 +1056,32 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
     marginBottom: 4,
   },
+  previewGreeting: {
+    fontSize: 13,
+    fontWeight: "600",
+    fontStyle: "italic",
+    marginBottom: 4,
+  },
   previewDetails: {
     fontSize: 12,
     fontWeight: "500",
+    marginBottom: 10,
+  },
+  weekStrip: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  weekDayPill: {
+    flex: 1,
+    marginHorizontal: 2,
+    paddingVertical: 5,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  weekDayPillText: {
+    fontSize: 10,
   },
   sectionHeading: {
     fontSize: 12,
