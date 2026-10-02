@@ -16,7 +16,7 @@ import {
   AccessibilityInfo,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons, Feather } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
@@ -39,6 +39,7 @@ export interface ColorBlindOption {
   desc: string;
   badge: string;
   palettePreview: string[];
+  activeSwitchColor: string;
 }
 
 export const COLOR_BLIND_OPTIONS: ColorBlindOption[] = [
@@ -47,7 +48,8 @@ export const COLOR_BLIND_OPTIONS: ColorBlindOption[] = [
     label: "Off",
     desc: "Standard full color spectrum (Trichromacy)",
     badge: "Default",
-    palettePreview: ["#3B82F6", "#10B981", "#F59E0B", "#EF4444"],
+    palettePreview: ["#3B82F6", "#10B981", "#F59E0B", "#6366F1"],
+    activeSwitchColor: "#34C759", // Native green
   },
   {
     id: "Protanopia",
@@ -55,27 +57,31 @@ export const COLOR_BLIND_OPTIONS: ColorBlindOption[] = [
     desc: "Red-weak correction filter (Enhances ambers & cyan-blues)",
     badge: "Red-Weak",
     palettePreview: ["#2563EB", "#F59E0B", "#06B6D4", "#6366F1"],
+    activeSwitchColor: "#2563EB", // Vibrant blue
   },
   {
     id: "Deuteranopia",
     label: "Deuteranopia",
-    desc: "Green-weak correction filter (Enhances blues & oranges)",
+    desc: "Green-weak correction filter (Enhances blues & deep oranges)",
     badge: "Green-Weak",
     palettePreview: ["#1D4ED8", "#EA580C", "#0284C7", "#D97706"],
+    activeSwitchColor: "#0284C7", // Cyan-blue
   },
   {
     id: "Tritanopia",
     label: "Tritanopia",
-    desc: "Blue-weak correction filter (Enhances teals & deep reds)",
+    desc: "Blue-weak correction filter (Enhances teals & bright magentas)",
     badge: "Blue-Weak",
-    palettePreview: ["#0D9488", "#DC2626", "#059669", "#E11D48"],
+    palettePreview: ["#0D9488", "#E11D48", "#059669", "#7C3AED"],
+    activeSwitchColor: "#0D9488", // Teal
   },
   {
     id: "Monochromacy",
     label: "Monochromacy",
     desc: "Achromatopsia filter (High luminance monochrome grayscale)",
     badge: "Grayscale",
-    palettePreview: ["#111827", "#4B5563", "#9CA3AF", "#F3F4F6"],
+    palettePreview: ["#111827", "#4B5563", "#9CA3AF", "#E5E7EB"],
+    activeSwitchColor: "#E5E7EB", // High luminance white/gray
   },
 ];
 
@@ -105,22 +111,33 @@ export default function AccessibilitySettings() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
 
-  const triggerToast = useCallback((msg: string) => {
-    setToastMessage(msg);
-    Animated.sequence([
-      Animated.timing(toastOpacity, {
-        toValue: 1,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-      Animated.delay(1600),
-      Animated.timing(toastOpacity, {
-        toValue: 0,
-        duration: 220,
-        useNativeDriver: true,
-      }),
-    ]).start(() => setToastMessage(null));
-  }, [toastOpacity]);
+  const triggerToast = useCallback(
+    (msg: string) => {
+      setToastMessage(msg);
+      if (reduceMotion) {
+        toastOpacity.setValue(1);
+        setTimeout(() => {
+          toastOpacity.setValue(0);
+          setToastMessage(null);
+        }, 1600);
+        return;
+      }
+      Animated.sequence([
+        Animated.timing(toastOpacity, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.delay(1600),
+        Animated.timing(toastOpacity, {
+          toValue: 0,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+      ]).start(() => setToastMessage(null));
+    },
+    [toastOpacity, reduceMotion]
+  );
 
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
@@ -140,22 +157,20 @@ export default function AccessibilitySettings() {
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
   // Dynamic colors derived from Settings page (zero red, greyish-white accents)
-  // Adaptively shifts contrast if highContrastMode is active
+  // Dynamically adapts based on highContrastMode and active colorBlindMode
   const colors = useMemo(() => {
-    const hasCustomNonRedAccent =
-      userAccent &&
-      userAccent !== "default" &&
-      userAccent !== "coral" &&
-      userAccent !== "red" &&
-      (ACCENT_COLORS as any)[userAccent];
-
-    const customAccent = hasCustomNonRedAccent
-      ? (ACCENT_COLORS as any)[userAccent]
-      : null;
+    const activeColorBlindConfig = COLOR_BLIND_OPTIONS.find((o) => o.id === colorBlindMode);
+    const dynamicSwitchColor = activeColorBlindConfig
+      ? colorBlindMode === "Off"
+        ? isDark
+          ? "#34C759"
+          : "#10B981"
+        : activeColorBlindConfig.activeSwitchColor
+      : isDark
+      ? "#34C759"
+      : "#10B981";
 
     const greyishWhite = isDark ? "#E2E8F0" : "#4B5563";
-    const activeText = customAccent || (isDark ? "#FFFFFF" : "#11141A");
-    const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
 
     // Dynamic High Contrast adjustments
     const bg = highContrastMode
@@ -192,8 +207,16 @@ export default function AccessibilitySettings() {
 
     const textSecondary = highContrastMode
       ? isDark
-        ? "#D1D5DB"
+        ? "#E5E7EB"
         : "#374151"
+      : isDark
+      ? "#8E95A2"
+      : "#7E8590";
+
+    const sectionHeader = highContrastMode
+      ? isDark
+        ? "#F3F4F6"
+        : "#111827"
       : isDark
       ? "#8E95A2"
       : "#7E8590";
@@ -204,27 +227,19 @@ export default function AccessibilitySettings() {
       cardBorder,
       divider: highContrastMode
         ? isDark
-          ? "rgba(255, 255, 255, 0.25)"
-          : "rgba(0, 0, 0, 0.20)"
+          ? "rgba(255, 255, 255, 0.35)"
+          : "rgba(0, 0, 0, 0.25)"
         : isDark
         ? "rgba(255, 255, 255, 0.05)"
         : "#F2F4F7",
       textPrimary,
       textSecondary,
-      sectionHeader: highContrastMode
-        ? isDark
-          ? "#E5E7EB"
-          : "#1F2937"
-        : isDark
-        ? "#8E95A2"
-        : "#7E8590",
+      sectionHeader,
       greyishWhite,
       iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
       chevron: isDark ? "#555860" : "#B4B9C2",
-      switchActive: isDark ? "#34C759" : "#10B981", // Native vibrant green, never red
+      switchActive: dynamicSwitchColor,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
-      activeText,
-      activeBorder,
       activeRowBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.04)",
       inputBg: isDark ? "rgba(255, 255, 255, 0.07)" : "#F2F4F7",
       modalOverlay: "rgba(0, 0, 0, 0.65)",
@@ -235,7 +250,7 @@ export default function AccessibilitySettings() {
       chipBg: isDark ? "rgba(255, 255, 255, 0.08)" : "#EEF2F6",
       btnPreviewBg: isDark ? "rgba(255, 255, 255, 0.12)" : "#E2E8F0",
     };
-  }, [isDark, userAccent, highContrastMode]);
+  }, [isDark, highContrastMode, colorBlindMode]);
 
   // Auth observer
   useEffect(() => {
@@ -328,51 +343,54 @@ export default function AccessibilitySettings() {
     }
   };
 
-  // Switch / option handlers with live feedback
+  // Switch / option handlers with live feedback & tactile feel
   const handleToggleScreenReader = (val: boolean) => {
     setScreenReaderCompat(val);
     savePreferences({ screenReaderCompat: val });
     if (val) {
-      AccessibilityInfo.announceForAccessibility("Screen Reader Compatibility activated.");
+      AccessibilityInfo.announceForAccessibility(
+        "Screen Reader Compatibility activated. Interface elements optimized for screen readers."
+      );
     }
     triggerToast(val ? "Screen Reader mode enabled" : "Screen Reader mode disabled");
-    if (hapticFeedback) Vibration.vibrate(8);
+    if (hapticFeedback) Vibration.vibrate(12);
   };
 
   const handleToggleHighContrast = (val: boolean) => {
     setHighContrastMode(val);
     savePreferences({ highContrastMode: val });
-    triggerToast(val ? "High Contrast mode active" : "High Contrast mode turned off");
-    if (hapticFeedback) Vibration.vibrate(8);
+    triggerToast(val ? "High Contrast mode active (AAA contrast)" : "Standard contrast mode restored");
+    if (hapticFeedback) Vibration.vibrate(12);
   };
 
   const handleToggleLargeTouchTargets = (val: boolean) => {
     setLargeTouchTargets(val);
     savePreferences({ largeTouchTargets: val });
-    triggerToast(val ? "Large Touch Targets active (48px+ min target)" : "Standard touch targets active");
-    if (hapticFeedback) Vibration.vibrate(8);
+    triggerToast(val ? "Large Touch Targets active (56px+ target size)" : "Standard touch targets active");
+    if (hapticFeedback) Vibration.vibrate(12);
   };
 
   const handleSelectColorBlindMode = (opt: ColorBlindOption) => {
     setColorBlindMode(opt.id);
     savePreferences({ colorBlindMode: opt.id });
     setColorBlindModalVisible(false);
-    triggerToast(opt.id === "Off" ? "Color blind filter disabled" : `${opt.label} filter applied`);
-    if (hapticFeedback) Vibration.vibrate(10);
+    triggerToast(opt.id === "Off" ? "Color blind filters disabled" : `${opt.label} filter active`);
+    if (hapticFeedback) Vibration.vibrate(15);
   };
 
   const handleToggleReduceMotion = (val: boolean) => {
     setReduceMotion(val);
     savePreferences({ reduceMotion: val });
-    triggerToast(val ? "Reduce Motion enabled (Animations minimized)" : "Standard animations enabled");
-    if (hapticFeedback) Vibration.vibrate(8);
+    triggerToast(val ? "Reduce Motion enabled (Animations minimized)" : "Standard animations active");
+    if (hapticFeedback) Vibration.vibrate(12);
   };
 
   const handleToggleHapticFeedback = (val: boolean) => {
     setHapticFeedback(val);
     savePreferences({ hapticFeedback: val });
     if (val) {
-      Vibration.vibrate(25);
+      // Tactile double confirmation pulse
+      Vibration.vibrate([0, 20, 60, 25], false);
     }
     triggerToast(val ? "Haptic feedback enabled" : "Haptic feedback disabled");
   };
@@ -380,7 +398,9 @@ export default function AccessibilitySettings() {
   // Handle interactive preview button tap
   const handlePreviewButtonTap = () => {
     setTestTapCount((c) => c + 1);
-    if (hapticFeedback) Vibration.vibrate(15);
+    if (hapticFeedback) {
+      Vibration.vibrate(15);
+    }
   };
 
   // Subtitle for Color Blind Mode row matching active selection
@@ -432,9 +452,9 @@ export default function AccessibilitySettings() {
               opacity: pressed ? 0.7 : 1,
             },
           ]}
-          accessibilityLabel="Back"
+          accessibilityLabel={t("back", "Back")}
           accessibilityRole="button"
-          hitSlop={largeTouchTargets ? 12 : 6}
+          hitSlop={largeTouchTargets ? 16 : 8}
         >
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
@@ -481,10 +501,10 @@ export default function AccessibilitySettings() {
               <Text
                 style={[
                   styles.previewChipText,
-                  { color: highContrastMode ? "#FFFFFF" : colors.textPrimary },
+                  { color: highContrastMode ? (colorBlindMode === "Monochromacy" ? "#000000" : "#FFFFFF") : colors.textPrimary },
                 ]}
               >
-                {highContrastMode ? "HIGH CONTRAST" : "STANDARD"}
+                {highContrastMode ? "AAA CONTRAST (21:1)" : "AA CONTRAST (7:1)"}
               </Text>
             </View>
           </View>
@@ -499,18 +519,19 @@ export default function AccessibilitySettings() {
                   backgroundColor: colors.btnPreviewBg,
                   borderColor: colors.cardBorder,
                   borderWidth: highContrastMode ? 2 : 1,
-                  paddingVertical: largeTouchTargets ? 14 : 9,
-                  paddingHorizontal: largeTouchTargets ? 20 : 14,
+                  paddingVertical: largeTouchTargets ? 15 : 10,
+                  paddingHorizontal: largeTouchTargets ? 22 : 14,
                   opacity: pressed ? 0.6 : 1,
                 },
               ]}
-              hitSlop={largeTouchTargets ? 16 : 6}
+              hitSlop={largeTouchTargets ? 18 : 6}
               accessibilityRole="button"
               accessibilityLabel="Tap to test haptics and touch target size"
+              accessibilityHint="Tests device vibration and shows active touch target dimensions"
             >
               <Ionicons
                 name="finger-print"
-                size={largeTouchTargets ? 20 : 17}
+                size={largeTouchTargets ? 22 : 18}
                 color={colors.textPrimary}
                 style={{ marginRight: 8 }}
               />
@@ -524,7 +545,7 @@ export default function AccessibilitySettings() {
                   },
                 ]}
               >
-                {largeTouchTargets ? "Touch Target: Large (56px)" : "Touch Target: Normal"} • Taps: {testTapCount}
+                {largeTouchTargets ? "Touch Target: Large (56px)" : "Touch Target: Normal (44px)"} • Taps: {testTapCount}
               </Text>
             </Pressable>
           </View>
@@ -558,12 +579,19 @@ export default function AccessibilitySettings() {
             },
           ]}
         >
-          {/* Screen Reader Compatibility */}
-          <View
-            style={[
+          {/* Screen Reader Compatibility - Entire row pressable */}
+          <Pressable
+            onPress={() => handleToggleScreenReader(!screenReaderCompat)}
+            style={({ pressed }) => [
               styles.rowItem,
-              { minHeight: largeTouchTargets ? 72 : 62 },
+              { minHeight: largeTouchTargets ? 74 : 62 },
+              pressed && styles.rowPressed,
             ]}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: screenReaderCompat }}
+            accessibilityLabel="Screen Reader Compatibility"
+            accessibilityHint="Double tap to toggle VoiceOver and TalkBack navigation optimization"
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="volume-high-outline" size={20} color={colors.greyishWhite} />
@@ -592,17 +620,24 @@ export default function AccessibilitySettings() {
                 onValueChange={handleToggleScreenReader}
                 trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
                 thumbColor="#FFFFFF"
-                accessibilityLabel="Toggle Screen Reader Compatibility"
+                hitSlop={largeTouchTargets ? 12 : 6}
               />
             </View>
-          </View>
+          </Pressable>
 
-          {/* High Contrast Mode */}
-          <View
-            style={[
+          {/* High Contrast Mode - Entire row pressable */}
+          <Pressable
+            onPress={() => handleToggleHighContrast(!highContrastMode)}
+            style={({ pressed }) => [
               styles.rowItem,
-              { minHeight: largeTouchTargets ? 72 : 62 },
+              { minHeight: largeTouchTargets ? 74 : 62 },
+              pressed && styles.rowPressed,
             ]}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: highContrastMode }}
+            accessibilityLabel="High Contrast Mode"
+            accessibilityHint="Double tap to toggle high contrast interface elements"
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="eye-outline" size={20} color={colors.greyishWhite} />
@@ -631,17 +666,24 @@ export default function AccessibilitySettings() {
                 onValueChange={handleToggleHighContrast}
                 trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
                 thumbColor="#FFFFFF"
-                accessibilityLabel="Toggle High Contrast Mode"
+                hitSlop={largeTouchTargets ? 12 : 6}
               />
             </View>
-          </View>
+          </Pressable>
 
-          {/* Large Touch Targets */}
-          <View
-            style={[
+          {/* Large Touch Targets - Entire row pressable */}
+          <Pressable
+            onPress={() => handleToggleLargeTouchTargets(!largeTouchTargets)}
+            style={({ pressed }) => [
               styles.rowItem,
-              { minHeight: largeTouchTargets ? 72 : 62 },
+              { minHeight: largeTouchTargets ? 74 : 62 },
+              pressed && styles.rowPressed,
             ]}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: largeTouchTargets }}
+            accessibilityLabel="Large Touch Targets"
+            accessibilityHint="Double tap to expand tappable interactive elements"
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="navigate-outline" size={19} color={colors.greyishWhite} />
@@ -670,22 +712,27 @@ export default function AccessibilitySettings() {
                 onValueChange={handleToggleLargeTouchTargets}
                 trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
                 thumbColor="#FFFFFF"
-                accessibilityLabel="Toggle Large Touch Targets"
+                hitSlop={largeTouchTargets ? 12 : 6}
               />
             </View>
-          </View>
+          </Pressable>
 
           {/* Color Blind Mode */}
           <Pressable
-            onPress={() => setColorBlindModalVisible(true)}
+            onPress={() => {
+              if (hapticFeedback) Vibration.vibrate(10);
+              setColorBlindModalVisible(true);
+            }}
             style={({ pressed }) => [
               styles.rowItem,
-              { minHeight: largeTouchTargets ? 72 : 62 },
+              { minHeight: largeTouchTargets ? 74 : 62 },
               pressed && styles.rowPressed,
             ]}
-            hitSlop={largeTouchTargets ? 8 : 4}
+            hitSlop={largeTouchTargets ? 12 : 6}
+            accessible={true}
             accessibilityRole="button"
-            accessibilityLabel={`Color Blind Mode currently ${colorBlindMode}`}
+            accessibilityLabel={`Color Blind Mode, currently set to ${colorBlindMode}`}
+            accessibilityHint="Double tap to open color blind filter selection modal"
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="eye-off-outline" size={20} color={colors.greyishWhite} />
@@ -733,12 +780,19 @@ export default function AccessibilitySettings() {
             },
           ]}
         >
-          {/* Reduce Motion */}
-          <View
-            style={[
+          {/* Reduce Motion - Entire row pressable */}
+          <Pressable
+            onPress={() => handleToggleReduceMotion(!reduceMotion)}
+            style={({ pressed }) => [
               styles.rowItem,
-              { minHeight: largeTouchTargets ? 72 : 62 },
+              { minHeight: largeTouchTargets ? 74 : 62 },
+              pressed && styles.rowPressed,
             ]}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: reduceMotion }}
+            accessibilityLabel="Reduce Motion"
+            accessibilityHint="Double tap to limit animations and decorative movements"
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="flash-outline" size={20} color={colors.greyishWhite} />
@@ -767,17 +821,24 @@ export default function AccessibilitySettings() {
                 onValueChange={handleToggleReduceMotion}
                 trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
                 thumbColor="#FFFFFF"
-                accessibilityLabel="Toggle Reduce Motion"
+                hitSlop={largeTouchTargets ? 12 : 6}
               />
             </View>
-          </View>
+          </Pressable>
 
-          {/* Haptic Feedback */}
-          <View
-            style={[
+          {/* Haptic Feedback - Entire row pressable */}
+          <Pressable
+            onPress={() => handleToggleHapticFeedback(!hapticFeedback)}
+            style={({ pressed }) => [
               styles.rowItem,
-              { minHeight: largeTouchTargets ? 72 : 62 },
+              { minHeight: largeTouchTargets ? 74 : 62 },
+              pressed && styles.rowPressed,
             ]}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: hapticFeedback }}
+            accessibilityLabel="Haptic Feedback"
+            accessibilityHint="Double tap to toggle device vibrations on key presses and confirmations"
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="phone-portrait-outline" size={20} color={colors.greyishWhite} />
@@ -801,10 +862,10 @@ export default function AccessibilitySettings() {
                 onValueChange={handleToggleHapticFeedback}
                 trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
                 thumbColor="#FFFFFF"
-                accessibilityLabel="Toggle Haptic Feedback"
+                hitSlop={largeTouchTargets ? 12 : 6}
               />
             </View>
-          </View>
+          </Pressable>
         </View>
 
         <View style={{ height: 40 }} />
@@ -844,7 +905,7 @@ export default function AccessibilitySettings() {
               <Pressable
                 onPress={() => setColorBlindModalVisible(false)}
                 style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
-                hitSlop={10}
+                hitSlop={largeTouchTargets ? 16 : 8}
               >
                 <Ionicons name="close" size={22} color={colors.textPrimary} />
               </Pressable>
@@ -859,10 +920,15 @@ export default function AccessibilitySettings() {
                     onPress={() => handleSelectColorBlindMode(opt)}
                     style={({ pressed }) => [
                       styles.modalListItem,
+                      { minHeight: largeTouchTargets ? 64 : 54 },
                       isSelected && { backgroundColor: colors.activeRowBg },
                       highContrastMode && isSelected && { borderWidth: 1, borderColor: colors.cardBorder },
                       pressed && { opacity: 0.7 },
                     ]}
+                    accessible={true}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={`${opt.label}, ${opt.desc}`}
                   >
                     <View style={styles.modalItemTextGroup}>
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
