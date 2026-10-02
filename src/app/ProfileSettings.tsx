@@ -1028,18 +1028,6 @@ export default function ProfileSettings() {
       },
     },
     {
-      id: "about-app",
-      category: "SUPPORT",
-      title: "About BunkMates",
-      subtitle: "Version 3.4.1 (Stable)",
-      keywords: ["about", "version", "build", "info", "release"],
-      icon: "information-circle-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/about");
-      },
-    },
-    {
       id: "licenses",
       category: "SUPPORT",
       title: "Third-Party Licenses",
@@ -1062,6 +1050,18 @@ export default function ProfileSettings() {
       onPress: () => {
         setIsSearching(false);
         smoothNavigate("/inviteFriend");
+      },
+    },
+    {
+      id: "about-app",
+      category: "SUPPORT",
+      title: "About BunkMates",
+      subtitle: "Version 3.4.1 (Build 4108)",
+      keywords: ["about", "version", "build", "info", "release", "bunkmates"],
+      icon: "information-circle-outline",
+      onPress: () => {
+        setIsSearching(false);
+        smoothNavigate("/about");
       },
     },
     ...(isDeveloper
@@ -2808,12 +2808,6 @@ export default function ProfileSettings() {
               )
             }
           />
-          <SettingRow
-            icon="information-circle-outline"
-            title="About BunkMates"
-            subtitle="Version 3.4.1 (Stable)"
-            onPress={() => smoothNavigate("/about")}
-          />
           {/* Preserved v2 feature: Licenses */}
           <SettingRow
             icon="license"
@@ -2827,7 +2821,6 @@ export default function ProfileSettings() {
             icon="person-add-outline"
             title="Invite a Friend"
             subtitle="Share BunkMates with travel companions"
-            isLast={!isDeveloper}
             onPress={() => smoothNavigate("/inviteFriend")}
           />
           {/* Preserved v2 feature: Developer tools if unlocked */}
@@ -2836,10 +2829,17 @@ export default function ProfileSettings() {
               icon="code-slash-outline"
               title="Developer Tools & Sandbox"
               subtitle="Access internal tools, sandboxes, and developer routes"
-              isLast
               onPress={() => setCurrentPage("developers")}
             />
           )}
+          {/* About BunkMates placed at the very end of Settings */}
+          <SettingRow
+            icon="information-circle-outline"
+            title="About BunkMates"
+            subtitle="Version 3.4.1 (Build 4108)"
+            isLast
+            onPress={() => smoothNavigate("/about")}
+          />
         </View>
 
         {/* =====================================================
