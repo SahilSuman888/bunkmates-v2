@@ -873,7 +873,7 @@ export default function ProfileSettings() {
       icon: "location-outline",
       onPress: () => {
         setIsSearching(false);
-        Alert.alert("Maps & Navigation", "Navigation route preferences and scenic route toggles.");
+        smoothNavigate("/maps-navigation");
       },
     },
     {
@@ -2692,12 +2692,7 @@ export default function ProfileSettings() {
             icon="location-outline"
             title="Maps & Navigation"
             subtitle="Offline cache, route preferences"
-            onPress={() =>
-              Alert.alert(
-                "Maps & Navigation",
-                "Navigation route preferences and scenic route toggles."
-              )
-            }
+            onPress={() => smoothNavigate("/maps-navigation")}
           />
           <SettingRow
             icon="partly-sunny-outline"
