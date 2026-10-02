@@ -916,7 +916,8 @@ export default function ProfileSettings() {
           : "Light Mode",
       icon: "color-filter-outline",
       onPress: () => {
-        toggleThemeFn();
+        setIsSearching(false);
+        smoothNavigate("/appearance");
       },
     },
     {
@@ -2730,7 +2731,7 @@ export default function ProfileSettings() {
                 ? "Dark Mode"
                 : "Light Mode"
             }
-            onPress={toggleThemeFn}
+            onPress={() => smoothNavigate("/appearance")}
           />
           <SettingRow
             icon="globe-outline"
