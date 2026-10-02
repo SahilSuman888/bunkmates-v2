@@ -2926,6 +2926,26 @@ function DevToolSandboxView({
   toolId: string;
   onBack: () => void;
 }) {
+  let isDark = true;
+  try {
+    const themeContext = useThemeToggle();
+    if (themeContext) {
+      isDark =
+        themeContext.mode === "dark" ||
+        (themeContext.mode === "system" && Appearance.getColorScheme() === "dark");
+    }
+  } catch (e) {}
+
+  const colors = useMemo(
+    () => ({
+      card: isDark ? "#141418" : "#FFFFFF",
+      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
+      textPrimary: isDark ? "#FFFFFF" : "#11141A",
+      textSecondary: isDark ? "#8E95A2" : "#7E8590",
+    }),
+    [isDark]
+  );
+
   // Weather state
   const [selectedCity, setSelectedCity] = useState("Goa 🏖️");
   const weatherCities = ["Goa 🏖️", "Manali 🏔️", "Rishikesh 🌊", "Leh 🗻", "Bali 🌴"];
