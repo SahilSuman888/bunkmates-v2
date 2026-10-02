@@ -957,18 +957,7 @@ export default function ProfileSettings() {
         smoothNavigate("/chat-settings");
       },
     },
-    {
-      id: "general-settings",
-      category: "APP SETTINGS",
-      title: "General Settings",
-      subtitle: "App Theme, Language, and Location",
-      keywords: ["general", "settings", "default", "preferences"],
-      icon: "settings-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/general-settings");
-      },
-    },
+
     {
       id: "ai-features",
       category: "APP SETTINGS",
@@ -2762,13 +2751,7 @@ export default function ProfileSettings() {
             subtitle="Theme, Wallpapers, and Chat Settings"
             onPress={() => smoothNavigate("/chat-settings")}
           />
-          {/* Preserved v2 feature: General Settings */}
-          <SettingRow
-            icon="settings-outline"
-            title="General Settings"
-            subtitle="App Theme, Language, and Location"
-            onPress={() => smoothNavigate("/general-settings")}
-          />
+
           {/* Preserved v2 feature: AI Features with greyish-white icon */}
           <SettingRow
             icon="sparkles"
