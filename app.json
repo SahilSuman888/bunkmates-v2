@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "bunkmates",
-    "owner": "cjayendra111",
+    "owner": "iam_sahilsuman",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
@@ -72,7 +72,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "4311dfb6-5860-4967-b47f-f3f1022c7c4a"
+        "projectId": "9ab7093d-32f1-4cb6-a7b3-67f82abf1b65"
       }
     }
   }
