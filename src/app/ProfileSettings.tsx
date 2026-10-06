@@ -262,8 +262,8 @@ export default function ProfileSettings() {
 
   // **@** Redirect to Google Play Store to rate BunkMates
   const handleRateApp = useCallback(async () => {
-    const playStoreUrl = "https://play.google.com/store/apps/details?id=com.bm.bunkmates";
-    const marketUrl = "market://details?id=com.bm.bunkmates";
+    const playStoreUrl = "https://play.google.com/store/apps/details?id=com.bm.bunkmate";
+    const marketUrl = "market://details?id=com.bm.bunkmate";
 
     try {
       if (Platform.OS === "android") {
