@@ -13,11 +13,13 @@ import {
     useWindowDimensions,
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
+import { useLanguage } from "../contexts/LanguageContext";
 
 const DOWNLOAD_LINK =
   "https://bunkmateshome.vercel.app/bm-install";
 
 export default function InviteFriendScreen() {
+  const { t } = useLanguage();
   const { width, height } = useWindowDimensions();
   const scale = Math.min(Math.max(width / 390, 0.88), 1.12);
   const horizontalPadding = Math.max(18, width * 0.055);
@@ -283,7 +285,7 @@ export default function InviteFriendScreen() {
           </Pressable>
 
           <Text style={[styles.headerTitle, { fontSize: titleFontSize }]}> 
-            Invite & Download
+            {t("Invite a Friend", "Invite & Download")}
           </Text>
         </View>
 
@@ -292,7 +294,7 @@ export default function InviteFriendScreen() {
         {/* ================================= */}
 
         <Text style={[styles.sectionTitle, { fontSize: sectionFontSize, marginLeft: 0, marginBottom: 14 }]}> 
-          Share the BunkMates App
+          {t("Share BunkMates with your friends and explore together!", "Share the BunkMates App")}
         </Text>
 
         {/* ================================= */}
@@ -315,7 +317,7 @@ export default function InviteFriendScreen() {
           {/* DESCRIPTION */}
 
           <Text style={[styles.qrDescription, { fontSize: Math.max(11, Math.round(11 * scale)), marginBottom: Math.round(10 * scale) }]}> 
-            Scan the QR or share this download link:
+            {t("Scan QR Code", "Scan the QR or share this download link:")}
           </Text>
 
           {/* ================================= */}

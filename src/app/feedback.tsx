@@ -406,7 +406,7 @@ export default function SendFeedbackScreen() {
         </Pressable>
 
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          Send Feedback
+          {t("Send Feedback")}
         </Text>
 
         <Pressable
@@ -439,7 +439,7 @@ export default function SendFeedbackScreen() {
           {/* ========================================================
               1. FEEDBACK TYPE SECTION
           ========================================================= */}
-          <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>FEEDBACK TYPE</Text>
+          <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("FEEDBACK TYPE")}</Text>
 
           <View style={[styles.typeContainer, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             {(["Bug Report", "Request Feature", "General"] as FeedbackType[]).map((type) => {
@@ -471,7 +471,7 @@ export default function SendFeedbackScreen() {
                       },
                     ]}
                   >
-                    {type}
+                    {t(type)}
                   </Text>
                 </Pressable>
               );
@@ -481,7 +481,7 @@ export default function SendFeedbackScreen() {
           {/* ========================================================
               2. DETAILS SECTION
           ========================================================= */}
-          <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>DETAILS</Text>
+          <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DETAILS")}</Text>
 
           <View
             style={[
@@ -513,7 +513,7 @@ export default function SendFeedbackScreen() {
           {/* ========================================================
               3. ATTACHMENTS SECTION
           ========================================================= */}
-          <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>ATTACHMENTS</Text>
+          <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("ATTACHMENTS")}</Text>
 
           <View style={[styles.attachmentCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             {attachment ? (
@@ -586,7 +586,7 @@ export default function SendFeedbackScreen() {
               <ActivityIndicator color={colors.btnPrimaryText} size="small" />
             ) : (
               <Text style={[styles.submitBtnText, { color: colors.btnPrimaryText }]}>
-                Submit Feedback
+                {t("Submit Feedback")}
               </Text>
             )}
           </Pressable>

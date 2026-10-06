@@ -21,6 +21,8 @@ import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { useAppSettings } from "../contexts/AppSettingsContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../theme/theme";
 
 type TempUnit = "°F" | "°C" | "K";
@@ -44,6 +46,8 @@ const FORECAST_HORIZONS: ForecastHorizon[] = ["3 Days", "5 Days", "7 Days", "10 
 
 export default function WeatherSettings() {
   const router = useRouter();
+  const { updateWeatherPreferences } = useAppSettings();
+  const { t } = useLanguage();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
@@ -214,6 +218,7 @@ export default function WeatherSettings() {
 
   // Sync preference helper saving to both AsyncStorage and Firestore
   const syncPreference = async (field: string, value: any) => {
+    updateWeatherPreferences({ [field]: value });
     try {
       const current = await AsyncStorage.getItem("@bunkmates_weather_preferences");
       const currentObj = current ? JSON.parse(current) : {};
@@ -293,7 +298,7 @@ export default function WeatherSettings() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          Weather
+          {t("Weather & AQI", "Weather")}
         </Text>
       </View>
 
@@ -303,7 +308,7 @@ export default function WeatherSettings() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── 1. PREFERENCES ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>PREFERENCES</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("WEATHER UNITS", "PREFERENCES")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Temperature Units */}
           <Pressable
@@ -316,12 +321,12 @@ export default function WeatherSettings() {
               <Ionicons name="thermometer-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Temperature Units</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Temperature Unit", "Temperature Units")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
                 Select Celsius or Fahrenheit
               </Text>
             </View>
-            <Text style={[styles.rowValueText, { color: colors.textSecondary }]}>{tempUnit}</Text>
+            <Text style={[styles.rowValueText, { color: colors.textSecondary }]}>{t(tempUnit)}</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
           </Pressable>
 
@@ -329,7 +334,7 @@ export default function WeatherSettings() {
 
           {/* Forecast Horizon Length */}
           <View style={styles.segmentBlock}>
-            <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>Forecast Horizon Length</Text>
+            <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>{t("Forecast Horizon", "Forecast Horizon Length")}</Text>
             <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg }]}>
               {FORECAST_HORIZONS.map((h) => {
                 const isSelected = forecastHorizon === h;
@@ -353,7 +358,7 @@ export default function WeatherSettings() {
                           : { color: colors.textSecondary },
                       ]}
                     >
-                      {h}
+                      {t(h)}
                     </Text>
                   </Pressable>
                 );
@@ -369,9 +374,9 @@ export default function WeatherSettings() {
               <Ionicons name="thunderstorm-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Severe Weather Alerts</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Severe Weather Alerts")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Get notified of storms and critical updates
+                {t("Receive push alerts for rain, storms & extreme weather", "Get notified of storms and critical updates")}
               </Text>
             </View>
             <Switch
@@ -391,9 +396,9 @@ export default function WeatherSettings() {
               <Ionicons name="rainy-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Rain Notifications</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Rain Notifications")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Receive alerts 15m before rain starts
+                {t("Receive alerts 15m before rain starts", "Receive alerts 15m before rain starts")}
               </Text>
             </View>
             <Switch
@@ -413,9 +418,9 @@ export default function WeatherSettings() {
               <Ionicons name="sunny-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>UV Index Alerts</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("UV Index Alerts")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Warnings when UV index exceeds 6
+                {t("Warnings when UV index exceeds 6", "Warnings when UV index exceeds 6")}
               </Text>
             </View>
             <Switch
@@ -429,21 +434,21 @@ export default function WeatherSettings() {
         </View>
 
         {/* ── 2. DISPLAY WIDGET ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>DISPLAY WIDGET</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DISPLAY WIDGET")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Pressable
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             onPress={() => setWidgetModalVisible(true)}
             accessibilityRole="button"
-            accessibilityLabel="Widget Preferences"
+            accessibilityLabel={t("Widget Preferences")}
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="apps-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Widget Preferences</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Widget Preferences")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Customize the home screen weather tile
+                {t("Customize the home screen weather tile", "Customize the home screen weather tile")}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
@@ -451,32 +456,32 @@ export default function WeatherSettings() {
         </View>
 
         {/* ── 3. AIR QUALITY & AQI (ALREADY AVAILABLE IN THE APP) ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>AIR QUALITY & POLLUTION</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("AIR QUALITY & POLLUTION")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Link to existing AQI Detail Screen */}
           <Pressable
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             onPress={() => router.push("/(tabs)/aqi" as any)}
             accessibilityRole="button"
-            accessibilityLabel="Air Quality Index"
+            accessibilityLabel={t("Air Quality Index")}
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="speedometer-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
               <View style={styles.badgeRow}>
-                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Air Quality Index (AQI)</Text>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Air Quality Index (AQI)")}</Text>
                 <View
                   style={[
                     styles.aqiBadge,
                     { backgroundColor: colors.badgeBg, borderColor: colors.badgeBorder },
                   ]}
                 >
-                  <Text style={[styles.aqiBadgeText, { color: colors.badgeText }]}>AQI 70 • Moderate</Text>
+                  <Text style={[styles.aqiBadgeText, { color: colors.badgeText }]}>{t("AQI 70 • Moderate")}</Text>
                 </View>
               </View>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Live station monitoring, PM2.5, PM10 & Ozone
+                {t("Live station monitoring, PM2.5, PM10 & Ozone", "Live station monitoring, PM2.5, PM10 & Ozone")}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
@@ -490,9 +495,9 @@ export default function WeatherSettings() {
               <Ionicons name="alert-circle-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>High Pollution Warnings</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("High Pollution Warnings")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Notify when AQI exceeds Moderate threshold (&gt;100)
+                {t("Notify when AQI exceeds Moderate threshold (>100)", "Notify when AQI exceeds Moderate threshold (>100)")}
               </Text>
             </View>
             <Switch
@@ -533,9 +538,9 @@ export default function WeatherSettings() {
               <Ionicons name="thermometer-outline" size={22} color={colors.greyishWhite} />
             </View>
 
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Temperature Units</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Temperature Units")}</Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              Choose whether temperature values across the app are displayed in Fahrenheit or Celsius.
+              {t("Choose whether temperature values across the app are displayed in Fahrenheit or Celsius.", "Choose whether temperature values across the app are displayed in Fahrenheit or Celsius.")}
             </Text>
 
             <View style={styles.modalListColumn}>
@@ -564,10 +569,10 @@ export default function WeatherSettings() {
                           },
                         ]}
                       >
-                        {opt.label}
+                        {t(opt.label)}
                       </Text>
                       <Text style={[styles.modalOptionSub, { color: colors.textSecondary }]}>
-                        {opt.desc}
+                        {t(opt.desc)}
                       </Text>
                     </View>
                     {isSelected && (
@@ -586,7 +591,7 @@ export default function WeatherSettings() {
               ]}
               onPress={() => setTempModalVisible(false)}
             >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>Close</Text>
+              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
             </Pressable>
           </View>
         </View>
@@ -605,14 +610,14 @@ export default function WeatherSettings() {
               <Ionicons name="apps-outline" size={22} color={colors.greyishWhite} />
             </View>
 
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Home Widget Preferences</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Home Widget Preferences")}</Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              Adjust layout and data points shown on the home screen weather tile.
+              {t("Adjust layout and data points shown on the home screen weather tile.", "Adjust layout and data points shown on the home screen weather tile.")}
             </Text>
 
             {/* Layout switch */}
             <View style={styles.widgetControlGroup}>
-              <Text style={[styles.widgetGroupLabel, { color: colors.textPrimary }]}>Card Layout</Text>
+              <Text style={[styles.widgetGroupLabel, { color: colors.textPrimary }]}>{t("Card Layout")}</Text>
               <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg, marginBottom: 14 }]}>
                 {(["Compact Tile", "Detailed Card"] as WidgetLayout[]).map((layout) => {
                   const isSelected = widgetLayout === layout;
@@ -639,7 +644,7 @@ export default function WeatherSettings() {
                             : { color: colors.textSecondary },
                         ]}
                       >
-                        {layout}
+                        {t(layout)}
                       </Text>
                     </Pressable>
                   );
@@ -649,7 +654,7 @@ export default function WeatherSettings() {
               {/* Toggles */}
               <View style={[styles.widgetToggleRow, { borderColor: colors.divider }]}>
                 <Text style={[styles.widgetToggleLabel, { color: colors.textPrimary }]}>
-                  Show Feels-Like Temp & Humidity
+                  {t("Show Feels-Like Temp & Humidity")}
                 </Text>
                 <Switch
                   value={showFeelsLike}
@@ -664,7 +669,7 @@ export default function WeatherSettings() {
 
               <View style={[styles.widgetToggleRow, { borderColor: colors.divider }]}>
                 <Text style={[styles.widgetToggleLabel, { color: colors.textPrimary }]}>
-                  Show Wind Speed & Direction
+                  {t("Show Wind Speed & Direction")}
                 </Text>
                 <Switch
                   value={showWindSpeed}
@@ -686,7 +691,7 @@ export default function WeatherSettings() {
               ]}
               onPress={() => setWidgetModalVisible(false)}
             >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>Done</Text>
+              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Done")}</Text>
             </Pressable>
           </View>
         </View>

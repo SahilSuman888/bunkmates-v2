@@ -50,6 +50,8 @@ import WeatherDetailsSheet from "./Weather/WeatherDetailsSheet";
 import AQIDetailsSheet from "./Weather/AQIDetailsSheet";
 
 import placesData from "../data/data.json";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { useLanguage } from "../../contexts/LanguageContext";
 
 
 // ============================================================
@@ -83,6 +85,17 @@ export default function Home() {
     loading: authLoading,
     userData,
   } = useUser();
+
+  const { formatTemperature } = useAppSettings();
+  const { t } = useLanguage();
+
+  const getGreeting = () => {
+    const hr = new Date().getHours();
+    if (hr < 12) return t("good_morning", "Good Morning,");
+    if (hr < 17) return t("good_afternoon", "Good Afternoon,");
+    if (hr < 21) return t("good_evening", "Good Evening,");
+    return t("good_night", "Good Night,");
+  };
 
 
   // ==========================================================
@@ -637,9 +650,7 @@ export default function Home() {
 
   const weatherTemperature =
     weather?.main?.temp != null
-      ? `${Math.round(
-          weather.main.temp
-        )}°C`
+      ? formatTemperature(weather.main.temp, "C")
       : "--";
 
   const weatherDescription =
@@ -778,7 +789,7 @@ export default function Home() {
                   },
                 ]}
               >
-                Good Evening,
+                {getGreeting()}
               </Text>
 
               <Text
@@ -991,7 +1002,7 @@ export default function Home() {
                 },
               ]}
             >
-              Search Exploration
+              {t("search_exploration", "Search Exploration")}
             </Text>
           </Pressable>
 
@@ -1022,7 +1033,7 @@ export default function Home() {
                 },
               ]}
             >
-              Your Trips
+              {t("your_trips", "Your Trips")}
             </Text>
 
             <Pressable
@@ -1041,7 +1052,7 @@ export default function Home() {
                   },
                 ]}
               >
-                View all
+                {t("view_all", "View all")}
               </Text>
             </Pressable>
 
@@ -1336,7 +1347,7 @@ export default function Home() {
                   },
                 ]}
               >
-                No trips yet
+                {t("No trips yet")}
               </Text>
             </View>
           )}
@@ -1368,7 +1379,7 @@ export default function Home() {
                 },
               ]}
             >
-              Reminders
+              {t("reminders", "Reminders")}
             </Text>
 
             <Pressable
@@ -1387,7 +1398,7 @@ export default function Home() {
                   },
                 ]}
               >
-                View all
+                {t("view_all", "View all")}
               </Text>
             </Pressable>
 
@@ -1456,7 +1467,7 @@ export default function Home() {
                     },
                   ]}
                 >
-                  No reminders found.
+                  {t("no_reminders", "No reminders found.")}
                 </Text>
               </View>
             )}
@@ -1490,7 +1501,7 @@ export default function Home() {
                 },
               ]}
             >
-              Featured Places
+              {t("explore_places", "Featured Places")}
             </Text>
 
           </View>
@@ -1564,8 +1575,7 @@ export default function Home() {
                 },
               ]}
             >
-              No featured places
-              available.
+              {t("No featured places available.")}
             </Text>
           )}
 
@@ -1596,7 +1606,7 @@ export default function Home() {
                 },
               ]}
             >
-              More Places
+              {t("More Places")}
             </Text>
 
           </View>

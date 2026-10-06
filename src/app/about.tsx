@@ -289,7 +289,7 @@ export default function AboutScreen() {
         </Pressable>
 
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          About BunkMates
+          {t("About BunkMates")}
         </Text>
 
         <View style={styles.headerSpacer} />
@@ -331,7 +331,7 @@ export default function AboutScreen() {
         {/* ========================================================
             1. LEGAL AGREEMENTS SECTION
         ========================================================= */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>LEGAL AGREEMENTS</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("LEGAL AGREEMENTS")}</Text>
 
         <View style={[styles.cardGroup, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Terms of Service */}
@@ -351,7 +351,7 @@ export default function AboutScreen() {
                 { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth },
               ]}
             >
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Terms of Service</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Terms of Service")}</Text>
               <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
             </View>
           </Pressable>
@@ -373,7 +373,7 @@ export default function AboutScreen() {
                 { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth },
               ]}
             >
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Privacy Policy</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Privacy Policy")}</Text>
               <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
             </View>
           </Pressable>
@@ -390,7 +390,7 @@ export default function AboutScreen() {
               <Ionicons name="receipt-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={[styles.rowContent, { borderBottomWidth: 0 }]}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Open Source Licenses</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Open Source Licenses")}</Text>
               <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
             </View>
           </Pressable>
@@ -399,7 +399,7 @@ export default function AboutScreen() {
         {/* ========================================================
             2. SOCIAL MEDIA SECTION MATCHING MOCKUP
         ========================================================= */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>SOCIAL MEDIA</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("SOCIAL MEDIA")}</Text>
 
         <View style={[styles.socialCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Twitter / X */}

@@ -27,6 +27,9 @@ export const auth = initializeAuth(app, {
 
 export const db = getFirestore(app);
 
+import { getStorage } from "firebase/storage";
+export const storage = getStorage(app);
+
 // Note: For React Native, Firebase Messaging should be initialized using:
 // import messaging from '@react-native-firebase/messaging';
 // export const firebaseMessaging = messaging();

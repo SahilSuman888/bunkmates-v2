@@ -21,6 +21,7 @@ import { useRouter } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import { useUser } from "../contexts/UserContext";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { auth, db } from "../lib/firebase";
 import { doc, updateDoc, onSnapshot } from "firebase/firestore";
 import { deleteUser, sendPasswordResetEmail } from "firebase/auth";
@@ -35,6 +36,7 @@ import {
 export default function AccountAndSecurity() {
   const router = useRouter();
   const { user, loading: authLoading } = useUser();
+  const { t } = useLanguage();
 
   const [loading, setLoading] = useState(true);
 
@@ -505,14 +507,14 @@ export default function AccountAndSecurity() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          Account & Security
+          {t("Account & Security")}
         </Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         {/* ── 1. PASSWORD SETTINGS ── */}
-        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>PASSWORD SETTINGS</Text>
+        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("PASSWORD SETTINGS")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Pressable
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
@@ -522,7 +524,7 @@ export default function AccountAndSecurity() {
               <Ionicons name="shield-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Change Password</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Change Password")}</Text>
               <Text style={[styles.rowSub, { color: resetEmailSent ? colors.activeGreen : colors.textSecondary }]}>
                 {resetEmailSent ? "✓ Reset link sent to your email" : passwordLastUpdated}
               </Text>
@@ -532,16 +534,16 @@ export default function AccountAndSecurity() {
         </View>
 
         {/* ── 2. TWO-FACTOR AUTHENTICATION ── */}
-        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>TWO-FACTOR AUTHENTICATION</Text>
+        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("TWO-FACTOR AUTHENTICATION")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <View style={styles.row}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="lock-closed-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Two-Factor Auth (2FA)</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Two-Factor Auth (2FA)")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Secure your travel plans with SMS or{"\n"}Authenticator
+                {t("Secure your travel plans with SMS or Authenticator")}
               </Text>
             </View>
             <Switch
@@ -559,7 +561,7 @@ export default function AccountAndSecurity() {
             onPress={() => setShowBackupCodes(true)}
           >
             <Text style={[styles.backupCodeTitle, { color: colors.textPrimary }]}>
-              Backup Security Codes
+              {t("Backup Security Codes")}
             </Text>
             <Feather name="chevron-right" size={20} color={colors.chevron} />
           </Pressable>
@@ -568,7 +570,7 @@ export default function AccountAndSecurity() {
         {/* ── 3. LOGIN ACTIVITY (Dynamic live session tracking) ── */}
         <View style={styles.sectionHeaderRow}>
           <Text style={[styles.sectionLabel, { color: colors.sectionHeader, marginTop: 0, marginBottom: 0 }]}>
-            LOGIN ACTIVITY
+            {t("LOGIN ACTIVITY")}
           </Text>
           <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
             <Pressable onPress={handleManualRefresh} hitSlop={6} accessibilityLabel="Refresh sessions">
@@ -642,14 +644,14 @@ export default function AccountAndSecurity() {
         {/* ── 4. TRUSTED DEVICES (Coral circle icon, date subtitle, chevron) ── */}
         <View style={styles.sectionHeaderRow}>
           <Text style={[styles.sectionLabel, { color: colors.sectionHeader, marginTop: 0, marginBottom: 0 }]}>
-            TRUSTED DEVICES
+            {t("TRUSTED DEVICES")}
           </Text>
           {!isCurrentDeviceAlreadyTrusted && (
             <Pressable
               onPress={() => handleTrustDevice(currentDeviceId, currentDeviceName, "phone")}
               hitSlop={6}
             >
-              <Text style={[styles.sectionAction, { color: colors.coral }]}>+ Trust This Device</Text>
+              <Text style={[styles.sectionAction, { color: colors.coral }]}>{t("+ Trust This Device")}</Text>
             </Pressable>
           )}
         </View>
@@ -661,10 +663,10 @@ export default function AccountAndSecurity() {
                 <Ionicons name="shield-checkmark-outline" size={26} color={colors.greyishWhite} />
               </View>
               <Text style={[styles.emptyTrustedTitle, { color: colors.textPrimary }]}>
-                No Trusted Devices
+                {t("No Trusted Devices")}
               </Text>
               <Text style={[styles.emptyTrustedSub, { color: colors.textSecondary }]}>
-                Authorize {currentDeviceName || "this device"} so future logins are instant and secure.
+                {t("Authorize", "Authorize")} {currentDeviceName || t("this device")} {t("so future logins are instant and secure.", "so future logins are instant and secure.")}
               </Text>
               <Pressable
                 style={({ pressed }) => [
@@ -676,7 +678,7 @@ export default function AccountAndSecurity() {
               >
                 <Ionicons name="shield-checkmark-outline" size={15} color={colors.coral} style={{ marginRight: 6 }} />
                 <Text style={[styles.trustNowText, { color: colors.coral }]}>
-                  Trust {currentDeviceName || "This Device"}
+                  {t("Trust")} {currentDeviceName || t("This Device")}
                 </Text>
               </Pressable>
             </View>
@@ -715,7 +717,7 @@ export default function AccountAndSecurity() {
         </View>
 
         {/* ── 5. PRIVACY & PERMISSIONS (PRESERVED: Nothing lost) ── */}
-        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>PRIVACY & PERMISSIONS</Text>
+        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("PRIVACY & PERMISSIONS")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Private Profile */}
           <View style={styles.row}>
@@ -723,9 +725,9 @@ export default function AccountAndSecurity() {
               <Feather name="lock" size={19} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Private Profile</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Private Profile", "Private Profile")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                {privacy.profileVisibility === "private" ? "Only friends can see your profile" : "Profile visible to everyone"}
+                {privacy.profileVisibility === "private" ? t("Only friends can see your profile", "Only friends can see your profile") : t("Profile visible to everyone", "Profile visible to everyone")}
               </Text>
             </View>
             <Switch
@@ -747,7 +749,7 @@ export default function AccountAndSecurity() {
               <MaterialCommunityIcons name="account-group-outline" size={21} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Who can add you to groups</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Who can add you to groups", "Who can add you to groups")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
                 {privacy.canBeAddedToGroups.charAt(0).toUpperCase() + privacy.canBeAddedToGroups.slice(1)}
               </Text>
@@ -766,7 +768,7 @@ export default function AccountAndSecurity() {
               <Feather name="briefcase" size={19} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Who can add you to trips</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Who can add you to trips", "Who can add you to trips")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
                 {privacy.canBeAddedToTrips.charAt(0).toUpperCase() + privacy.canBeAddedToTrips.slice(1)}
               </Text>
@@ -776,7 +778,7 @@ export default function AccountAndSecurity() {
         </View>
 
         {/* ── 6. DANGER ZONE (Soft pink/coral card, solid circle icon, red title & sub) ── */}
-        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>DANGER ZONE</Text>
+        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("DANGER ZONE")}</Text>
         <Pressable
           style={({ pressed }) => [
             styles.dangerCard,
@@ -790,10 +792,10 @@ export default function AccountAndSecurity() {
           </View>
           <View style={styles.rowMid}>
             <Text style={[styles.rowTitle, { color: colors.dangerText, fontWeight: "700" }]}>
-              Delete BunkMates Account
+              {t("Delete Account", "Delete BunkMates Account")}
             </Text>
             <Text style={[styles.rowSub, { color: colors.dangerSubtext }]}>
-              Permanently wipe all past trip logs and data
+              {t("Permanently remove your account and data", "Permanently wipe all past trip logs and data")}
             </Text>
           </View>
           <Feather name="chevron-right" size={20} color={colors.dangerText} />
@@ -809,25 +811,26 @@ export default function AccountAndSecurity() {
             <View style={[styles.modalIcon, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="phone-portrait" size={28} color={colors.greyishWhite} />
             </View>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Register Device Session</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Register Device Session")}</Text>
             <Text style={[styles.modalMsg, { color: colors.textSecondary }]}>
-              Add an additional device to verify multi-device synchronization.
+              {t("Add an additional device to verify multi-device synchronization.")}
             </Text>
 
             <TextInput
               value={newDeviceNameInput}
               onChangeText={setNewDeviceNameInput}
-              placeholder="e.g. iPad Air, Work MacBook, Galaxy S23"
+              placeholder={t("e.g. iPad Air, Work MacBook, Galaxy S23")}
               placeholderTextColor={colors.chevron}
               style={[styles.modalInput, { backgroundColor: colors.iconBoxBg, borderColor: colors.cardBorder, color: colors.textPrimary }]}
             />
 
             <View style={{ flexDirection: "row", width: "100%", gap: 8, marginBottom: 20 }}>
-              {(["phone", "tablet", "desktop"] as const).map((t) => {
-                const isSelected = newDeviceTypeInput === t;
+              {(["phone", "tablet", "desktop"] as const).map((devT) => {
+                const isSelected = newDeviceTypeInput === devT;
+                const label = devT === "phone" ? t("Phone") : devT === "tablet" ? t("Tablet") : t("Desktop");
                 return (
                   <Pressable
-                    key={t}
+                    key={devT}
                     style={[
                       styles.typeChip,
                       {
@@ -835,10 +838,10 @@ export default function AccountAndSecurity() {
                         borderColor: isSelected ? colors.coral : colors.cardBorder,
                       },
                     ]}
-                    onPress={() => setNewDeviceTypeInput(t)}
+                    onPress={() => setNewDeviceTypeInput(devT)}
                   >
                     <Text style={[styles.typeChipText, { color: isSelected ? colors.coral : colors.textPrimary }]}>
-                      {t.charAt(0).toUpperCase() + t.slice(1)}
+                      {label}
                     </Text>
                   </Pressable>
                 );
@@ -847,10 +850,10 @@ export default function AccountAndSecurity() {
 
             <View style={styles.modalBtnRow}>
               <Pressable style={[styles.modalSecBtn, { borderColor: colors.cardBorder }]} onPress={() => setShowAddDeviceModal(false)}>
-                <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>Cancel</Text>
+                <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Cancel")}</Text>
               </Pressable>
               <Pressable style={[styles.modalPrimBtn, { backgroundColor: colors.coral }]} onPress={handleAddManualDevice}>
-                <Text style={styles.modalPrimBtnText}>Register</Text>
+                <Text style={styles.modalPrimBtnText}>{t("Register")}</Text>
               </Pressable>
             </View>
           </View>
@@ -867,16 +870,17 @@ export default function AccountAndSecurity() {
         <View style={[styles.overlay, { backgroundColor: colors.modalOverlay }]}>
           <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
-              {showGroupsModal ? "Who can add you to groups" : "Who can add you to trips"}
+              {showGroupsModal ? t("Who can add you to groups") : t("Who can add you to trips")}
             </Text>
             <Text style={[styles.modalMsg, { color: colors.textSecondary }]}>
-              Choose who can invite you:
+              {t("Choose who can invite you:")}
             </Text>
 
             <View style={{ width: "100%", gap: 10, marginBottom: 20 }}>
               {(["everyone", "friends", "nobody"] as const).map((opt) => {
                 const field = showGroupsModal ? "canBeAddedToGroups" : "canBeAddedToTrips";
                 const isSelected = privacy[field] === opt;
+                const optLabel = opt === "everyone" ? t("Everyone") : opt === "friends" ? t("Friends") : t("Nobody");
                 return (
                   <Pressable
                     key={opt}
@@ -894,7 +898,7 @@ export default function AccountAndSecurity() {
                     }}
                   >
                     <Text style={[styles.selectorText, { color: colors.textPrimary }]}>
-                      {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                      {optLabel}
                     </Text>
                     {isSelected && <Feather name="check" size={18} color={colors.switchActive} />}
                   </Pressable>
@@ -906,7 +910,7 @@ export default function AccountAndSecurity() {
               style={[styles.modalSecBtn, { borderColor: colors.cardBorder, flex: 0, width: "100%", height: 46 }]}
               onPress={() => { setShowGroupsModal(false); setShowTripsModal(false); }}
             >
-              <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>Done</Text>
+              <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Done")}</Text>
             </Pressable>
           </View>
         </View>
@@ -919,9 +923,9 @@ export default function AccountAndSecurity() {
             <View style={[styles.modalIcon, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="key-outline" size={28} color={colors.greyishWhite} />
             </View>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Backup Codes</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Backup Codes")}</Text>
             <Text style={[styles.modalMsg, { color: colors.textSecondary }]}>
-              Store these single-use recovery codes in a safe place. Each code can only be used once.
+              {t("Store these single-use recovery codes in a safe place. Each code can only be used once.")}
             </Text>
 
             <View style={[styles.codesGrid, { backgroundColor: colors.iconBoxBg, borderColor: colors.cardBorder }]}>
@@ -934,10 +938,10 @@ export default function AccountAndSecurity() {
 
             <View style={styles.modalBtnRow}>
               <Pressable style={[styles.modalSecBtn, { borderColor: colors.cardBorder }]} onPress={() => setShowBackupCodes(false)}>
-                <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>Close</Text>
+                <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
               </Pressable>
               <Pressable style={[styles.modalPrimBtn, { backgroundColor: colors.coral }]} onPress={handleCopyBackupCodes}>
-                <Text style={styles.modalPrimBtnText}>Copy All</Text>
+                <Text style={styles.modalPrimBtnText}>{t("Copy All")}</Text>
               </Pressable>
             </View>
           </View>
@@ -951,9 +955,9 @@ export default function AccountAndSecurity() {
             <View style={[styles.modalDangerIcon, { backgroundColor: colors.dangerIconBg }]}>
               <MaterialCommunityIcons name="alert-octagon-outline" size={36} color={colors.dangerText} />
             </View>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Delete Account?</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Delete Account?")}</Text>
             <Text style={[styles.modalMsg, { color: colors.textSecondary }]}>
-              Permanently wipe all past trip logs, chat messages, and account data. This action cannot be reversed.
+              {t("Permanently wipe all past trip logs, chat messages, and account data. This action cannot be reversed.")}
             </Text>
 
             <View style={styles.modalBtnRow}>
@@ -962,7 +966,7 @@ export default function AccountAndSecurity() {
                 onPress={() => setShowDeleteConfirm(false)}
                 disabled={isDeleting}
               >
-                <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>Cancel</Text>
+                <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Cancel")}</Text>
               </Pressable>
               <Pressable
                 style={[styles.modalDangerBtn, { backgroundColor: colors.dangerText }]}
@@ -972,7 +976,7 @@ export default function AccountAndSecurity() {
                 {isDeleting ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.modalDangerBtnText}>Delete Forever</Text>
+                  <Text style={styles.modalDangerBtnText}>{t("Delete Forever")}</Text>
                 )}
               </Pressable>
             </View>

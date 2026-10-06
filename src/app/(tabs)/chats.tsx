@@ -22,6 +22,7 @@ import { useUserChats } from "../../hooks/useUserChats";
 import { useUserGroups } from "../../hooks/useUserGroups";
 import { useFriendRequests } from "../../hooks/useFriendRequests";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useLanguage } from "../../contexts/LanguageContext";
 import NotificationBell from "../../components/NotificationBell";
 import UserProfileModal from "../../components/UserProfileModal";
 import AddFriendModal from "../../components/chat/AddFriendModal";
@@ -42,6 +43,7 @@ export default function ChatsScreen() {
   const router = useRouter();
   const { user, loading: authLoading } = useUser();
   const { startCall } = useCall();
+  const { t } = useLanguage();
 
   const [activeTab, setActiveTab] = useState<"chats" | "calls">("chats");
   const [callHistory, setCallHistory] = useState<any[]>([]);
@@ -286,12 +288,12 @@ export default function ChatsScreen() {
           <View style={styles.header}>
             <View>
               <Text style={styles.headerTitle}>
-                {activeTab === "chats" ? "Messages" : "Call History"}
+                {activeTab === "chats" ? t("messages", "Messages") : t("call_history", "Call History")}
               </Text>
               <Text style={styles.headerSubtitle}>
                 {activeTab === "chats"
-                  ? `${combinedList.length} conversations`
-                  : `${callHistory.length} total calls recorded`}
+                  ? `${combinedList.length} ${t("conversations", "conversations")}`
+                  : `${callHistory.length} ${t("total_calls", "total calls recorded")}`}
               </Text>
             </View>
             <NotificationBell />
@@ -304,8 +306,8 @@ export default function ChatsScreen() {
               style={styles.searchInput}
               placeholder={
                 activeTab === "chats"
-                  ? "Search travelers & groups..."
-                  : "Search calls by name or handle..."
+                  ? t("search_messages", "Search travelers & groups...")
+                  : t("search_calls", "Search calls by name or handle...")
               }
               placeholderTextColor="#7f8c9b"
               value={searchText}
@@ -395,7 +397,7 @@ export default function ChatsScreen() {
                   </Pressable>
                 ))
               ) : (
-                <Empty text="No conversations found" icon="chatbubbles-outline" />
+                <Empty text={t("no_conversations", "No conversations found")} icon="chatbubbles-outline" />
               )}
             </ScrollView>
           ) : (
@@ -611,7 +613,7 @@ export default function ChatsScreen() {
                     activeTab === "chats" && styles.tabBtnTextActive,
                   ]}
                 >
-                  Messages
+                  {t("messages", "Messages")}
                 </Text>
               </Pressable>
 
@@ -631,7 +633,7 @@ export default function ChatsScreen() {
                     activeTab === "calls" && styles.tabBtnTextActive,
                   ]}
                 >
-                  Calls
+                  {t("calls", "Calls")}
                 </Text>
                 {callHistory.length > 0 && (
                   <View

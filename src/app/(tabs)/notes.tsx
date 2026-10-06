@@ -31,6 +31,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { MaterialCommunityIcons, Feather, Ionicons } from "@expo/vector-icons";
+import { useLanguage } from "../../contexts/LanguageContext";
 import NotificationBell from '../../components/NotificationBell';
 import Animated, { FadeIn } from "../reanimatedShim";
 // ...existing code...
@@ -66,6 +67,7 @@ const COLOR_ICONS = ["#ffb300", "#1976d2", "#43a047", "#d81b60", "#f57c00", "#7b
 
 export default function NotesScreen() {
   const router = useRouter();
+  const { t } = useLanguage();
   const [authInitialized, setAuthInitialized] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -224,7 +226,7 @@ const createNote = async () => {
         
         {/* MATCHING HEADER */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Notes</Text>
+          <Text style={styles.headerTitle}>{t("notes", "Notes")}</Text>
           <NotificationBell />
         </View>
 
@@ -233,7 +235,7 @@ const createNote = async () => {
           <Feather name="search" size={18} color="#888" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search notes..."
+            placeholder={t("search_notes", "Search notes...")}
             placeholderTextColor="#888"
             value={searchText}
             onChangeText={setSearchText}
@@ -243,9 +245,9 @@ const createNote = async () => {
         {/* MATCHING SORT & VIEW TOGGLES */}
         <View style={styles.sortToggleRow}>
           <View>
-             <Text style={styles.sortLabel}>Sort by</Text>
+             <Text style={styles.sortLabel}>{t("sort_by", "Sort by")}</Text>
              <Pressable style={styles.sortDropdown}>
-                <Text style={styles.sortText}>Newest First</Text>
+                <Text style={styles.sortText}>{t("newest_first", "Newest First")}</Text>
                 <MaterialCommunityIcons name="menu-down" size={20} color="#fff" />
              </Pressable>
           </View>
@@ -269,7 +271,7 @@ const createNote = async () => {
              >
                {filter === "Pinned" && <MaterialCommunityIcons name="pin" size={12} color={activeFilter === filter ? "#000" : "#d94a4a"} style={{marginRight: 4}} />}
                <Text style={[styles.pillText, activeFilter === filter && styles.pillTextActive]}>
-                 {filter}
+                 {filter === "All" ? t("all", "All") : filter === "Pinned" ? t("pinned", "Pinned") : filter === "Shared" ? t("shared", "Shared") : t("trial", "Trial")}
                </Text>
              </Pressable>
            ))}
@@ -297,7 +299,7 @@ const createNote = async () => {
           <View style={styles.emptyContainer}>
             <MaterialCommunityIcons name="note-outline" size={48} color="rgba(255,255,255,0.2)" />
             <Text style={styles.emptyText}>
-              {searchText ? "No notes found" : "No notes yet"}
+              {searchText ? t("no_notes_found", "No notes found") : t("no_notes_yet", "No notes yet")}
             </Text>
             <Text style={styles.emptySubtext}>
               {searchText ? "Try a different search" : "Create your first note"}
@@ -324,7 +326,7 @@ const createNote = async () => {
                 <Pressable onPress={() => setShowCreateModal(false)}>
                   <MaterialCommunityIcons name="close" size={24} color="#fff" />
                 </Pressable>
-                <Text style={styles.modalTitle}>New Note</Text>
+                <Text style={styles.modalTitle}>{t("new_note", "New Note")}</Text>
                 <Pressable onPress={createNote}>
                   <MaterialCommunityIcons name="check" size={24} color="#b36a22" />
                 </Pressable>

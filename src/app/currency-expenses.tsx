@@ -22,6 +22,8 @@ import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { useAppSettings } from "../contexts/AppSettingsContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../theme/theme";
 
 export interface CurrencyItem {
@@ -78,6 +80,8 @@ const PRESET_GOALS = [200, 350, 450, 600, 800, 1000, 1500];
 
 export default function CurrencyExpenses() {
   const router = useRouter();
+  const { updateCurrencyPreferences } = useAppSettings();
+  const { t } = useLanguage();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
@@ -255,7 +259,8 @@ export default function CurrencyExpenses() {
 
   // Sync preference helper saving to both AsyncStorage and Firestore
   const syncPreference = async (field: string, value: any) => {
-    // 1. Local AsyncStorage cache
+    // 1. Local AppSettings & AsyncStorage cache
+    updateCurrencyPreferences({ [field]: value });
     try {
       const current = await AsyncStorage.getItem("@bunkmates_currency_preferences");
       const currentObj = current ? JSON.parse(current) : {};
@@ -357,7 +362,7 @@ export default function CurrencyExpenses() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          Currency & Expenses
+          {t("Currency & Expenses")}
         </Text>
       </View>
 
@@ -367,7 +372,7 @@ export default function CurrencyExpenses() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── 1. BASE CURRENCY ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>BASE CURRENCY</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("Base Currency", "BASE CURRENCY")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Pressable
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
@@ -402,7 +407,7 @@ export default function CurrencyExpenses() {
         </View>
 
         {/* ── 2. DISPLAY OPTIONS ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>DISPLAY OPTIONS</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("CURRENCY DISPLAY", "DISPLAY OPTIONS")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Show Currency Symbol */}
           <View style={styles.row}>
@@ -410,7 +415,7 @@ export default function CurrencyExpenses() {
               <Ionicons name="cash-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Show Currency Symbol</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Show Currency Symbol")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
                 Display {baseCurrency.symbol}300 instead of 300 {baseCurrency.code}
               </Text>
@@ -432,9 +437,9 @@ export default function CurrencyExpenses() {
               <Ionicons name="options-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Auto Round Off</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Auto Round-off", "Auto Round Off")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Round tiny fractional cents to nearest unit
+                {t("Round up fractional amounts to the nearest whole number", "Round tiny fractional cents to nearest unit")}
               </Text>
             </View>
             <Switch
@@ -448,7 +453,7 @@ export default function CurrencyExpenses() {
         </View>
 
         {/* ── 3. EXPENSE SPLITTING ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>EXPENSE SPLITTING</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("SPLIT BILLS DEFAULTS", "EXPENSE SPLITTING")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Text style={[styles.cardIntroText, { color: colors.textSecondary }]}>
             Your default choice when adding new group logs:
@@ -465,9 +470,9 @@ export default function CurrencyExpenses() {
               <Ionicons name="pie-chart-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Split Method</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Default Split Method", "Split Method")}</Text>
             </View>
-            <Text style={[styles.rowValueText, { color: colors.textSecondary }]}>{splitMethod}</Text>
+            <Text style={[styles.rowValueText, { color: colors.textSecondary }]}>{t(splitMethod)}</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
           </Pressable>
 
@@ -479,9 +484,9 @@ export default function CurrencyExpenses() {
               <Ionicons name="sparkles-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Auto-Categorize Expenses</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Auto-Categorize Group Spends", "Auto-Categorize Expenses")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Identify flights, hostel stays & meals via AI
+                {t("Automatically categorize shared expenses into food, stay, transport", "Identify flights, hostel stays & meals via AI")}
               </Text>
             </View>
             <Switch
@@ -495,14 +500,14 @@ export default function CurrencyExpenses() {
         </View>
 
         {/* ── 4. BUDGET TRACKING ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>BUDGET TRACKING</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("BUDGET & SAVINGS", "BUDGET TRACKING")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Monthly Travel Savings Goal Toggle */}
           <View style={styles.row}>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Monthly Travel Savings Goal</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Monthly Travel Savings Goal")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                We'll help you stash travel funds monthly
+                {t("We'll help you stash travel funds monthly", "We'll help you stash travel funds monthly")}
               </Text>
             </View>
             <Switch
@@ -543,7 +548,7 @@ export default function CurrencyExpenses() {
                 accessibilityRole="button"
                 accessibilityLabel="Edit Goal"
               >
-                <Text style={[styles.editGoalBtnText, { color: colors.textPrimary }]}>EDIT GOAL</Text>
+                <Text style={[styles.editGoalBtnText, { color: colors.textPrimary }]}>{t("Edit Goal", "EDIT GOAL")}</Text>
               </Pressable>
             </View>
           )}
@@ -573,9 +578,9 @@ export default function CurrencyExpenses() {
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Select Base Currency</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Select Base Currency")}</Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              All group logs, split calculations and savings will be computed in this currency.
+              {t("All group logs, split calculations and savings will be computed in this currency.", "All group logs, split calculations and savings will be computed in this currency.")}
             </Text>
 
             {/* Search input */}
@@ -584,7 +589,7 @@ export default function CurrencyExpenses() {
               <TextInput
                 value={currencySearch}
                 onChangeText={setCurrencySearch}
-                placeholder="Search currency code or country..."
+                placeholder={t("Search currency code or country...")}
                 placeholderTextColor={colors.textSecondary}
                 style={[styles.searchInput, { color: colors.textPrimary }]}
                 autoCapitalize="none"
@@ -614,7 +619,7 @@ export default function CurrencyExpenses() {
                   >
                     <Text style={styles.currencyFlagEmoji}>{c.flag}</Text>
                     <View style={styles.currencyItemMid}>
-                      <Text style={[styles.currencyItemName, { color: colors.textPrimary }]}>{c.name}</Text>
+                      <Text style={[styles.currencyItemName, { color: colors.textPrimary }]}>{t(c.name)}</Text>
                       <Text style={[styles.currencyItemCode, { color: colors.textSecondary }]}>
                         {c.code} ({c.symbol})
                       </Text>
@@ -635,7 +640,7 @@ export default function CurrencyExpenses() {
               ]}
               onPress={() => setCurrencyModalVisible(false)}
             >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>Close</Text>
+              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
             </Pressable>
           </View>
         </View>
@@ -654,9 +659,9 @@ export default function CurrencyExpenses() {
               <Ionicons name="pie-chart-outline" size={22} color={colors.greyishWhite} />
             </View>
 
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Default Split Method</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Default Split Method")}</Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              Choose the primary logic applied when you record new group shared expenses.
+              {t("Choose the primary logic applied when you record new group shared expenses.", "Choose the primary logic applied when you record new group shared expenses.")}
             </Text>
 
             <View style={styles.modalListColumn}>
@@ -685,9 +690,9 @@ export default function CurrencyExpenses() {
                           },
                         ]}
                       >
-                        {sm.title}
+                        {t(sm.title)}
                       </Text>
-                      <Text style={[styles.modalOptionSub, { color: colors.textSecondary }]}>{sm.desc}</Text>
+                      <Text style={[styles.modalOptionSub, { color: colors.textSecondary }]}>{t(sm.desc)}</Text>
                     </View>
                     {isSelected && (
                       <Ionicons name="checkmark-circle" size={20} color={colors.activeBorder} />
@@ -705,7 +710,7 @@ export default function CurrencyExpenses() {
               ]}
               onPress={() => setSplitModalVisible(false)}
             >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>Close</Text>
+              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
             </Pressable>
           </View>
         </View>
@@ -724,9 +729,9 @@ export default function CurrencyExpenses() {
               <Ionicons name="wallet-outline" size={22} color={colors.greyishWhite} />
             </View>
 
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Edit Monthly Savings Goal</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Edit Monthly Savings Goal")}</Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              Set a monthly target to fund your upcoming adventures and bunkmate trips.
+              {t("Set a monthly target to fund your upcoming adventures and bunkmate trips.", "Set a monthly target to fund your upcoming adventures and bunkmate trips.")}
             </Text>
 
             {/* Quick preset amount chips */}
@@ -786,7 +791,7 @@ export default function CurrencyExpenses() {
                 ]}
                 onPress={() => setGoalModalVisible(false)}
               >
-                <Text style={[styles.modalCloseBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+                <Text style={[styles.modalCloseBtnText, { color: colors.textSecondary }]}>{t("Cancel")}</Text>
               </Pressable>
 
               <Pressable
@@ -798,7 +803,7 @@ export default function CurrencyExpenses() {
                 onPress={handleSaveGoal}
               >
                 <Text style={[styles.modalPrimaryBtnText, { color: isDark ? "#0A0A0C" : "#FFFFFF" }]}>
-                  Save Goal
+                  {t("Save Goal")}
                 </Text>
               </Pressable>
             </View>

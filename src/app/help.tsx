@@ -356,7 +356,7 @@ export default function HelpSupportScreen() {
 
   // Action: Open Email Support with clipboard copy fallback
   const handleOpenEmail = async () => {
-    const email = "support@bunkmates.com";
+    const email = "support@bunkmates.xyz";
     const mailtoUrl = `mailto:${email}?subject=BunkMates Help Request`;
 
     try {
@@ -372,7 +372,7 @@ export default function HelpSupportScreen() {
         await Linking.openURL(mailtoUrl);
         triggerToast("Opening email app & copied address!");
       } else {
-        triggerToast("Email copied: support@bunkmates.com");
+        triggerToast(`Email copied: ${email}`);
         Alert.alert(
           "Email Address Copied",
           `We've copied ${email} to your clipboard. You can paste it into your favorite email app to contact our support team.`,
@@ -380,7 +380,7 @@ export default function HelpSupportScreen() {
         );
       }
     } catch {
-      triggerToast("Email copied: support@bunkmates.com");
+      triggerToast(`Email copied: ${email}`);
       Alert.alert(
         "Email Support",
         `Our support email is: ${email} (Copied to clipboard). Send us a message anytime!`,
@@ -472,7 +472,7 @@ export default function HelpSupportScreen() {
       await addDoc(collection(db, "supportTickets"), {
         ticketId,
         userId: user ? user.uid : "guest",
-        userEmail: user ? user.email : "guest@bunkmates.com",
+        userEmail: user ? user.email : "guest@bunkmates.xyz",
         title: "Live Chat Escalation",
         description: chatHistory.map((m) => `${m.sender}: ${m.text}`).join("\n"),
         category: "Live Chat",
@@ -532,7 +532,7 @@ export default function HelpSupportScreen() {
       await addDoc(collection(db, "supportTickets"), {
         ticketId,
         userId: user ? user.uid : "anonymous",
-        userEmail: user ? user.email : "guest@bunkmates.com",
+        userEmail: user ? user.email : "guest@bunkmates.xyz",
         title: bugTitle.trim(),
         description: bugDescription.trim(),
         severity: bugSeverity,
@@ -795,7 +795,7 @@ export default function HelpSupportScreen() {
         {/* ========================================================
             1. FAQ CATEGORIES SECTION
         ========================================================= */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>FAQ CATEGORIES</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("FAQ CATEGORIES")}</Text>
         <View style={[styles.cardGroup, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {filteredCategories.map((cat, index) => {
             const isLast = index === filteredCategories.length - 1;
@@ -836,7 +836,7 @@ export default function HelpSupportScreen() {
         {/* ========================================================
             2. DIRECT CONTACT SECTION
         ========================================================= */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>DIRECT CONTACT</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DIRECT CONTACT")}</Text>
         <View style={[styles.cardGroup, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Contact Support */}
           <Pressable
@@ -853,14 +853,14 @@ export default function HelpSupportScreen() {
               ]}
             >
               <View style={styles.labelGroup}>
-                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Contact Support</Text>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Contact Support")}</Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                  Live chat with our support assistant
+                  {t("Live chat with our support assistant")}
                 </Text>
               </View>
               <View style={styles.onlineBadge}>
                 <View style={[styles.onlineDot, { backgroundColor: "#10B981" }]} />
-                <Text style={[styles.onlineText, { color: colors.textSecondary }]}>Online</Text>
+                <Text style={[styles.onlineText, { color: colors.textSecondary }]}>{t("Online")}</Text>
               </View>
               <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
             </View>
@@ -881,14 +881,14 @@ export default function HelpSupportScreen() {
               ]}
             >
               <View style={styles.labelGroup}>
-                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Email Support</Text>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Email Support")}</Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                  Tap to copy & open mail client
+                  {t("Tap to copy & open mail client")}
                 </Text>
               </View>
               <View style={styles.rightGroup}>
                 <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>
-                  support@bunkmates.com
+                  support@bunkmates.xyz
                 </Text>
                 <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
               </View>
@@ -910,9 +910,9 @@ export default function HelpSupportScreen() {
               ]}
             >
               <View style={styles.labelGroup}>
-                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Report a Bug</Text>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Report a Bug")}</Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                  Submit an issue to our engineering team
+                  {t("Submit an issue to our engineering team")}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
@@ -929,9 +929,9 @@ export default function HelpSupportScreen() {
             </View>
             <View style={[styles.rowContent, { borderBottomWidth: 0 }]}>
               <View style={styles.labelGroup}>
-                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Community Forum</Text>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Community Forum")}</Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                  Explore discussions with 50,000+ roommates
+                  {t("Explore discussions with 50,000+ roommates")}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={17} color={colors.chevron} />

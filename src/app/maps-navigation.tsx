@@ -21,6 +21,7 @@ import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../theme/theme";
 
 type MapProvider = "Apple Maps" | "Google Maps" | "Waze";
@@ -41,6 +42,7 @@ const DISTANCE_OPTIONS: DistanceOption[] = [
 
 export default function MapsNavigation() {
   const router = useRouter();
+  const { t } = useLanguage();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
@@ -270,7 +272,7 @@ export default function MapsNavigation() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          Maps & Navigation
+          {t("Maps & Navigation")}
         </Text>
       </View>
 
@@ -280,11 +282,11 @@ export default function MapsNavigation() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── 1. NAVIGATION PREFERENCES ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>NAVIGATION PREFERENCES</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("NAVIGATION PROVIDER", "NAVIGATION PREFERENCES")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Default Map Provider */}
           <View style={styles.segmentBlock}>
-            <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>Default Map Provider</Text>
+            <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>{t("Preferred Map App", "Default Map Provider")}</Text>
             <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg }]}>
               {(["Apple Maps", "Google Maps", "Waze"] as MapProvider[]).map((p) => {
                 const isSelected = mapProvider === p;
@@ -323,18 +325,18 @@ export default function MapsNavigation() {
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             onPress={() => setDistanceModalVisible(true)}
             accessibilityRole="button"
-            accessibilityLabel="Distance Units"
+            accessibilityLabel={t("Distance Units")}
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="arrow-forward-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Distance Units</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Distance Units")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Choose display units for distances
+                {t("Choose display units for distances", "Choose display units for distances")}
               </Text>
             </View>
-            <Text style={[styles.rowValueText, { color: colors.textSecondary }]}>{distanceUnit}</Text>
+            <Text style={[styles.rowValueText, { color: colors.textSecondary }]}>{t(distanceUnit)}</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
           </Pressable>
 
@@ -346,9 +348,9 @@ export default function MapsNavigation() {
               <Ionicons name="sync-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Auto-Reroute</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Auto-Reroute")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Reroute instantly if a faster path is found
+                {t("Automatically find faster routes when traffic changes", "Reroute instantly if a faster path is found")}
               </Text>
             </View>
             <Switch
@@ -368,9 +370,9 @@ export default function MapsNavigation() {
               <Ionicons name="git-branch-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Avoid Tolls</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Avoid Tolls")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Calculate routes to avoid toll roads
+                {t("Prefer free routes without toll booths", "Calculate routes to avoid toll roads")}
               </Text>
             </View>
             <Switch
@@ -384,11 +386,11 @@ export default function MapsNavigation() {
         </View>
 
         {/* ── 2. MAP STYLE ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>MAP STYLE</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("MAP DISPLAY & UNITS", "MAP STYLE")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Style Profile */}
           <View style={styles.segmentBlock}>
-            <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>Style Profile</Text>
+            <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>{t("Map Style", "Style Profile")}</Text>
             <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg }]}>
               {(["Standard", "Satellite", "Terrain"] as StyleProfile[]).map((s) => {
                 const isSelected = styleProfile === s;
@@ -412,7 +414,7 @@ export default function MapsNavigation() {
                           : { color: colors.textSecondary },
                       ]}
                     >
-                      {s}
+                      {t(s)}
                     </Text>
                   </Pressable>
                 );
@@ -428,9 +430,9 @@ export default function MapsNavigation() {
               <Ionicons name="location-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Show Points of Interest</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Show Points of Interest")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Display cafes, fuel stations, and landmarks
+                {t("Display cafes, fuel stations, and landmarks", "Display cafes, fuel stations, and landmarks")}
               </Text>
             </View>
             <Switch
@@ -471,9 +473,9 @@ export default function MapsNavigation() {
               <Ionicons name="arrow-forward-outline" size={22} color={colors.greyishWhite} />
             </View>
 
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Distance Units</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Distance Units")}</Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              Select your preferred measurement units for route guidance and trail navigation.
+              {t("Select your preferred measurement units for route guidance and trail navigation.", "Select your preferred measurement units for route guidance and trail navigation.")}
             </Text>
 
             <View style={styles.modalListColumn}>
@@ -502,10 +504,10 @@ export default function MapsNavigation() {
                           },
                         ]}
                       >
-                        {opt.label}
+                        {t(opt.label)}
                       </Text>
                       <Text style={[styles.modalOptionSub, { color: colors.textSecondary }]}>
-                        {opt.desc}
+                        {t(opt.desc)}
                       </Text>
                     </View>
                     {isSelected && (
@@ -524,7 +526,7 @@ export default function MapsNavigation() {
               ]}
               onPress={() => setDistanceModalVisible(false)}
             >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>Close</Text>
+              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
             </Pressable>
           </View>
         </View>

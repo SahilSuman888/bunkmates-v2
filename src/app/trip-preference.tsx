@@ -20,6 +20,8 @@ import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { useAppSettings } from "../contexts/AppSettingsContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../theme/theme";
 
 type TravelStyle = "Budget" | "Mid-Range" | "Luxury";
@@ -69,6 +71,8 @@ const ACTIVITY_OPTIONS = [
 
 export default function TripPreferences() {
   const router = useRouter();
+  const { updateTripPreferences } = useAppSettings();
+  const { t } = useLanguage();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
@@ -238,6 +242,7 @@ export default function TripPreferences() {
 
   // Sync preference helper saving to both AsyncStorage and Firestore
   const syncPreference = async (field: string, value: any) => {
+    updateTripPreferences({ [field]: value });
     // 1. Cache locally in AsyncStorage
     try {
       const current = await AsyncStorage.getItem("@bunkmates_trip_preferences");
@@ -336,7 +341,7 @@ export default function TripPreferences() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          Trip Preferences
+          {t("Trip Preferences")}
         </Text>
       </View>
 
@@ -346,10 +351,10 @@ export default function TripPreferences() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── 1. PREFERRED TRAVEL STYLE ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>PREFERRED TRAVEL STYLE</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("TRAVEL STYLE", "PREFERRED TRAVEL STYLE")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
           <Text style={[styles.descText, { color: colors.textSecondary }]}>
-            What's your typical budget and pace for exploring new spots?
+            {t("What's your typical budget and pace for exploring new spots?", "What's your typical budget and pace for exploring new spots?")}
           </Text>
 
           {/* 3-Way Segmented Control */}
@@ -376,7 +381,7 @@ export default function TripPreferences() {
                         : { color: colors.textSecondary },
                     ]}
                   >
-                    {style}
+                    {t(style)}
                   </Text>
                 </Pressable>
               );
@@ -385,10 +390,10 @@ export default function TripPreferences() {
         </View>
 
         {/* ── 2. PREFERRED ACCOMMODATIONS ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>PREFERRED ACCOMMODATIONS</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("Accommodation Preference", "PREFERRED ACCOMMODATIONS")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
           <Text style={[styles.descText, { color: colors.textSecondary }]}>
-            Select your favorite types of stays (multi-select):
+            {t("Select your favorite types of stays (multi-select):", "Select your favorite types of stays (multi-select):")}
           </Text>
 
           <View style={styles.chipRow}>
@@ -416,7 +421,7 @@ export default function TripPreferences() {
                       },
                     ]}
                   >
-                    {item}
+                    {t(item)}
                   </Text>
                 </Pressable>
               );
@@ -425,7 +430,7 @@ export default function TripPreferences() {
         </View>
 
         {/* ── 3. DEFAULT TRIP SETTINGS ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>DEFAULT TRIP SETTINGS</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DEFAULT TRIP SETTINGS", "DEFAULT TRIP SETTINGS")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Default Trip Duration */}
           <Pressable
@@ -438,9 +443,9 @@ export default function TripPreferences() {
               <Ionicons name="time-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Default Trip Duration</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Typical Duration", "Default Trip Duration")}</Text>
             </View>
-            <Text style={[styles.rowValue, { color: colors.textSecondary }]}>{tripDuration}</Text>
+            <Text style={[styles.rowValue, { color: colors.textSecondary }]}>{t(tripDuration)}</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
           </Pressable>
 
@@ -457,15 +462,15 @@ export default function TripPreferences() {
               <Ionicons name="people-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Ideal Group Size</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Preferred Group Size", "Ideal Group Size")}</Text>
             </View>
-            <Text style={[styles.rowValue, { color: colors.textSecondary }]}>{groupSize}</Text>
+            <Text style={[styles.rowValue, { color: colors.textSecondary }]}>{t(groupSize)}</Text>
             <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
           </Pressable>
         </View>
 
         {/* ── 4. DIETARY PREFERENCES ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>DIETARY PREFERENCES</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DIET & LIFESTYLE", "DIETARY PREFERENCES")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
           <Text style={[styles.descText, { color: colors.textSecondary }]}>
             We'll filter group diners and recipe guides based on these:
@@ -496,7 +501,7 @@ export default function TripPreferences() {
                       },
                     ]}
                   >
-                    {item}
+                    {t(item)}
                   </Text>
                 </Pressable>
               );
@@ -505,10 +510,10 @@ export default function TripPreferences() {
         </View>
 
         {/* ── 5. ACTIVITY INTERESTS ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>ACTIVITY INTERESTS</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("ACTIVITY INTERESTS")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
           <Text style={[styles.descText, { color: colors.textSecondary }]}>
-            Help us match you with perfect sightseeing plans:
+            {t("Help us match you with perfect sightseeing plans:", "Help us match you with perfect sightseeing plans:")}
           </Text>
 
           <View style={styles.chipRow}>
@@ -536,7 +541,7 @@ export default function TripPreferences() {
                       },
                     ]}
                   >
-                    {item}
+                    {t(item)}
                   </Text>
                 </Pressable>
               );
@@ -577,12 +582,12 @@ export default function TripPreferences() {
             </View>
 
             <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
-              {activeModal === "duration" ? "Default Trip Duration" : "Ideal Group Size"}
+              {activeModal === "duration" ? t("Default Trip Duration") : t("Ideal Group Size")}
             </Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
               {activeModal === "duration"
-                ? "Choose your standard preferred duration when creating or searching trips."
-                : "Choose the target group size that best suits your travel style."}
+                ? t("Choose your standard preferred duration when creating or searching trips.", "Choose your standard preferred duration when creating or searching trips.")
+                : t("Choose the target group size that best suits your travel style.", "Choose the target group size that best suits your travel style.")}
             </Text>
 
             <View style={styles.modalListColumn}>
@@ -612,7 +617,7 @@ export default function TripPreferences() {
                         },
                       ]}
                     >
-                      {opt}
+                      {t(opt)}
                     </Text>
                     {isSelected && (
                       <Ionicons name="checkmark-circle" size={20} color={colors.chipSelectedBorder} />
@@ -630,7 +635,7 @@ export default function TripPreferences() {
               ]}
               onPress={() => setActiveModal(null)}
             >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>Close</Text>
+              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
             </Pressable>
           </View>
         </View>

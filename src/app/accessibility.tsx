@@ -24,6 +24,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useAppSettings } from "../contexts/AppSettingsContext";
 import { ACCENT_COLORS } from "../theme/theme";
 
 export type ColorBlindType =
@@ -88,6 +89,7 @@ export const COLOR_BLIND_OPTIONS: ColorBlindOption[] = [
 export default function AccessibilitySettings() {
   const router = useRouter();
   const { t } = useLanguage();
+  const { updateAccessibilityPreferences } = useAppSettings();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
@@ -324,6 +326,7 @@ export default function AccessibilitySettings() {
       ...updated,
     };
 
+    updateAccessibilityPreferences(updated);
     try {
       await AsyncStorage.setItem("@bunkmates_accessibility_preferences", JSON.stringify(current));
     } catch (e) {
@@ -465,7 +468,7 @@ export default function AccessibilitySettings() {
           ]}
           numberOfLines={1}
         >
-          Accessibility
+          {t("Accessibility")}
         </Text>
         <View style={styles.headerRightSpacer} />
       </View>
@@ -568,7 +571,7 @@ export default function AccessibilitySettings() {
         {/* ========================================================
             1. VISION SUPPORT SECTION
         ========================================================= */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>VISION SUPPORT</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("VISION & DISPLAY", "VISION SUPPORT")}</Text>
         <View
           style={[
             styles.cardGroup,
@@ -609,10 +612,10 @@ export default function AccessibilitySettings() {
                     { color: colors.textPrimary, fontWeight: highContrastMode ? "800" : "600" },
                   ]}
                 >
-                  Screen Reader Compatibility
+                  {t("Screen Reader Optimization", "Screen Reader Compatibility")}
                 </Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                  Optimize navigation for VoiceOver & TalkBack
+                  {t("Optimize labels and order for screen readers", "Optimize navigation for VoiceOver & TalkBack")}
                 </Text>
               </View>
               <Switch
@@ -655,7 +658,7 @@ export default function AccessibilitySettings() {
                     { color: colors.textPrimary, fontWeight: highContrastMode ? "800" : "600" },
                   ]}
                 >
-                  High Contrast Mode
+                  {t("High Contrast Mode")}
                 </Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
                   Increase text and interface element contrast
@@ -769,7 +772,7 @@ export default function AccessibilitySettings() {
         {/* ========================================================
             2. MOTION & FEEDBACK SECTION
         ========================================================= */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>MOTION & FEEDBACK</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("INTERACTION & MOTION", "MOTION & FEEDBACK")}</Text>
         <View
           style={[
             styles.cardGroup,
@@ -810,7 +813,7 @@ export default function AccessibilitySettings() {
                     { color: colors.textPrimary, fontWeight: highContrastMode ? "800" : "600" },
                   ]}
                 >
-                  Reduce Motion
+                  {t("Reduce Motion")}
                 </Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
                   Limit animations and decorative movements
@@ -851,10 +854,10 @@ export default function AccessibilitySettings() {
                     { color: colors.textPrimary, fontWeight: highContrastMode ? "800" : "600" },
                   ]}
                 >
-                  Haptic Feedback
+                  {t("Haptic Feedback")}
                 </Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                  Vibrate device on key presses & confirmations
+                  {t("Vibrate on button taps, switches and tab switches", "Vibrate device on key presses & confirmations")}
                 </Text>
               </View>
               <Switch

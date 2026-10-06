@@ -22,6 +22,7 @@ import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../theme/theme";
 
 export interface DownloadedMap {
@@ -54,6 +55,7 @@ const AVAILABLE_MAPS_TO_DOWNLOAD = [
 
 export default function OfflineDownloads() {
   const router = useRouter();
+  const { t } = useLanguage();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
@@ -385,7 +387,7 @@ export default function OfflineDownloads() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          Offline & Downloads
+          {t("Offline & Downloads")}
         </Text>
       </View>
 
@@ -395,10 +397,10 @@ export default function OfflineDownloads() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── 1. DEVICE STORAGE ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>DEVICE STORAGE</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DEVICE STORAGE")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 18 }]}>
           <View style={styles.storageTopRow}>
-            <Text style={[styles.storageTitle, { color: colors.textPrimary }]}>BunkMates Storage Used</Text>
+            <Text style={[styles.storageTitle, { color: colors.textPrimary }]}>{t("BunkMates Storage Used")}</Text>
             <Text style={[styles.storageUsedText, { color: colors.textPrimary }]}>
               {totalUsedMB} MB of 128 GB
             </Text>
@@ -418,18 +420,18 @@ export default function OfflineDownloads() {
           </View>
 
           <Text style={[styles.storageDescText, { color: colors.textSecondary }]}>
-            Includes offline topographic maps, pack-lists, and cached friend avatars.
+            {t("Includes offline topographic maps, pack-lists, and cached friend avatars.")}
           </Text>
         </View>
 
         {/* ── 2. DOWNLOADED MAPS ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>DOWNLOADED MAPS</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DOWNLOADED MAPS")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {maps.length === 0 ? (
             <View style={styles.emptyMapWrap}>
               <Ionicons name="map-outline" size={28} color={colors.textSecondary} />
               <Text style={[styles.emptyMapText, { color: colors.textSecondary }]}>
-                No offline maps downloaded yet.
+                {t("No offline maps downloaded yet.")}
               </Text>
             </View>
           ) : (
@@ -479,12 +481,12 @@ export default function OfflineDownloads() {
         >
           <Ionicons name="cloud-download-outline" size={19} color={colors.textPrimary} />
           <Text style={[styles.downloadActionBtnText, { color: colors.textPrimary }]}>
-            Download New Map Region
+            {t("Download New Region", "Download New Map Region")}
           </Text>
         </Pressable>
 
         {/* ── 3. OFFLINE TRIPS CACHE ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>OFFLINE TRIPS CACHE</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("OFFLINE SAVED TRIPS", "OFFLINE TRIPS CACHE")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {trips.map((t, idx) => (
             <React.Fragment key={t.id}>

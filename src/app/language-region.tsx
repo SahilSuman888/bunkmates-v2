@@ -25,6 +25,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useAppSettings } from "../contexts/AppSettingsContext";
 import { ACCENT_COLORS } from "../theme/theme";
 
 export interface LanguageOption {
@@ -159,6 +160,7 @@ export default function LanguageRegionSettings() {
     changeLanguage,
     t,
   } = useLanguage();
+  const { updateLocalePreferences } = useAppSettings();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
@@ -356,6 +358,7 @@ export default function LanguageRegionSettings() {
       ...updated,
     };
 
+    updateLocalePreferences(updated as any);
     try {
       await AsyncStorage.setItem("@bunkmates_locale_preferences", JSON.stringify(current));
     } catch (e) {

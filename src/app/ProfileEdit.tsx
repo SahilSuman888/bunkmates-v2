@@ -20,6 +20,7 @@ import { useRouter } from "expo-router";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { useUser } from "../contexts/UserContext";
 import { useThemeToggle } from "../contexts/ThemeContext"; // **@** Dynamic theme hook
+import { useLanguage } from "../contexts/LanguageContext";
 import { auth, db, storage } from "../lib/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
@@ -29,6 +30,7 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 export default function EditProfile() {
   const router = useRouter();
   const { user } = useUser();
+  const { t } = useLanguage();
 
   const [loading, setLoading] = useState(!user);
   const [saving, setSaving] = useState(false);
@@ -247,7 +249,7 @@ export default function EditProfile() {
           </Pressable>
 
           <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-            Edit Profile
+            {t("Edit Profile")}
           </Text>
 
           <Pressable
@@ -268,7 +270,7 @@ export default function EditProfile() {
             {saving ? (
               <ActivityIndicator size="small" color={colors.saveBtnText} />
             ) : (
-              <Text style={[styles.savePillText, { color: colors.saveBtnText }]}>Save</Text>
+              <Text style={[styles.savePillText, { color: colors.saveBtnText }]}>{t("Save")}</Text>
             )}
           </Pressable>
         </View>
@@ -301,14 +303,14 @@ export default function EditProfile() {
 
           {/* **@** Section Header: "PERSONAL INFORMATION" */}
           <Text style={[styles.sectionHeaderTitle, { color: colors.sectionHeader }]}>
-            PERSONAL INFORMATION
+            {t("PERSONAL INFORMATION")}
           </Text>
 
           {/* **@** Form Container Card: Clean rounded container enclosing all personal fields */}
           <View style={[styles.formCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             {/* First Name */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>First Name</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("First Name")}</Text>
               <TextInput
                 value={data.firstName}
                 onChangeText={(v) => setData({ ...data, firstName: v })}
@@ -323,7 +325,7 @@ export default function EditProfile() {
 
             {/* Last Name */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Last Name</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Last Name")}</Text>
               <TextInput
                 value={data.lastName}
                 onChangeText={(v) => setData({ ...data, lastName: v })}
@@ -338,7 +340,7 @@ export default function EditProfile() {
 
             {/* Display Name with Subtitle */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Display Name</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Display Name")}</Text>
               <TextInput
                 value={data.displayName}
                 onChangeText={(v) => setData({ ...data, displayName: v })}
@@ -350,13 +352,13 @@ export default function EditProfile() {
                 ]}
               />
               <Text style={[styles.fieldHelper, { color: colors.textSecondary }]}>
-                This is how other bunkmates will see you on trips.
+                {t("This is how other bunkmates will see you on trips.")}
               </Text>
             </View>
 
             {/* **@** Preserved v2 feature: Username handle */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Username</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Username")}</Text>
               <View
                 style={[
                   styles.inputWithIconWrapper,
@@ -377,7 +379,7 @@ export default function EditProfile() {
 
             {/* Email with Icon (Read-only as in reference) */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Email</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Email")}</Text>
               <View
                 style={[
                   styles.inputWithIconWrapper,
@@ -397,7 +399,7 @@ export default function EditProfile() {
 
             {/* Phone with Icon */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Phone</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Phone")}</Text>
               <View
                 style={[
                   styles.inputWithIconWrapper,
@@ -418,7 +420,7 @@ export default function EditProfile() {
 
             {/* Bio / Travel Tagline */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Bio / Travel Tagline</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Bio / Travel Tagline")}</Text>
               <TextInput
                 value={data.bio}
                 onChangeText={(v) => setData({ ...data, bio: v })}
@@ -435,7 +437,7 @@ export default function EditProfile() {
 
             {/* Home City with Location Pin Icon */}
             <View style={[styles.fieldGroup, { marginBottom: 4 }]}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Home City</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Home City")}</Text>
               <View
                 style={[
                   styles.inputWithIconWrapper,

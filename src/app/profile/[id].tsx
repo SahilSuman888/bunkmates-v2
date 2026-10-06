@@ -110,6 +110,22 @@ export default function ProfileScreen() {
     );
   }
 
+  const isPrivate =
+    profile.privacy?.profileVisibility === "private" ||
+    profile.profileVisibility === "private";
+  const isFriend =
+    profile.friends?.includes(user?.uid) ||
+    user?.friends?.includes(id?.toString());
+  const isSelf = user?.uid === id?.toString();
+  const canViewFullProfile = !isPrivate || isFriend || isSelf;
+
+  const [friendRequested, setFriendRequested] = useState(false);
+
+  const handleAddFriend = () => {
+    setFriendRequested(true);
+    Alert.alert("Friend Request Sent", `A friend request was sent to @${profile.username || profile.name}.`);
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#0a0a0a" />
@@ -127,131 +143,163 @@ export default function ProfileScreen() {
             source={{ uri: profile.photoURL || "https://i.pravatar.cc/300" }}
             style={styles.avatar}
           />
-          <Text style={styles.name}>{profile.name || "Mohit Sharma"}</Text>
-          <Text style={styles.username}>@{profile.username || "mohit_sharma"}</Text>
-          <View style={styles.nicknamePill}>
-            <Text style={styles.nicknameText}>{profile.name || "Mohit Sharma"}</Text>
-          </View>
-        </View>
-
-        {/* INFO LIST */}
-        <View style={styles.listContainer}>
-          <View style={styles.listItem}>
-            <Text style={styles.listText}>{mutualCount} Mutual Friends</Text>
-            <View style={styles.mutualAvatarsWrapper}>
-              {/* Dummy overlapping avatars matching the image */}
-              <Image source={{ uri: "https://i.pravatar.cc/100?img=1" }} style={[styles.mutualAvatar, { zIndex: 3 }]} />
-              <Image source={{ uri: "https://i.pravatar.cc/100?img=2" }} style={[styles.mutualAvatar, styles.mutualOverlap, { zIndex: 2 }]} />
-              <Image source={{ uri: "https://i.pravatar.cc/100?img=3" }} style={[styles.mutualAvatar, styles.mutualOverlap, { zIndex: 1 }]} />
+          <Text style={styles.name}>{profile.name || "User"}</Text>
+          <Text style={styles.username}>@{profile.username || "user"}</Text>
+          {isPrivate && (
+            <View style={[styles.nicknamePill, { flexDirection: "row", alignItems: "center", marginTop: 4 }]}>
+              <Ionicons name="lock-closed" size={12} color="#aaa" style={{ marginRight: 4 }} />
+              <Text style={styles.nicknameText}>Private Account</Text>
             </View>
-          </View>
-          
-          <View style={styles.listItem}>
-            <Feather name="phone" size={18} color="#ccc" style={styles.listIcon} />
-            <Text style={styles.listText}>{profile.mobile || "918109618103"}</Text>
-          </View>
-          
-          <View style={styles.listItem}>
-            <Feather name="user" size={18} color="#ccc" style={styles.listIcon} />
-            <Text style={styles.listText}>Profile</Text>
-          </View>
-
-          <View style={styles.listItem}>
-            <MaterialCommunityIcons name="format-text" size={20} color="#ccc" style={styles.listIcon} />
-            <Text style={styles.listText}>Add a Nickname</Text>
-          </View>
+          )}
         </View>
 
-        {/* COMMON GROUPS */}
-        <Text style={styles.sectionTitle}>Common Groups</Text>
-        <View style={styles.groupItem}>
-          <Image source={{ uri: "https://i.pravatar.cc/150?img=11" }} style={styles.groupAvatar} />
-          <View style={styles.groupTextContainer}>
-            <Text style={styles.groupTitle}>BM - Dev Beta</Text>
-            <Text style={styles.groupMembers} numberOfLines={1}>Jayendra Choudhary, Mohit Sharma, Sahil...</Text>
+        {!canViewFullProfile ? (
+          /* PRIVATE ACCOUNT GUARD */
+          <View style={styles.privateCard}>
+            <View style={styles.privateIconCircle}>
+              <Ionicons name="lock-closed-outline" size={28} color="#E2E8F0" />
+            </View>
+            <Text style={styles.privateTitle}>This Account is Private</Text>
+            <Text style={styles.privateSubtitle}>
+              Follow or become friends with @{profile.username || profile.name} to see their trips, groups, and activity.
+            </Text>
+            <Pressable
+              style={({ pressed }) => [
+                styles.addFriendBtn,
+                friendRequested && { backgroundColor: "rgba(255,255,255,0.15)" },
+                pressed && { opacity: 0.8 },
+              ]}
+              onPress={handleAddFriend}
+              disabled={friendRequested}
+            >
+              <Ionicons
+                name={friendRequested ? "checkmark" : "person-add"}
+                size={16}
+                color={friendRequested ? "#fff" : "#000"}
+              />
+              <Text style={[styles.addFriendText, friendRequested && { color: "#fff" }]}>
+                {friendRequested ? "Request Sent" : "Add Friend"}
+              </Text>
+            </Pressable>
           </View>
-        </View>
-        <View style={styles.groupItem}>
-          <Image source={{ uri: "https://i.pravatar.cc/150?img=12" }} style={styles.groupAvatar} />
-          <View style={styles.groupTextContainer}>
-            <Text style={styles.groupTitle}>Chai Circle Lite</Text>
-            <Text style={styles.groupMembers} numberOfLines={1}>Sahil Suman, Jayendra Choudhary, Rauna...</Text>
-          </View>
-        </View>
-        <View style={styles.groupItem}>
-          <Image source={{ uri: "https://i.pravatar.cc/150?img=13" }} style={styles.groupAvatar} />
-          <View style={styles.groupTextContainer}>
-            <Text style={styles.groupTitle}>Bunkers of Thar</Text>
-            <Text style={styles.groupMembers} numberOfLines={1}>Jayendra Choudhary, Raunak Bansal, Sah...</Text>
-          </View>
-        </View>
-
-        {/* COMMON TRIPS */}
-        <Text style={styles.sectionTitle}>Common Trips</Text>
-        {commonTrips.length > 0 ? (
-          commonTrips.map((trip) => (
-            <View key={trip.id} style={styles.tripCard}>
-              <View style={styles.tripHeaderRow}>
-                <Text style={styles.tripTitle}>{trip.name || "Bunkers of Thar"}</Text>
-                <View style={styles.tripProgressContainer}>
-                  <Text style={styles.tripProgressText}>0 / 1 complete</Text>
-                  <View style={styles.progressBarBg}>
-                    <View style={styles.progressBarFill} />
-                  </View>
+        ) : (
+          <>
+            {/* INFO LIST */}
+            <View style={styles.listContainer}>
+              <View style={styles.listItem}>
+                <Text style={styles.listText}>{mutualCount} Mutual Friends</Text>
+                <View style={styles.mutualAvatarsWrapper}>
+                  {/* Dummy overlapping avatars matching the image */}
+                  <Image source={{ uri: "https://i.pravatar.cc/100?img=1" }} style={[styles.mutualAvatar, { zIndex: 3 }]} />
+                  <Image source={{ uri: "https://i.pravatar.cc/100?img=2" }} style={[styles.mutualAvatar, styles.mutualOverlap, { zIndex: 2 }]} />
+                  <Image source={{ uri: "https://i.pravatar.cc/100?img=3" }} style={[styles.mutualAvatar, styles.mutualOverlap, { zIndex: 1 }]} />
                 </View>
               </View>
               
-              <View style={styles.tripRow}>
-                <Feather name="map-pin" size={12} color="#888" />
-                <Text style={styles.tripSubText}>{trip.location || "Jaipur → Jaisalmer"}</Text>
+              {profile.mobile && (
+                <View style={styles.listItem}>
+                  <Feather name="phone" size={18} color="#ccc" style={styles.listIcon} />
+                  <Text style={styles.listText}>{profile.mobile}</Text>
+                </View>
+              )}
+              
+              <View style={styles.listItem}>
+                <Feather name="user" size={18} color="#ccc" style={styles.listIcon} />
+                <Text style={styles.listText}>Profile</Text>
               </View>
-              <View style={styles.tripRow}>
-                <Feather name="clock" size={12} color="#888" />
-                <Text style={styles.tripSubText}>{trip.startDate || "2025-11-07"} → {trip.endDate || "2025-11-10"}</Text>
+
+              <View style={styles.listItem}>
+                <MaterialCommunityIcons name="format-text" size={20} color="#ccc" style={styles.listIcon} />
+                <Text style={styles.listText}>Add a Nickname</Text>
               </View>
             </View>
-          ))
-        ) : (
-          /* Mock Trip Card to match image exactly if DB is empty */
-          <View style={styles.tripCard}>
-            <View style={styles.tripHeaderRow}>
-              <Text style={styles.tripTitle}>Bunkers of Thar</Text>
-              <View style={styles.tripProgressContainer}>
-                <Text style={styles.tripProgressText}>0 / 1 complete</Text>
-                <View style={styles.progressBarBg}>
-                  <View style={styles.progressBarFill} />
+
+            {/* COMMON GROUPS */}
+            <Text style={styles.sectionTitle}>Common Groups</Text>
+            <View style={styles.groupItem}>
+              <Image source={{ uri: "https://i.pravatar.cc/150?img=11" }} style={styles.groupAvatar} />
+              <View style={styles.groupTextContainer}>
+                <Text style={styles.groupTitle}>BM - Dev Beta</Text>
+                <Text style={styles.groupMembers} numberOfLines={1}>Jayendra Choudhary, Mohit Sharma, Sahil...</Text>
+              </View>
+            </View>
+            <View style={styles.groupItem}>
+              <Image source={{ uri: "https://i.pravatar.cc/150?img=12" }} style={styles.groupAvatar} />
+              <View style={styles.groupTextContainer}>
+                <Text style={styles.groupTitle}>Chai Circle Lite</Text>
+                <Text style={styles.groupMembers} numberOfLines={1}>Sahil Suman, Jayendra Choudhary, Rauna...</Text>
+              </View>
+            </View>
+
+            {/* COMMON TRIPS */}
+            <Text style={styles.sectionTitle}>Common Trips</Text>
+            {commonTrips.length > 0 ? (
+              commonTrips.map((trip) => (
+                <View key={trip.id} style={styles.tripCard}>
+                  <View style={styles.tripHeaderRow}>
+                    <Text style={styles.tripTitle}>{trip.name || "Bunkers of Thar"}</Text>
+                    <View style={styles.tripProgressContainer}>
+                      <Text style={styles.tripProgressText}>0 / 1 complete</Text>
+                      <View style={styles.progressBarBg}>
+                        <View style={styles.progressBarFill} />
+                      </View>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.tripRow}>
+                    <Feather name="map-pin" size={12} color="#888" />
+                    <Text style={styles.tripSubText}>{trip.location || "Jaipur → Jaisalmer"}</Text>
+                  </View>
+                  <View style={styles.tripRow}>
+                    <Feather name="clock" size={12} color="#888" />
+                    <Text style={styles.tripSubText}>{trip.startDate || "2025-11-07"} → {trip.endDate || "2025-11-10"}</Text>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <View style={styles.tripCard}>
+                <View style={styles.tripHeaderRow}>
+                  <Text style={styles.tripTitle}>Bunkers of Thar</Text>
+                  <View style={styles.tripProgressContainer}>
+                    <Text style={styles.tripProgressText}>0 / 1 complete</Text>
+                    <View style={styles.progressBarBg}>
+                      <View style={styles.progressBarFill} />
+                    </View>
+                  </View>
+                </View>
+                
+                <View style={styles.tripRow}>
+                  <Feather name="map-pin" size={12} color="#888" />
+                  <Text style={styles.tripSubText}>Jaipur → Jaisalmer</Text>
+                </View>
+                <View style={styles.tripRow}>
+                  <Feather name="clock" size={12} color="#888" />
+                  <Text style={styles.tripSubText}>2025-11-07 → 2025-11-10</Text>
                 </View>
               </View>
+            )}
+
+            {/* DANGER ZONE (Only visible when friends/connected) */}
+            <View style={styles.dangerZone}>
+              <Pressable onPress={deleteChat} style={styles.dangerBtn}>
+                <Feather name="trash-2" size={18} color="#d94a4a" style={styles.dangerIcon} />
+                <Text style={styles.dangerText}>Delete Chat</Text>
+              </Pressable>
+
+              <Pressable onPress={blockUser} style={styles.dangerBtn}>
+                <Feather name="slash" size={18} color="#d94a4a" style={styles.dangerIcon} />
+                <Text style={styles.dangerText}>Block Friend</Text>
+              </Pressable>
+
+              {isFriend && (
+                <Pressable onPress={removeFriend} style={styles.dangerBtn}>
+                  <Feather name="minus-circle" size={18} color="#d94a4a" style={styles.dangerIcon} />
+                  <Text style={styles.dangerText}>Remove from Friend</Text>
+                </Pressable>
+              )}
             </View>
-            
-            <View style={styles.tripRow}>
-              <Feather name="map-pin" size={12} color="#888" />
-              <Text style={styles.tripSubText}>Jaipur → Jaisalmer</Text>
-            </View>
-            <View style={styles.tripRow}>
-              <Feather name="clock" size={12} color="#888" />
-              <Text style={styles.tripSubText}>2025-11-07 → 2025-11-10</Text>
-            </View>
-          </View>
+          </>
         )}
-
-        {/* DANGER ZONE */}
-        <View style={styles.dangerZone}>
-          <Pressable onPress={deleteChat} style={styles.dangerBtn}>
-            <Feather name="trash-2" size={18} color="#d94a4a" style={styles.dangerIcon} />
-            <Text style={styles.dangerText}>Delete Chat</Text>
-          </Pressable>
-
-          <Pressable onPress={blockUser} style={styles.dangerBtn}>
-            <Feather name="slash" size={18} color="#d94a4a" style={styles.dangerIcon} />
-            <Text style={styles.dangerText}>Block Friend</Text>
-          </Pressable>
-
-          <Pressable onPress={removeFriend} style={styles.dangerBtn}>
-            <Feather name="minus-circle" size={18} color="#d94a4a" style={styles.dangerIcon} />
-            <Text style={styles.dangerText}>Remove from Friend</Text>
-          </Pressable>
-        </View>
 
       </ScrollView>
     </SafeAreaView>
@@ -311,4 +359,53 @@ const styles = StyleSheet.create({
   dangerBtn: { flexDirection: "row", alignItems: "center", backgroundColor: "#1a0f0f", padding: 16, borderRadius: 12, marginBottom: 8 },
   dangerIcon: { marginRight: 12 },
   dangerText: { color: "#d94a4a", fontSize: 14 },
+
+  // Private Account Card
+  privateCard: {
+    backgroundColor: "#16161a",
+    borderRadius: 16,
+    padding: 24,
+    alignItems: "center",
+    marginHorizontal: 16,
+    marginVertical: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  privateIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  privateTitle: {
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  privateSubtitle: {
+    color: "#8E95A2",
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: "center",
+    marginBottom: 18,
+    paddingHorizontal: 10,
+  },
+  addFriendBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  addFriendText: {
+    color: "#000000",
+    fontWeight: "600",
+    fontSize: 14,
+    marginLeft: 6,
+  },
 });

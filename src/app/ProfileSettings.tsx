@@ -693,26 +693,6 @@ export default function ProfileSettings() {
     }
   };
 
-  // =========================================================
-  // LOADING
-  // =========================================================
-
-  // **@** Show skeleton/loading only while auth is resolving.
-  // Profile data now loads via InteractionManager so we show
-  // the settings layout ASAP with fallback values, rather than
-  // blocking the entire screen behind a spinner.
-  if (authLoading) {
-    return (
-      <View
-        style={styles.loadingContainer}
-      >
-        <ActivityIndicator
-          size="small"
-          color="#ffffff"
-        />
-      </View>
-    );
-  }
 
   // =========================================================
   // VALUES
@@ -997,7 +977,7 @@ export default function ProfileSettings() {
       title: "Help & Support",
       subtitle: "Guides, FAQs, 24/7 BunkMates bot",
       keywords: ["help", "support", "faq", "customer service", "guide", "problem", "ticket"],
-      icon: "chatbubble-question-outline",
+      icon: "help-circle-outline",
       onPress: () => {
         setIsSearching(false);
         smoothNavigate("/help");
@@ -1109,6 +1089,15 @@ export default function ProfileSettings() {
       return titleMatch || subtitleMatch || categoryMatch || keywordMatch;
     });
   }, [searchQuery, searchableSettings]);
+
+  // Loading check placed after all hooks to prevent hook count mismatch
+  if (authLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="small" color="#ffffff" />
+      </View>
+    );
+  }
 
   const SettingItem = ({
     icon,
@@ -2313,7 +2302,7 @@ export default function ProfileSettings() {
               style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}
               numberOfLines={1}
             >
-              Settings
+              {tr("Settings")}
             </Text>
           </View>
 
@@ -2371,7 +2360,7 @@ export default function ProfileSettings() {
             <TextInput
               ref={searchInputRef}
               style={[styles.modernSearchInput, { color: colors.textPrimary }]}
-              placeholder="Search settings & features..."
+              placeholder={tr("Search settings & features...")}
               placeholderTextColor={colors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -2407,7 +2396,7 @@ export default function ProfileSettings() {
             accessibilityLabel="Cancel search"
           >
             <Text style={[styles.modernSearchCancelText, { color: colors.coral }]}>
-              Cancel
+              {tr("Cancel")}
             </Text>
           </Pressable>
         </View>
@@ -2452,7 +2441,7 @@ export default function ProfileSettings() {
                     { color: colors.sectionHeader },
                   ]}
                 >
-                  SUGGESTED SETTINGS
+                  {tr("Suggested Settings").toUpperCase()}
                 </Text>
                 <View
                   style={[
@@ -2478,7 +2467,7 @@ export default function ProfileSettings() {
                   ))}
                 </View>
                 <Text style={[styles.modernSearchTip, { color: colors.textSecondary }]}>
-                  Type any setting name, feature, or keyword to find it instantly.
+                  {tr("Type any setting name, feature, or keyword to find it instantly.")}
                 </Text>
               </View>
             ) : filteredSettings.length > 0 ? (
@@ -2489,7 +2478,7 @@ export default function ProfileSettings() {
                     { color: colors.sectionHeader },
                   ]}
                 >
-                  MATCHING SETTINGS ({filteredSettings.length})
+                  {tr("Matching Settings").toUpperCase()} ({filteredSettings.length})
                 </Text>
                 <View
                   style={[
@@ -2535,7 +2524,7 @@ export default function ProfileSettings() {
                     { color: colors.textPrimary },
                   ]}
                 >
-                  No settings found
+                  {tr("No settings found")}
                 </Text>
                 <Text
                   style={[
@@ -2554,7 +2543,7 @@ export default function ProfileSettings() {
                   onPress={() => setSearchQuery("")}
                 >
                   <Text style={[styles.modernEmptyClearBtnText, { color: colors.coral }]}>
-                    Clear Query
+                    {tr("Clear Query")}
                   </Text>
                 </Pressable>
               </View>
@@ -2617,7 +2606,7 @@ export default function ProfileSettings() {
             { color: colors.sectionHeader },
           ]}
         >
-          ACCOUNT
+          {tr("account_section", "ACCOUNT")}
         </Text>
         <View
           style={[
@@ -2628,24 +2617,24 @@ export default function ProfileSettings() {
           {/* **@** Edit Profile option removed from ACCOUNT as requested (accessible via the pen icon above) */}
           <SettingRow
             icon="shield-checkmark-outline"
-            title="Account & Security"
-            subtitle="Password, Two-factor auth, session logs"
+            title={tr("accounts_security", "Account & Security")}
+            subtitle={tr("Password, Two-factor auth, session logs")}
             onPress={() => smoothNavigate("/accounts")}
           />
           <SettingRow
             icon="lock-closed-outline"
-            title="Privacy & Data"
-            subtitle="Profile visibility, location logs"
+            title={tr("Privacy & Data")}
+            subtitle={tr("Profile visibility, location logs")}
             onPress={() => smoothNavigate("/privacy")}
           />
           <SettingRow
             icon="link-outline"
-            title="Connected Accounts"
-            subtitle="Google, Apple, social integrations"
+            title={tr("Connected Accounts")}
+            subtitle={tr("Google, Apple, social integrations")}
             isLast
             onPress={() =>
               Alert.alert(
-                "Connected Accounts",
+                tr("Connected Accounts"),
                 "Google authentication is active."
               )
             }
@@ -2661,7 +2650,7 @@ export default function ProfileSettings() {
             { color: colors.sectionHeader },
           ]}
         >
-          TRIP EXPERIENCE
+          {tr("trip_experience_section", "TRIP EXPERIENCE")}
         </Text>
         <View
           style={[
@@ -2671,39 +2660,39 @@ export default function ProfileSettings() {
         >
           <SettingRow
             icon="notifications-outline"
-            title="Notifications"
-            subtitle="Trip updates, chat pings, alerts"
+            title={tr("notifications", "Notifications")}
+            subtitle={tr("Trip updates, chat pings, alerts")}
             onPress={() => smoothNavigate("/notification")}
           />
           <SettingRow
             icon="compass-outline"
-            title="Trip Preferences"
+            title={tr("trip_preferences", "Trip Preferences")}
             badge="Hot"
-            subtitle="Dietary rules, accommodation styles, travel pace"
+            subtitle={tr("Dietary rules, accommodation styles, travel pace")}
             onPress={() => smoothNavigate("/trip-preference")}
           />
           <SettingRow
             icon="cash-outline"
-            title="Currency & Expenses"
-            subtitle="Default Split bills, home currency USD"
+            title={tr("currency_expenses", "Currency & Expenses")}
+            subtitle={tr("Default Split bills, home currency USD")}
             onPress={() => smoothNavigate("/currency-expenses")}
           />
           <SettingRow
             icon="cloud-download-outline"
-            title="Offline & Downloads"
-            subtitle="Storage management, offline maps"
+            title={tr("offline_downloads", "Offline & Downloads")}
+            subtitle={tr("Storage management, offline maps")}
             onPress={() => smoothNavigate("/offline-downloads")}
           />
           <SettingRow
             icon="location-outline"
-            title="Maps & Navigation"
-            subtitle="Offline cache, route preferences"
+            title={tr("maps_navigation", "Maps & Navigation")}
+            subtitle={tr("Offline cache, route preferences")}
             onPress={() => smoothNavigate("/maps-navigation")}
           />
           <SettingRow
             icon="partly-sunny-outline"
-            title="Weather"
-            subtitle="Local weather forecasts & rain warnings"
+            title={tr("weather", "Weather")}
+            subtitle={tr("Local weather forecasts & rain warnings")}
             isLast
             onPress={() => smoothNavigate("/weather")}
           />
@@ -2718,7 +2707,7 @@ export default function ProfileSettings() {
             { color: colors.sectionHeader },
           ]}
         >
-          APP SETTINGS
+          {tr("app_settings_section", "APP SETTINGS")}
         </Text>
         <View
           style={[
@@ -2731,10 +2720,10 @@ export default function ProfileSettings() {
             title={tr("appearance", "Appearance")}
             rightText={
               themeMode === "system"
-                ? "System (Auto)"
+                ? tr("System (Auto)")
                 : themeMode === "dark"
-                ? "Dark Mode"
-                : "Light Mode"
+                ? tr("Dark Mode")
+                : tr("Light Mode")
             }
             onPress={() => smoothNavigate("/appearance")}
           />
@@ -2746,23 +2735,23 @@ export default function ProfileSettings() {
           />
           <SettingRow
             icon="accessibility-outline"
-            title="Accessibility"
-            subtitle="Vision support, high contrast, motion & haptics"
+            title={tr("accessibility", "Accessibility")}
+            subtitle={tr("Vision support, high contrast, motion & haptics")}
             onPress={() => smoothNavigate("/accessibility")}
           />
           {/* Preserved v2 feature: Chats */}
           <SettingRow
             icon="chatbubble-ellipses-outline"
-            title="Chats"
-            subtitle="Theme, Wallpapers, and Chat Settings"
+            title={tr("chats", "Chats")}
+            subtitle={tr("Theme, Wallpapers, and Chat Settings")}
             onPress={() => smoothNavigate("/chat-settings")}
           />
 
           {/* Preserved v2 feature: AI Features with greyish-white icon */}
           <SettingRow
             icon="sparkles"
-            title="AI Features"
-            subtitle="Configure Groq API Key & AI settings"
+            title={tr("ai_features", "AI Features")}
+            subtitle={tr("Configure Groq API Key & AI settings")}
             isLast
             onPress={() => smoothNavigate("/ai-settings")}
           />
@@ -2777,7 +2766,7 @@ export default function ProfileSettings() {
             { color: colors.sectionHeader },
           ]}
         >
-          SUPPORT
+          {tr("support_section", "SUPPORT")}
         </Text>
         <View
           style={[
@@ -2786,24 +2775,24 @@ export default function ProfileSettings() {
           ]}
         >
           <SettingRow
-            icon="chatbubble-question-outline"
-            title="Help & Support"
-            subtitle="Guides, FAQs, 24/7 BunkMates bot"
+            icon="help-circle-outline"
+            title={tr("help_support", "Help & Support")}
+            subtitle={tr("Guides, FAQs, 24/7 BunkMates bot")}
             onPress={() => smoothNavigate("/help")}
           />
           <SettingRow
             icon="megaphone-outline"
-            title="Send Feedback"
-            subtitle="Feature requests, report bugs"
+            title={tr("send_feedback", "Send Feedback")}
+            subtitle={tr("Feature requests, report bugs")}
             onPress={() => smoothNavigate("/feedback")}
           />
           <SettingRow
             icon="ribbon-outline"
-            title="Rate BunkMates"
-            subtitle="Show us some love on the store"
+            title={tr("Rate BunkMates")}
+            subtitle={tr("Show us some love on the store")}
             onPress={() =>
               Alert.alert(
-                "Rate BunkMates",
+                tr("Rate BunkMates"),
                 "Thank you for rating BunkMates 5 stars! ⭐⭐⭐⭐⭐"
               )
             }
@@ -2812,31 +2801,31 @@ export default function ProfileSettings() {
           <SettingRow
             icon="license"
             iconFamily="material"
-            title="Third-Party Licenses"
-            subtitle="Open source software & dependencies"
+            title={tr("Third-Party Licenses")}
+            subtitle={tr("Open source software & dependencies")}
             onPress={() => setCurrentPage("licenses")}
           />
           {/* Preserved v2 feature: Invite Friend */}
           <SettingRow
             icon="person-add-outline"
-            title="Invite a Friend"
-            subtitle="Share BunkMates with travel companions"
+            title={tr("invite_friend", "Invite a Friend")}
+            subtitle={tr("Share BunkMates with travel companions")}
             onPress={() => smoothNavigate("/inviteFriend")}
           />
           {/* Preserved v2 feature: Developer tools if unlocked */}
           {isDeveloper && (
             <SettingRow
               icon="code-slash-outline"
-              title="Developer Tools & Sandbox"
-              subtitle="Access internal tools, sandboxes, and developer routes"
+              title={tr("Developer Tools & Sandbox")}
+              subtitle={tr("Access internal tools, sandboxes, and developer routes")}
               onPress={() => setCurrentPage("developers")}
             />
           )}
           {/* About BunkMates placed at the very end of Settings */}
           <SettingRow
             icon="information-circle-outline"
-            title="About BunkMates"
-            subtitle="Version 3.4.1 (Build 4108)"
+            title={tr("about_app", "About BunkMates")}
+            subtitle={tr("App version, team credits & legal")}
             isLast
             onPress={() => smoothNavigate("/about")}
           />
@@ -2856,12 +2845,12 @@ export default function ProfileSettings() {
           ]}
           onPress={() => {
             Alert.alert(
-              "Log Out",
-              "Are you sure you want to log out of BunkMates?",
+              tr("logout", "Log Out"),
+              tr("Are you sure you want to log out of BunkMates?"),
               [
-                { text: "Cancel", style: "cancel" },
+                { text: tr("Cancel"), style: "cancel" },
                 {
-                  text: "Log Out",
+                  text: tr("logout", "Log Out"),
                   style: "destructive",
                   onPress: handleLogout,
                 },
@@ -2870,7 +2859,7 @@ export default function ProfileSettings() {
           }}
         >
           <Ionicons name="log-out-outline" size={20} color={colors.greyishWhite} />
-          <Text style={styles.modernLogoutText}>Log Out</Text>
+          <Text style={styles.modernLogoutText}>{tr("logout", "Log Out")}</Text>
         </Pressable>
           </>
         )}

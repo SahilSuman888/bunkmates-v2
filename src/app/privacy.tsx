@@ -34,18 +34,23 @@ import * as Sharing from "expo-sharing";
 import * as Clipboard from "expo-clipboard";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { useAppSettings } from "../contexts/AppSettingsContext";
+import { useLanguage } from "../contexts/LanguageContext";
 
-type VisibilityOption = "public" | "friends" | "private";
+type VisibilityOption = "public" | "private";
 
 export default function PrivacyAndData() {
   const router = useRouter();
+  const { updatePrivacyPreferences } = useAppSettings();
+  const { t } = useLanguage();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   // Settings states with persisted fallbacks
-  const [visibility, setVisibility] = useState<VisibilityOption>("friends");
+  const [visibility, setVisibility] = useState<VisibilityOption>("public");
+  const [visibilityDropdownOpen, setVisibilityDropdownOpen] = useState<boolean>(false);
   const [locationSharing, setLocationSharing] = useState<boolean>(true);
   const [activityStatus, setActivityStatus] = useState<boolean>(false);
   const [hidePastTrips, setHidePastTrips] = useState<boolean>(false);
@@ -138,7 +143,7 @@ export default function PrivacyAndData() {
           AsyncStorage.getItem("hide_past_trips"),
           AsyncStorage.getItem("analytics_collection"),
         ]);
-        if (savedVis) setVisibility(savedVis as VisibilityOption);
+        if (savedVis) setVisibility(savedVis === "private" ? "private" : "public");
         if (savedLoc !== null) setLocationSharing(savedLoc === "true");
         if (savedAct !== null) setActivityStatus(savedAct === "true");
         if (savedHide !== null) setHidePastTrips(savedHide === "true");
@@ -162,7 +167,6 @@ export default function PrivacyAndData() {
           const currentVis = p.profileVisibility || uData.profileVisibility;
           if (currentVis) {
             if (currentVis === "private") setVisibility("private");
-            else if (currentVis === "friends" || currentVis === "friends_only") setVisibility("friends");
             else setVisibility("public");
           }
 
@@ -183,6 +187,7 @@ export default function PrivacyAndData() {
 
   // Firestore & AsyncStorage synchronization helper
   const syncSetting = async (field: string, value: any, storageKey?: string) => {
+    updatePrivacyPreferences({ [field]: value });
     if (storageKey) {
       AsyncStorage.setItem(storageKey, typeof value === "string" ? value : String(value)).catch(() => {});
     }
@@ -382,7 +387,7 @@ export default function PrivacyAndData() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          Privacy & Data
+          {t("Privacy & Data")}
         </Text>
       </View>
 
@@ -392,87 +397,154 @@ export default function PrivacyAndData() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── 1. PROFILE VISIBILITY ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>PROFILE VISIBILITY</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
-          <Text style={[styles.descText, { color: colors.textSecondary }]}>
-            Choose who can find your profile and see your upcoming adventure plans.
-          </Text>
-
-          {/* 3-Option Segmented Control */}
-          <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg }]}>
-            {/* Public */}
-            <Pressable
-              style={[
-                styles.segmentItem,
-                visibility === "public" && [
-                  styles.segmentItemActive,
-                  { backgroundColor: colors.segmentActiveBg },
-                ],
-              ]}
-              onPress={() => handleSelectVisibility("public")}
-            >
-              <Text
-                style={[
-                  styles.segmentText,
-                  visibility === "public"
-                    ? [styles.segmentTextActive, { color: colors.coral }]
-                    : { color: colors.textPrimary },
-                ]}
-              >
-                Public
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("PROFILE PRIVACY")}</Text>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          {/* Main Row */}
+          <View style={styles.row}>
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons
+                name={visibility === "public" ? "globe-outline" : "lock-closed-outline"}
+                size={20}
+                color={colors.greyishWhite}
+              />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Profile Visibility")}</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {visibility === "public"
+                  ? t("Profile visible to everyone")
+                  : t("Only friends can see your profile")}
               </Text>
-            </Pressable>
+            </View>
 
-            {/* Friends Only */}
+            {/* Small Dropdown Trigger Pill */}
             <Pressable
-              style={[
-                styles.segmentItem,
-                visibility === "friends" && [
-                  styles.segmentItemActive,
-                  { backgroundColor: colors.segmentActiveBg },
-                ],
+              style={({ pressed }) => [
+                styles.smallDropdownPill,
+                {
+                  backgroundColor: isDark ? "rgba(226, 232, 240, 0.10)" : "rgba(0, 0, 0, 0.05)",
+                  borderColor: isDark ? "rgba(226, 232, 240, 0.22)" : "#CBD5E1",
+                },
+                pressed && styles.pressed,
               ]}
-              onPress={() => handleSelectVisibility("friends")}
+              onPress={() => setVisibilityDropdownOpen((prev) => !prev)}
+              accessibilityRole="button"
+              accessibilityLabel={t("Profile Visibility")}
             >
-              <Text
-                style={[
-                  styles.segmentText,
-                  visibility === "friends"
-                    ? [styles.segmentTextActive, { color: colors.coral }]
-                    : { color: colors.textPrimary },
-                ]}
-              >
-                Friends Only
+              <Text style={[styles.smallDropdownPillText, { color: colors.greyishWhite }]}>
+                {visibility === "public" ? t("Public") : t("Private")}
               </Text>
-            </Pressable>
-
-            {/* Private */}
-            <Pressable
-              style={[
-                styles.segmentItem,
-                visibility === "private" && [
-                  styles.segmentItemActive,
-                  { backgroundColor: colors.segmentActiveBg },
-                ],
-              ]}
-              onPress={() => handleSelectVisibility("private")}
-            >
-              <Text
-                style={[
-                  styles.segmentText,
-                  visibility === "private"
-                    ? [styles.segmentTextActive, { color: colors.coral }]
-                    : { color: colors.textPrimary },
-                ]}
-              >
-                Private
-              </Text>
+              <Ionicons
+                name={visibilityDropdownOpen ? "chevron-up" : "chevron-down"}
+                size={12}
+                color={colors.greyishWhite}
+                style={{ marginLeft: 4 }}
+              />
             </Pressable>
           </View>
+
+          {/* Compact Dropdown Menu directly under the trigger */}
+          {visibilityDropdownOpen && (
+            <View style={styles.compactDropdownContainer}>
+              <View
+                style={[
+                  styles.compactDropdownMenu,
+                  {
+                    backgroundColor: isDark ? "#18181D" : "#FFFFFF",
+                    borderColor: isDark ? "rgba(255, 255, 255, 0.12)" : "#E2E8F0",
+                  },
+                ]}
+              >
+                {/* Public Option */}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.compactDropdownItem,
+                    visibility === "public" && {
+                      backgroundColor: isDark ? "rgba(226, 232, 240, 0.10)" : "#F1F5F9",
+                    },
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => {
+                    handleSelectVisibility("public");
+                    setVisibilityDropdownOpen(false);
+                  }}
+                >
+                  <Ionicons
+                    name="globe-outline"
+                    size={14}
+                    color={colors.greyishWhite}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text
+                    style={[
+                      styles.compactDropdownText,
+                      {
+                        color: colors.greyishWhite,
+                        fontWeight: visibility === "public" ? "700" : "500",
+                      },
+                    ]}
+                  >
+                    {t("Public")}
+                  </Text>
+                  {visibility === "public" && (
+                    <Ionicons
+                      name="checkmark"
+                      size={14}
+                      color={colors.greyishWhite}
+                      style={{ marginLeft: "auto" }}
+                    />
+                  )}
+                </Pressable>
+
+                <View style={[styles.compactDropdownDivider, { backgroundColor: colors.divider }]} />
+
+                {/* Private Option */}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.compactDropdownItem,
+                    visibility === "private" && {
+                      backgroundColor: isDark ? "rgba(226, 232, 240, 0.10)" : "#F1F5F9",
+                    },
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => {
+                    handleSelectVisibility("private");
+                    setVisibilityDropdownOpen(false);
+                  }}
+                >
+                  <Ionicons
+                    name="lock-closed-outline"
+                    size={14}
+                    color={colors.greyishWhite}
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text
+                    style={[
+                      styles.compactDropdownText,
+                      {
+                        color: colors.greyishWhite,
+                        fontWeight: visibility === "private" ? "700" : "500",
+                      },
+                    ]}
+                  >
+                    {t("Private")}
+                  </Text>
+                  {visibility === "private" && (
+                    <Ionicons
+                      name="checkmark"
+                      size={14}
+                      color={colors.greyishWhite}
+                      style={{ marginLeft: "auto" }}
+                    />
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          )}
         </View>
 
         {/* ── 2. SHARING PREFERENCES ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>SHARING PREFERENCES</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("LOCATION SERVICES", "SHARING PREFERENCES")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Location Sharing */}
           <View style={styles.row}>
@@ -480,9 +552,9 @@ export default function PrivacyAndData() {
               <Ionicons name="location-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Location Sharing</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Share Live Location", "Location Sharing")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Share live GPS trail with active trip bunkmates
+                {t("Allow group members to see your real-time location", "Share live GPS trail with active trip bunkmates")}
               </Text>
             </View>
             <Switch
@@ -501,9 +573,9 @@ export default function PrivacyAndData() {
               <Ionicons name="time-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Activity Status</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Activity Status")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Show when you are active or currently traveling
+                {t("Show when you are active or currently traveling", "Show when you are active or currently traveling")}
               </Text>
             </View>
             <Switch
@@ -522,9 +594,9 @@ export default function PrivacyAndData() {
               <Ionicons name="eye-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Hide Past Trips</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Hide Past Trips")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Prevent friends from browsing your complete map archive
+                {t("Keep completed trips hidden from profile", "Prevent friends from browsing your complete map archive")}
               </Text>
             </View>
             <Switch
@@ -537,7 +609,7 @@ export default function PrivacyAndData() {
         </View>
 
         {/* ── 3. DATA PRIVACY ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>DATA PRIVACY</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DATA PRIVACY")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Analytics Collection */}
           <View style={styles.row}>
@@ -545,9 +617,9 @@ export default function PrivacyAndData() {
               <Ionicons name="options-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Analytics Collection</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Analytics Collection")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Help BunkMates improve with anonymous telemetry
+                {t("Help BunkMates improve with anonymous telemetry", "Help BunkMates improve with anonymous telemetry")}
               </Text>
             </View>
             <Switch
@@ -565,15 +637,15 @@ export default function PrivacyAndData() {
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             onPress={handleOpenExportModal}
             accessibilityRole="button"
-            accessibilityLabel="Download My Data"
+            accessibilityLabel={t("Download My Data")}
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="cloud-download-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Download My Data</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Download My Data")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Export a backup of your trip memories and reviews
+                {t("Export a backup of your trip memories and reviews", "Export a backup of your trip memories and reviews")}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={19} color={colors.chevron} />
@@ -586,15 +658,15 @@ export default function PrivacyAndData() {
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             onPress={() => setShowClearHistoryModal(true)}
             accessibilityRole="button"
-            accessibilityLabel="Clear Search History"
+            accessibilityLabel={t("Clear Search History")}
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="trash-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Clear Search History</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Clear Search History")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Wipe your local destination search records
+                {t("Wipe your local destination search records", "Wipe your local destination search records")}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={19} color={colors.chevron} />
@@ -615,9 +687,9 @@ export default function PrivacyAndData() {
             <Ionicons name="shield-checkmark-outline" size={24} color={colors.pledgeIcon} />
           </View>
           <View style={styles.pledgeContent}>
-            <Text style={[styles.pledgeTitle, { color: colors.pledgeTitle }]}>Secure Data Pledge</Text>
+            <Text style={[styles.pledgeTitle, { color: colors.pledgeTitle }]}>{t("Secure Data Pledge")}</Text>
             <Text style={[styles.pledgeBody, { color: colors.pledgeText }]}>
-              BunkMates never sells your location logs or personal booking details to third-party ad brokers.
+              {t("BunkMates never sells your location logs or personal booking details to third-party ad brokers.", "BunkMates never sells your location logs or personal booking details to third-party ad brokers.")}
             </Text>
           </View>
         </View>
@@ -636,28 +708,28 @@ export default function PrivacyAndData() {
               <Ionicons name="cloud-download-outline" size={24} color={colors.greyishWhite} />
             </View>
 
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Export Your Data</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Export Your Data")}</Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              A comprehensive archive containing your account profile, trips, and privacy configurations.
+              {t("A comprehensive archive containing your account profile, trips, and privacy configurations.", "A comprehensive archive containing your account profile, trips, and privacy configurations.")}
             </Text>
 
             {isExporting ? (
               <View style={styles.modalLoadingWrap}>
                 <ActivityIndicator size="small" color={colors.coral} />
-                <Text style={[styles.modalLoadingText, { color: colors.textSecondary }]}>Compiling your data package...</Text>
+                <Text style={[styles.modalLoadingText, { color: colors.textSecondary }]}>{t("Compiling your data package...")}</Text>
               </View>
             ) : exportBundle ? (
               <View style={[styles.exportInfoCard, { backgroundColor: colors.segmentBg, borderColor: colors.cardBorder }]}>
                 <View style={styles.exportInfoRow}>
-                  <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>Account UID:</Text>
-                  <Text style={[styles.exportInfoVal, { color: colors.textPrimary }]}>{user?.uid ? `${user.uid.slice(0, 10)}...` : "Active"}</Text>
+                  <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>{t("Account UID:")}</Text>
+                  <Text style={[styles.exportInfoVal, { color: colors.textPrimary }]}>{user?.uid ? `${user.uid.slice(0, 10)}...` : t("Active")}</Text>
                 </View>
                 <View style={styles.exportInfoRow}>
-                  <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>Saved Trips:</Text>
-                  <Text style={[styles.exportInfoVal, { color: colors.textPrimary }]}>{exportBundle.tripsSummary?.totalTrips ?? 0} trips</Text>
+                  <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>{t("Saved Trips:")}</Text>
+                  <Text style={[styles.exportInfoVal, { color: colors.textPrimary }]}>{exportBundle.tripsSummary?.totalTrips ?? 0} {t("trips")}</Text>
                 </View>
                 <View style={styles.exportInfoRow}>
-                  <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>Format & Size:</Text>
+                  <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>{t("Format & Size:")}</Text>
                   <Text style={[styles.exportInfoVal, { color: colors.textPrimary }]}>JSON • {Math.max(1, Math.round(exportJsonString.length / 1024))} KB</Text>
                 </View>
               </View>
@@ -675,7 +747,7 @@ export default function PrivacyAndData() {
                     onPress={handleSaveExportFile}
                   >
                     <Ionicons name="share-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
-                    <Text style={styles.modalPrimBtnText}>Save / Share File</Text>
+                    <Text style={styles.modalPrimBtnText}>{t("Save / Share File")}</Text>
                   </Pressable>
 
                   <Pressable
@@ -688,7 +760,7 @@ export default function PrivacyAndData() {
                   >
                     <Ionicons name={copiedToClipboard ? "checkmark-circle" : "copy-outline"} size={17} color={colors.textPrimary} style={{ marginRight: 8 }} />
                     <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>
-                      {copiedToClipboard ? "Copied to Clipboard!" : "Copy JSON to Clipboard"}
+                      {copiedToClipboard ? t("Copied to Clipboard!") : t("Copy JSON to Clipboard")}
                     </Text>
                   </Pressable>
                 </>
@@ -702,7 +774,7 @@ export default function PrivacyAndData() {
                 ]}
                 onPress={() => setShowExportModal(false)}
               >
-                <Text style={[styles.modalSecBtnText, { color: colors.textSecondary }]}>Close</Text>
+                <Text style={[styles.modalSecBtnText, { color: colors.textSecondary }]}>{t("Close")}</Text>
               </Pressable>
             </View>
           </View>
@@ -722,9 +794,9 @@ export default function PrivacyAndData() {
               <Ionicons name="trash-outline" size={24} color={colors.greyishWhite} />
             </View>
 
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Clear Search History?</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Clear Search History?")}</Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              This will remove all recent destination, location, and trip search queries stored on this device.
+              {t("This will remove all recent destination, location, and trip search queries stored on this device.", "This will remove all recent destination, location, and trip search queries stored on this device.")}
             </Text>
 
             <View style={styles.modalBtnRow}>
@@ -737,7 +809,7 @@ export default function PrivacyAndData() {
                 onPress={() => setShowClearHistoryModal(false)}
                 disabled={isClearingHistory}
               >
-                <Text style={[styles.modalSecBtnText, { color: colors.textSecondary }]}>Cancel</Text>
+                <Text style={[styles.modalSecBtnText, { color: colors.textSecondary }]}>{t("Cancel")}</Text>
               </Pressable>
 
               <Pressable
@@ -752,7 +824,7 @@ export default function PrivacyAndData() {
                 {isClearingHistory ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.modalDangerBtnText}>Clear History</Text>
+                  <Text style={styles.modalDangerBtnText}>{t("Clear History")}</Text>
                 )}
               </Pressable>
             </View>
@@ -824,41 +896,48 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
 
-  // Description text
-  descText: {
-    fontSize: 13.5,
-    lineHeight: 19,
-    marginBottom: 16,
-  },
-
-  // 3-Option Segmented Control
-  segmentContainer: {
+  // Compact Dropdown in Greyish-White matching Bunkmates app theme
+  smallDropdownPill: {
     flexDirection: "row",
     alignItems: "center",
-    height: 48,
-    borderRadius: 14,
-    padding: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 11,
+    borderRadius: 9,
+    borderWidth: 1,
   },
-  segmentItem: {
-    flex: 1,
-    height: "100%",
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 10,
-  },
-  segmentItemActive: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  segmentText: {
-    fontSize: 13.5,
+  smallDropdownPillText: {
+    fontSize: 12.5,
     fontWeight: "600",
+    letterSpacing: -0.2,
   },
-  segmentTextActive: {
-    fontWeight: "700",
+  compactDropdownContainer: {
+    alignItems: "flex-end",
+    paddingRight: 16,
+    paddingBottom: 12,
+    marginTop: -4,
+  },
+  compactDropdownMenu: {
+    width: 120,
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  compactDropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 9,
+    paddingHorizontal: 11,
+  },
+  compactDropdownText: {
+    fontSize: 13,
+  },
+  compactDropdownDivider: {
+    height: StyleSheet.hairlineWidth,
   },
 
   // Row matching modernRow in Settings

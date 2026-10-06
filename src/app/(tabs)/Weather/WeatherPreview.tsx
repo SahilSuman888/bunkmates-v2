@@ -1,8 +1,10 @@
 import React from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useAppSettings } from "../../../contexts/AppSettingsContext";
 
 export default function WeatherPreview({ weather, onPress }: any) {
+  const { formatTemperature } = useAppSettings();
   if (!weather) return null;
 
   return (
@@ -18,7 +20,7 @@ export default function WeatherPreview({ weather, onPress }: any) {
 
       <View style={styles.textContainer}>
         <Text style={styles.temp}>
-          {Math.round(weather.main.temp)}°C - {weather.name || "Pindwāra"}
+          {formatTemperature(weather.main.temp, "C")} - {weather.name || "Pindwāra"}
         </Text>
         <Text style={styles.desc}>
           {weather.weather[0].description || "Clear Sky"}

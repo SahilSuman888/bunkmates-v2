@@ -32,6 +32,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { db, auth } from "../lib/firebase";
+import { useLanguage } from "../contexts/LanguageContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const BASE_WIDTH = 375;
@@ -44,6 +45,7 @@ type KeyStatus = "idle" | "valid" | "invalid";
 
 export default function AISettingsScreen() {
   const router = useRouter();
+  const { t } = useLanguage();
   const uid = auth.currentUser?.uid || null;
 
   const [apiKey, setApiKey] = useState("");
@@ -211,10 +213,10 @@ export default function AISettingsScreen() {
           <View style={styles.headerText}>
             <View style={styles.titleRow}>
               <Text style={styles.sparkle}>✦</Text>
-              <Text style={styles.title}>AI Features</Text>
+              <Text style={styles.title}>{t("AI Features")}</Text>
             </View>
             <Text style={styles.subtitle}>
-              Configure Groq API Key & cross-device AI synchronization
+              {t("Configure Groq API Key & AI settings", "Configure Groq API Key & cross-device AI synchronization")}
             </Text>
           </View>
         </View>
@@ -223,7 +225,7 @@ export default function AISettingsScreen() {
         <View style={styles.card}>
           <View style={styles.cardTitleRow}>
             <MaterialCommunityIcons name="key-variant" size={rs(17)} color="#ffad00" />
-            <Text style={styles.cardTitle}>Groq API Key</Text>
+            <Text style={styles.cardTitle}>{t("Groq API Key")}</Text>
           </View>
 
           <Text style={styles.description}>
@@ -274,7 +276,7 @@ export default function AISettingsScreen() {
               ) : (
                 <>
                   <MaterialCommunityIcons name="creation" size={rs(15)} color="#00110d" />
-                  <Text style={styles.saveText}>Save & Validate Key</Text>
+                  <Text style={styles.saveText}>{t("Save & Validate Key")}</Text>
                 </>
               )}
             </Pressable>

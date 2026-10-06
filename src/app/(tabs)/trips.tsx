@@ -31,6 +31,8 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import NotificationBell from "../../components/NotificationBell";
 import CreateTripSheet from "../../components/trips/CreateTripSheet";
 import ConfirmDeleteDialog from "../../components/trip_components/ConfirmDeleteDialog";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { useLanguage } from "../../contexts/LanguageContext";
 
 const { width } = Dimensions.get("window");
 
@@ -67,6 +69,8 @@ export default function TripsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const user = auth.currentUser;
+  const { formatCurrency, formatDate, hidePastTrips } = useAppSettings();
+  const { t } = useLanguage();
 
   const [trips, setTrips] = useState<TripData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -270,9 +274,16 @@ export default function TripsScreen() {
         return new Date(t.endDate || today) < today;
       }
 
+      // If user enabled hidePastTrips in Privacy settings, automatically filter out past trips
+      if (hidePastTrips) {
+        if (new Date(t.endDate || today) < today) {
+          return false;
+        }
+      }
+
       return true;
     });
-  }, [trips, searchQuery, filterPlace, filterStartDate, filterEndDate, activeTab]);
+  }, [trips, searchQuery, filterPlace, filterStartDate, filterEndDate, activeTab, hidePastTrips]);
 
   const handleDeleteTrip = async () => {
     if (!selectedTrip) return;
@@ -295,7 +306,7 @@ export default function TripsScreen() {
       <View style={styles.container}>
         {/* HEADER matching image screenshot */}
         <View style={styles.header}>
-          <Text style={styles.title}>Where next?</Text>
+          <Text style={styles.title}>{t("where_next", "Where next?")}</Text>
           <NotificationBell />
         </View>
 
@@ -306,7 +317,7 @@ export default function TripsScreen() {
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Search trips by name or destination..."
+              placeholder={t("search_trips", "Search trips by name or destination...")}
               placeholderTextColor="#666666"
               style={styles.searchInput}
             />
@@ -423,7 +434,7 @@ export default function TripsScreen() {
                       <View style={styles.locationRow}>
                         <Ionicons name="location-sharp" size={13} color="#ffffff" style={{ marginRight: 4 }} />
                         <Text style={styles.locationText} numberOfLines={1}>
-                          {trip.location} — {trip.startDate} to {trip.endDate}
+                          {trip.location} — {trip.startDate ? formatDate(trip.startDate) : "TBD"} to {trip.endDate ? formatDate(trip.endDate) : "TBD"}
                         </Text>
                       </View>
 
@@ -431,9 +442,9 @@ export default function TripsScreen() {
                       {trip.budget ? (
                         <View style={styles.progressSection}>
                           <View style={styles.progressLabelRow}>
-                            <Text style={styles.progressLabel}>Budget Used:</Text>
+                            <Text style={styles.progressLabel}>{t("budget_used", "Budget Used:")}</Text>
                             <Text style={styles.progressValue}>
-                              ₹{budgetUsed} / ₹{budgetTotal}
+                              {formatCurrency(budgetUsed)} / {formatCurrency(budgetTotal)}
                             </Text>
                           </View>
                           <View style={styles.progressBarTrack}>
@@ -446,7 +457,7 @@ export default function TripsScreen() {
                       <View style={styles.progressSection}>
                         <View style={styles.progressLabelRow}>
                           <Text style={styles.progressLabel}>
-                            Timeline: {completedTimeline} / {totalTimeline} completed
+                            {t("timeline", "Timeline")}: {completedTimeline} / {totalTimeline} {t("completed", "completed")}
                           </Text>
                         </View>
                         <View style={styles.progressBarTrack}>
@@ -461,7 +472,7 @@ export default function TripsScreen() {
               <View style={styles.emptyCard}>
                 <Ionicons name="compass-outline" size={36} color="#666666" />
                 <Text style={{ color: "#888888", fontSize: 13, marginTop: 8 }}>
-                  No trips match your current filter.
+                  {t("no_trips", "No trips match your current filter.")}
                 </Text>
               </View>
             )}
@@ -473,6 +484,12 @@ export default function TripsScreen() {
           <View style={styles.pillBar}>
             {(["All", "Upcoming", "Ongoing", "Past"] as const).map((tab) => {
               const isTabActive = activeTab === tab;
+              const tabLabels: Record<string, string> = {
+                All: t("all", "All"),
+                Upcoming: t("upcoming", "Upcoming"),
+                Ongoing: t("ongoing", "Ongoing"),
+                Past: t("past", "Past"),
+              };
               return (
                 <Pressable
                   key={tab}
@@ -480,7 +497,7 @@ export default function TripsScreen() {
                   style={[styles.tabPill, isTabActive && styles.tabPillActive]}
                 >
                   <Text style={[styles.tabPillText, isTabActive && styles.tabPillTextActive]}>
-                    {tab}
+                    {tabLabels[tab] || tab}
                   </Text>
                 </Pressable>
               );
@@ -503,7 +520,7 @@ export default function TripsScreen() {
             <Pressable style={styles.modalBackdrop} onPress={() => setFilterModalOpen(false)} />
             <View style={styles.filterCard}>
               <View style={styles.filterHeader}>
-                <Text style={styles.filterTitle}>Filter Framework Matrix</Text>
+                <Text style={styles.filterTitle}>{t("Filter Framework Matrix")}</Text>
                 <Pressable onPress={() => setFilterModalOpen(false)}>
                   <Ionicons name="close" size={20} color="#ffffff" />
                 </Pressable>
@@ -512,14 +529,14 @@ export default function TripsScreen() {
               <TextInput
                 value={filterPlace}
                 onChangeText={setFilterPlace}
-                placeholder="Filter by Location / Place"
+                placeholder={t("Filter by Location / Place")}
                 placeholderTextColor="#777777"
                 style={styles.filterInput}
               />
 
               <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Timeline Horizon Start</Text>
+                  <Text style={styles.fieldLabel}>{t("Timeline Horizon Start")}</Text>
                   <View style={styles.dateInputWrap}>
                     <TextInput
                       value={filterStartDate}
@@ -533,7 +550,7 @@ export default function TripsScreen() {
                 </View>
 
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Timeline Horizon End</Text>
+                  <Text style={styles.fieldLabel}>{t("Timeline Horizon End")}</Text>
                   <View style={styles.dateInputWrap}>
                     <TextInput
                       value={filterEndDate}
@@ -556,14 +573,14 @@ export default function TripsScreen() {
                   }}
                   style={styles.clearBtn}
                 >
-                  <Text style={styles.clearBtnText}>Clear</Text>
+                  <Text style={styles.clearBtnText}>{t("Clear")}</Text>
                 </Pressable>
 
                 <Pressable
                   onPress={() => setFilterModalOpen(false)}
                   style={styles.applyBtn}
                 >
-                  <Text style={styles.applyBtnText}>Apply Filter</Text>
+                  <Text style={styles.applyBtnText}>{t("Apply Filter")}</Text>
                 </Pressable>
               </View>
             </View>
@@ -589,7 +606,7 @@ export default function TripsScreen() {
                 style={styles.optionRow}
               >
                 <Ionicons name="eye-outline" size={18} color="#ffffff" />
-                <Text style={styles.optionText}>View Details</Text>
+                <Text style={styles.optionText}>{t("View Details")}</Text>
               </Pressable>
 
               <Pressable
@@ -600,7 +617,7 @@ export default function TripsScreen() {
                 style={styles.optionRow}
               >
                 <Ionicons name="trash-outline" size={18} color="#ff4757" />
-                <Text style={[styles.optionText, { color: "#ff4757" }]}>Delete Trip</Text>
+                <Text style={[styles.optionText, { color: "#ff4757" }]}>{t("Delete Trip")}</Text>
               </Pressable>
             </View>
           </Pressable>

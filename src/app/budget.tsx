@@ -30,6 +30,8 @@ import Animated, { FadeIn } from "./reanimatedShim";
 // ...existing code...
 import { MotiView } from "moti";
 import { BarChart, PieChart } from "react-native-chart-kit";
+import { useAppSettings } from "../contexts/AppSettingsContext";
+import { useLanguage } from "../contexts/LanguageContext";
 
 const { width } = Dimensions.get("window");
 
@@ -55,8 +57,10 @@ const CATEGORIES = [
 ];
 
 export default function BudgetScreen() {
+  const { currency, formatCurrency, formatDate } = useAppSettings();
+  const { t } = useLanguage();
   const [authInitialized, setAuthInitialized] = useState(false);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [showModal, setShowModal] = useState(false);
@@ -212,8 +216,8 @@ export default function BudgetScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerSub}>Track your spending</Text>
-            <Text style={styles.headerTitle}>Budget</Text>
+            <Text style={styles.headerSub}>{t("Track your spending")}</Text>
+            <Text style={styles.headerTitle}>{t("Budget")}</Text>
           </View>
           <Pressable
             onPress={() => setShowModal(true)}
@@ -226,12 +230,12 @@ export default function BudgetScreen() {
         {/* Stats Card */}
         <View style={styles.statsCard}>
           <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Total Spent</Text>
-            <Text style={styles.statAmount}>₹{totalExpense.toFixed(2)}</Text>
+            <Text style={styles.statLabel}>{t("Total Spent")}</Text>
+            <Text style={styles.statAmount}>{formatCurrency(totalExpense)}</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Transactions</Text>
+            <Text style={styles.statLabel}>{t("Transactions")}</Text>
             <Text style={styles.statAmount}>{filteredExpenses.length}</Text>
           </View>
         </View>
@@ -256,7 +260,7 @@ export default function BudgetScreen() {
                 viewMode === "list" && styles.toggleTextActive,
               ]}
             >
-              List
+              {t("List")}
             </Text>
           </Pressable>
 
@@ -278,7 +282,7 @@ export default function BudgetScreen() {
                 viewMode === "chart" && styles.toggleTextActive,
               ]}
             >
-              Chart
+              {t("Chart")}
             </Text>
           </Pressable>
         </View>
@@ -305,7 +309,7 @@ export default function BudgetScreen() {
                   filterCategory === cat && styles.categoryChipTextActive,
                 ]}
               >
-                {cat}
+                {t(cat)}
               </Text>
             </Pressable>
           ))}
@@ -339,8 +343,8 @@ export default function BudgetScreen() {
                   size={48}
                   color="rgba(255,255,255,0.2)"
                 />
-                <Text style={styles.emptyText}>No expenses yet</Text>
-                <Text style={styles.emptySubtext}>Add your first expense</Text>
+                <Text style={styles.emptyText}>{t("No expenses yet")}</Text>
+                <Text style={styles.emptySubtext}>{t("Add your first expense")}</Text>
               </View>
             )}
             <View style={{ height: 20 }} />
@@ -377,7 +381,7 @@ export default function BudgetScreen() {
               size={48}
               color="rgba(255,255,255,0.2)"
             />
-            <Text style={styles.emptyText}>No data to display</Text>
+            <Text style={styles.emptyText}>{t("No data to display")}</Text>
           </View>
         )}
 
@@ -394,7 +398,7 @@ export default function BudgetScreen() {
                 <Pressable onPress={() => setShowModal(false)}>
                   <MaterialCommunityIcons name="close" size={24} color="#fff" />
                 </Pressable>
-                <Text style={styles.modalTitle}>Add Expense</Text>
+                <Text style={styles.modalTitle}>{t("Add Expense")}</Text>
                 <Pressable onPress={addExpense}>
                   <MaterialCommunityIcons
                     name="check"
@@ -411,7 +415,7 @@ export default function BudgetScreen() {
                 {/* Description */}
                 <TextInput
                   style={styles.textInput}
-                  placeholder="What did you spend on?"
+                  placeholder={t("What did you spend on?")}
                   placeholderTextColor="#666"
                   value={description}
                   onChangeText={setDescription}
@@ -420,7 +424,7 @@ export default function BudgetScreen() {
                 {/* Amount */}
                 <TextInput
                   style={styles.textInput}
-                  placeholder="Amount (₹)"
+                  placeholder={`${t("Amount")} (${currency.symbol})`}
                   placeholderTextColor="#666"
                   value={amount}
                   onChangeText={setAmount}
@@ -428,7 +432,7 @@ export default function BudgetScreen() {
                 />
 
                 {/* Category Selection */}
-                <Text style={styles.sectionLabel}>Category</Text>
+                <Text style={styles.sectionLabel}>{t("Category")}</Text>
                 <View style={styles.categoryGrid}>
                   {CATEGORIES.map((cat) => (
                     <Pressable
@@ -461,7 +465,7 @@ export default function BudgetScreen() {
                           },
                         ]}
                       >
-                        {cat.name}
+                        {t(cat.name)}
                       </Text>
                     </Pressable>
                   ))}
@@ -490,6 +494,7 @@ function ExpenseCard({
   index: number;
   onDelete: () => void;
 }) {
+  const { formatCurrency, formatDate } = useAppSettings();
   return (
     <MotiView
       from={{ opacity: 0, translateX: -20 }}
@@ -517,12 +522,9 @@ function ExpenseCard({
         </View>
 
         <View style={styles.expenseRight}>
-          <Text style={styles.expenseAmount}>₹{expense.amount.toFixed(0)}</Text>
+          <Text style={styles.expenseAmount}>{formatCurrency(expense.amount)}</Text>
           <Text style={styles.expenseDate}>
-            {expense.date.toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-            })}
+            {formatDate(expense.date)}
           </Text>
         </View>
 

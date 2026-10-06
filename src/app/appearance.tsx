@@ -20,6 +20,7 @@ import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle, BackgroundMode, LocationMode } from "../contexts/ThemeContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../theme/theme";
 
 type FontSize = "Small" | "Medium" | "Large";
@@ -45,6 +46,7 @@ const BACKGROUND_SWATCHES = {
 
 export default function AppearanceScreen() {
   const router = useRouter();
+  const { t } = useLanguage();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
@@ -259,7 +261,7 @@ export default function AppearanceScreen() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          Appearance
+          {t("Appearance")}
         </Text>
       </View>
 
@@ -269,7 +271,7 @@ export default function AppearanceScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── 1. THEME SELECT (From Screenshot) ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>THEME SELECT</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("THEME SELECT")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
           <View style={styles.themeSelectRow}>
             {/* Light Option */}
@@ -291,7 +293,7 @@ export default function AppearanceScreen() {
                 <View style={[styles.themePreviewLine, { backgroundColor: "#CBD5E1" }]} />
               </View>
               <Text style={[styles.themeOptionText, { color: mode === "light" ? colors.activeText : "#64748B" }]}>
-                Light
+                {t("Light")}
               </Text>
             </Pressable>
 
@@ -314,7 +316,7 @@ export default function AppearanceScreen() {
                 <View style={[styles.themePreviewLine, { backgroundColor: "#3F424E" }]} />
               </View>
               <Text style={[styles.themeOptionText, { color: mode === "dark" ? colors.activeText : "#94A3B8" }]}>
-                Dark
+                {t("Dark")}
               </Text>
             </Pressable>
 
@@ -350,14 +352,14 @@ export default function AppearanceScreen() {
                   { color: mode === "system" ? colors.activeText : colors.textSecondary },
                 ]}
               >
-                System
+                {t("System")}
               </Text>
             </Pressable>
           </View>
         </View>
 
         {/* ── 2. ACCENT COLOR (From Screenshot) ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>ACCENT COLOR</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("ACCENT COLOR")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 18 }]}>
           <ScrollView
             horizontal
@@ -386,11 +388,11 @@ export default function AppearanceScreen() {
         </View>
 
         {/* ── 3. TYPOGRAPHY & MOTION (From Screenshot) ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>TYPOGRAPHY & MOTION</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("TYPOGRAPHY & MOTION")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Font Size */}
           <View style={styles.segmentBlock}>
-            <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>Font Size</Text>
+            <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>{t("Font Size")}</Text>
             <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg }]}>
               {(["Small", "Medium", "Large"] as FontSize[]).map((f) => {
                 const isSelected = fontSize === f;
@@ -414,7 +416,7 @@ export default function AppearanceScreen() {
                           : { color: colors.textSecondary },
                       ]}
                     >
-                      {f}
+                      {t(f)}
                     </Text>
                   </Pressable>
                 );
@@ -430,9 +432,9 @@ export default function AppearanceScreen() {
               <Ionicons name="pulse-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Reduce Animations</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Reduce Animations")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Minimize transitional screen movements
+                {t("Minimize transitional screen movements", "Minimize transitional screen movements")}
               </Text>
             </View>
             <Switch
@@ -446,7 +448,7 @@ export default function AppearanceScreen() {
         </View>
 
         {/* ── 4. BACKGROUND & ATMOSPHERE (Integrated from General Settings) ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>BACKGROUND & ATMOSPHERE</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("BACKGROUND CANVAS & ATMOSPHERE", "BACKGROUND & ATMOSPHERE")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
           <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>Canvas Style</Text>
           <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg, marginBottom: 16 }]}>
@@ -504,16 +506,16 @@ export default function AppearanceScreen() {
         </View>
 
         {/* ── 5. LOCATION TRACKING (Integrated from General Settings) ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>LOCATION TRACKING</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("LOCATION PRIVACY MODE", "LOCATION TRACKING")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <View style={styles.row}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <MaterialCommunityIcons name="map-marker-radius-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Location Mode</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Location Mode", "Location Mode")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Auto-detect or manual travel region
+                {t("Auto-detect or manual travel region", "Auto-detect or manual travel region")}
               </Text>
             </View>
             <View style={[styles.miniSegment, { backgroundColor: colors.segmentBg }]}>

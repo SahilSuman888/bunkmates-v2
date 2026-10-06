@@ -16,6 +16,7 @@ import { Feather, MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useChatSettings } from "../contexts/ChatSettingsContext";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { getTheme } from "../theme/theme";
 // the slider component is provided by the community package; install via
 // `expo install @react-native-community/slider` or
@@ -37,6 +38,7 @@ const wallpapers = wallpaperList; // alias for convenience
 export default function ChatSettings() {
   const router = useRouter();
   const { themeColors, accentColor } = useThemeToggle();
+  const { t } = useLanguage();
 
   const { theme: chatTheme, setTheme, wallpaper, setWallpaper, fontSize, setFontSize } = useChatSettings();
 
@@ -55,7 +57,12 @@ export default function ChatSettings() {
     return () => sub.remove();
   }, [chatTheme]);
 
-  const displayTheme = () => chatTheme.charAt(0).toUpperCase() + chatTheme.slice(1);
+  const displayTheme = () => {
+    if (chatTheme === "system") return t("System");
+    if (chatTheme === "dark") return t("Dark");
+    if (chatTheme === "light") return t("Light");
+    return (chatTheme as any)?.toString() || "";
+  };
 
   const renderWallpaperCell = ({ item }: { item: typeof wallpapers[0] }) => (
     <Pressable
@@ -68,7 +75,7 @@ export default function ChatSettings() {
       {item.id === "default" ? (
         <View style={[styles.wallpaperImage, styles.defaultWallpaper]}>
           <Feather name="check" size={24} color="#fff" />
-          <Text style={styles.defaultLabel}>Default</Text>
+          <Text style={styles.defaultLabel}>{t("Default", "Default")}</Text>
         </View>
       ) : (
         <Image
@@ -98,11 +105,11 @@ export default function ChatSettings() {
         >
           <Ionicons name="arrow-back" size={20} color={themeColors.text} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: themeColors.text }]}>Chat Settings</Text>
+        <Text style={[styles.headerTitle, { color: themeColors.text }]}>{t("Chat Settings")}</Text>
       </View>
 
       <View style={styles.content}>
-        <Text style={[styles.sectionTitle, { color: themeColors.text }]}>Appearance</Text>
+        <Text style={[styles.sectionTitle, { color: themeColors.text }]}>{t("Appearance")}</Text>
         <Pressable
           style={styles.settingItem}
           onPress={() => setShowThemeModal(true)}
@@ -111,7 +118,7 @@ export default function ChatSettings() {
             <MaterialCommunityIcons name="theme-light-dark" size={22} color={themeColors.text} />
           </View>
           <View style={styles.settingText}>
-            <Text style={[styles.settingTitle, { color: themeColors.text }]}>Theme</Text>
+            <Text style={[styles.settingTitle, { color: themeColors.text }]}>{t("Theme")}</Text>
           </View>
           <View style={styles.valueContainer}>
             <View style={styles.dropdown}>
@@ -129,8 +136,8 @@ export default function ChatSettings() {
             <Feather name="image" size={22} color="#fff" />
           </View>
           <View style={styles.settingText}>
-            <Text style={styles.settingTitle}>Chat wallpaper</Text>
-            <Text style={styles.settingSubtitle}>Choose a background for your chats</Text>
+            <Text style={styles.settingTitle}>{t("Chat wallpaper")}</Text>
+            <Text style={styles.settingSubtitle}>{t("Choose a background for your chats")}</Text>
           </View>
           <View style={styles.valueContainer}>
             {wallpaper !== "default" && (
@@ -155,7 +162,7 @@ export default function ChatSettings() {
             <Feather name="type" size={22} color="#fff" />
           </View>
           <View style={styles.settingText}>
-            <Text style={styles.settingTitle}>Font Size</Text>
+            <Text style={styles.settingTitle}>{t("Font Size")}</Text>
           </View>
           <View style={styles.valueContainer}>
             <Text style={styles.valueText}>{fontSize}px</Text>
@@ -163,29 +170,29 @@ export default function ChatSettings() {
         </Pressable>
 
         {/* chat history actions */}
-        <Text style={[styles.sectionTitle, { marginTop: 30 }]}>Chat History</Text>
+        <Text style={[styles.sectionTitle, { marginTop: 30 }]}>{t("Chat History")}</Text>
         <Pressable
           style={styles.settingItem}
-          onPress={() => alert('All chat messages have been cleared (stub)')}
+          onPress={() => alert(t("All chat messages have been cleared"))}
         >
           <View style={styles.iconContainer}>
             <MaterialCommunityIcons name="delete-outline" size={22} color="#fff" />
           </View>
           <View style={styles.settingText}>
-            <Text style={styles.settingTitle}>Clear all chats</Text>
-            <Text style={styles.settingSubtitle}>Deletes all messages from every chat</Text>
+            <Text style={styles.settingTitle}>{t("Clear all chats")}</Text>
+            <Text style={styles.settingSubtitle}>{t("Deletes all messages from every chat")}</Text>
           </View>
         </Pressable>
         <Pressable
           style={styles.settingItem}
-          onPress={() => alert('All chats and messages permanently removed (stub)')}
+          onPress={() => alert(t("All chats and messages permanently removed"))}
         >
           <View style={styles.iconContainer}>
             <MaterialCommunityIcons name="trash-can-outline" size={22} color="#fff" />
           </View>
           <View style={styles.settingText}>
-            <Text style={styles.settingTitle}>Delete all chats</Text>
-            <Text style={styles.settingSubtitle}>Permanently removes all chats and messages</Text>
+            <Text style={styles.settingTitle}>{t("Delete all chats")}</Text>
+            <Text style={styles.settingSubtitle}>{t("Permanently removes all chats and messages")}</Text>
           </View>
         </Pressable>
       </View>
@@ -213,7 +220,7 @@ export default function ChatSettings() {
                   chatTheme === opt && { fontWeight: "bold" },
                 ]}
               >
-                {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                {t(opt.charAt(0).toUpperCase() + opt.slice(1))}
               </Text>
             </Pressable>
           ))}
@@ -248,9 +255,9 @@ export default function ChatSettings() {
         />
         <View style={styles.fontModalContent}>
           <View style={styles.handle} />
-          <Text style={[styles.fontPreview, { color: themeColors.text }]}>Preview</Text>
+          <Text style={[styles.fontPreview, { color: themeColors.text }]}>{t("Preview")}</Text>
           <View style={styles.fontPreviewBox}>
-            <Text style={[styles.fontPreviewText, { fontSize, color: themeColors.text }]}>The quick brown fox jumps over the lazy dog.</Text>
+            <Text style={[styles.fontPreviewText, { fontSize, color: themeColors.text }]}>{t("The quick brown fox jumps over the lazy dog.")}</Text>
           </View>
           <View style={styles.sliderContainer}>
             <Slider
@@ -270,7 +277,7 @@ export default function ChatSettings() {
               <Text style={styles.sliderLabel}>L</Text>
             </View>
           </View>
-          <Text style={styles.sliderHelp}>Adjust the slider to see how text size changes.</Text>
+          <Text style={styles.sliderHelp}>{t("Adjust the slider to see how text size changes.")}</Text>
         </View>
       </Modal>
     </SafeAreaView>
@@ -325,7 +332,7 @@ const styles = StyleSheet.create({
   },
   valueText: { color: "#888", marginRight: 5 },
   modalOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.3)",
   },
   modalContent: {
@@ -373,7 +380,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   selectedOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.25)",
     justifyContent: "center",
     alignItems: "center",

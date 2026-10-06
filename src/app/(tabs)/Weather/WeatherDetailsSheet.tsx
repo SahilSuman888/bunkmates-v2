@@ -16,6 +16,7 @@ import WeatherGridCard from "./WeatherGridCard";
 import HourlyForecast from "./HourlyForecast";
 import { fetchForecast } from "../../../lib/WeatherService";
 import { Feather } from "@expo/vector-icons";
+import { useAppSettings } from "../../../contexts/AppSettingsContext";
 
 const { height } = Dimensions.get("window");
 
@@ -30,6 +31,7 @@ export default function WeatherDetailsSheet({
   visible: boolean;
   onClose: () => void;
 }) {
+  const { formatTemperature } = useAppSettings();
   const [forecast, setForecast] = useState<any[]>([]);
   const [modalVisible, setModalVisible] = useState(visible);
 
@@ -116,9 +118,9 @@ export default function WeatherDetailsSheet({
 
   if (!modalVisible) return null;
 
-  const currentTemp = weather?.main?.temp ? Math.round(weather.main.temp) : 28;
-  const tempMin = weather?.main?.temp_min ? Math.round(weather.main.temp_min) : 22;
-  const tempMax = weather?.main?.temp_max ? Math.round(weather.main.temp_max) : 31;
+  const currentTemp = formatTemperature(weather?.main?.temp ?? 28, "C");
+  const tempMin = formatTemperature(weather?.main?.temp_min ?? 22, "C");
+  const tempMax = formatTemperature(weather?.main?.temp_max ?? 31, "C");
   const cityName = weather?.name || "Goa";
   const country = weather?.sys?.country || "IN";
   const stationId = weather?.id || "84920";
@@ -211,11 +213,11 @@ export default function WeatherDetailsSheet({
 
             {/* Hero Temperature */}
             <View style={styles.mainTempContainer}>
-              <Text style={styles.temp}>{currentTemp}°</Text>
+              <Text style={styles.temp}>{currentTemp}</Text>
               <Text style={styles.condition}>{description}</Text>
               <View style={styles.hiLoBadge}>
                 <Text style={styles.hiLoText}>
-                  H: {tempMax}°  •  L: {tempMin}°
+                  H: {tempMax}  •  L: {tempMin}
                 </Text>
               </View>
             </View>

@@ -22,6 +22,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { registerForPushNotifications, disablePushNotifications } from "../lib/pushNotifications";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { useLanguage } from "../contexts/LanguageContext";
 
 const TIME_OPTIONS = [
   "08:00 PM",
@@ -45,6 +46,7 @@ const TIME_OPTIONS = [
 
 export default function NotificationSettings() {
   const router = useRouter();
+  const { t } = useLanguage();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
@@ -270,7 +272,7 @@ export default function NotificationSettings() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          Notifications
+          {t("Notifications")}
         </Text>
       </View>
 
@@ -290,9 +292,9 @@ export default function NotificationSettings() {
           ]}
         >
           <View style={styles.heroTextWrap}>
-            <Text style={[styles.heroTitle, { color: colors.greyishWhite }]}>All Push Notifications</Text>
+            <Text style={[styles.heroTitle, { color: colors.greyishWhite }]}>{t("All Push Notifications")}</Text>
             <Text style={[styles.heroSub, { color: colors.textSecondary }]}>
-              Quickly silence or enable all mobile alerts
+              {t("Quickly silence or enable all mobile alerts")}
             </Text>
           </View>
           <Switch
@@ -304,7 +306,7 @@ export default function NotificationSettings() {
         </View>
 
         {/* ── 1. NOTIFICATION CATEGORIES ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>NOTIFICATION CATEGORIES</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("NOTIFICATION CATEGORIES")}</Text>
         <View
           style={[
             styles.card,
@@ -319,9 +321,9 @@ export default function NotificationSettings() {
               <Ionicons name="airplane-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Trip Updates</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Trip Updates")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Flight delays, gate changes, booking syncs
+                {t("Flight delays, gate changes, booking syncs")}
               </Text>
             </View>
             <Switch
@@ -341,9 +343,9 @@ export default function NotificationSettings() {
               <Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Messages & Chat</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Messages & Chat")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Instant pings from your travel group chat
+                {t("Instant pings from your travel group chat")}
               </Text>
             </View>
             <Switch
@@ -363,9 +365,9 @@ export default function NotificationSettings() {
               <Ionicons name="time-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Reminders</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Reminders")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Pack list alerts, check-in prompts
+                {t("Pack list alerts, check-in prompts")}
               </Text>
             </View>
             <Switch
@@ -385,9 +387,9 @@ export default function NotificationSettings() {
               <Ionicons name="sparkles-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Recommendations</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Recommendations")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Curated cafes & local events nearby
+                {t("Curated cafes & local events nearby")}
               </Text>
             </View>
             <Switch
@@ -407,9 +409,9 @@ export default function NotificationSettings() {
               <Ionicons name="pricetag-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Promotions & Deals</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Promotions & Deals")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Discounts on hostels, budget flights & events
+                {t("Discounts on hostels, budget flights & events")}
               </Text>
             </View>
             <Switch
@@ -423,14 +425,14 @@ export default function NotificationSettings() {
         </View>
 
         {/* ── 2. QUIET HOURS ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>QUIET HOURS</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("QUIET HOURS")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
           {/* Do Not Disturb Toggle */}
           <View style={styles.dndRow}>
             <View style={styles.dndTextWrap}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>Do Not Disturb</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Do Not Disturb")}</Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                Auto-silence non-critical trip pings
+                {t("Auto-silence non-critical trip pings")}
               </Text>
             </View>
             <Switch

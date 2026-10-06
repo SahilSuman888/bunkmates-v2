@@ -26,6 +26,8 @@ import { db } from "../lib/firebase";
 import { BlurView } from "expo-blur";
 import Svg, { Path, Rect } from "react-native-svg";
 
+import { useLanguage } from "../contexts/LanguageContext";
+
 const { width: SCREEN_W } = Dimensions.get("window");
 const QR_SIZE = SCREEN_W * 0.68;
 const SCAN_BOX_SIZE = Math.min(SCREEN_W * 0.68, 280);
@@ -36,6 +38,7 @@ interface QRCodeScreenProps {
 
 export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
   const router = useRouter();
+  const { t } = useLanguage();
   const { user, userData } = useUser();
   const [activeTab, setActiveTab] = useState<"my" | "scan">("my");
   const [cameraReady, setCameraReady] = useState(false);
@@ -167,9 +170,9 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
           ) : (
             <View style={styles.centerPerm}>
               <Feather name="camera-off" size={48} color="#555" />
-              <Text style={styles.permText}>Camera permission is required{"\n"}to scan QR codes</Text>
+              <Text style={styles.permText}>{t("Camera permission is required")}{"\n"}{t("to scan QR codes")}</Text>
               <Pressable style={styles.permBtn} onPress={requestPermission}>
-                <Text style={styles.permBtnText}>Allow Camera</Text>
+                <Text style={styles.permBtnText}>{t("Allow Camera")}</Text>
               </Pressable>
             </View>
           )}
@@ -179,7 +182,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
 
           {/* INSTRUCTIONAL TEXT & CONTROLS DYNAMICALLY BELOW FRAME */}
           <View style={styles.belowFrameRow} pointerEvents="box-none">
-            <Text style={styles.scanLabel}>Align QR code within the frame</Text>
+            <Text style={styles.scanLabel}>{t("Align QR code within the frame")}</Text>
             {isProcessing && (
               <ActivityIndicator color="#ffffff" style={{ marginTop: 16 }} />
             )}
@@ -188,7 +191,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
                 style={styles.retryBtn}
                 onPress={() => setScanned(false)}
               >
-                <Text style={styles.retryText}>Tap to Scan Again</Text>
+                <Text style={styles.retryText}>{t("Tap to Scan Again")}</Text>
               </Pressable>
             )}
           </View>
@@ -202,7 +205,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
           <Pressable style={styles.backBtn} onPress={() => (onBack ? onBack() : router.back())}>
             <Feather name="arrow-left" size={22} color="#fff" />
           </Pressable>
-          <Text style={styles.headerTitle}>QR Code</Text>
+          <Text style={styles.headerTitle}>{t("QR Code")}</Text>
         </View>
 
         {/* PILL-SHAPED SEGMENTED TOGGLE BAR */}
@@ -212,7 +215,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
             onPress={() => setActiveTab("my")}
           >
             <Text style={[styles.tabText, activeTab === "my" && styles.tabTextActive]}>
-              My Code
+              {t("My Code")}
             </Text>
           </Pressable>
           <Pressable
@@ -223,7 +226,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
             }}
           >
             <Text style={[styles.tabText, activeTab === "scan" && styles.tabTextActive]}>
-              Scan Code
+              {t("Scan Code")}
             </Text>
           </Pressable>
         </View>
@@ -344,6 +347,7 @@ function MyCodeTab({
   photoURL: string | null;
   qrValue: string;
 }) {
+  const { t } = useLanguage();
   return (
     <View style={styles.myCodeOuter}>
       <View style={styles.myCodeCard}>
@@ -378,8 +382,7 @@ function MyCodeTab({
         </View>
 
         <Text style={styles.hint}>
-          Your QR code is private. If you share it, they{"\n"}can add you as a
-          friend.
+          {t("Your QR code is private. If you share it, they can add you as a friend.", "Your QR code is private. If you share it, they can add you as a friend.")}
         </Text>
       </View>
     </View>
@@ -400,6 +403,7 @@ function ScannedUserModal({
   onAddFriend: () => void;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <Modal
       visible={visible}
@@ -432,29 +436,29 @@ function ScannedUserModal({
             {/* Card */}
             <View style={styles.modalCard}>
               <Text style={styles.modalName}>
-                {scannedUser.name || scannedUser.displayName || "User"}
+                {scannedUser.name || scannedUser.displayName || t("User")}
               </Text>
               <Text style={styles.modalUsername}>
                 @{scannedUser.username || "bunkmate"}
               </Text>
               <Text style={styles.modalBio}>
-                {scannedUser.bio || "This user hasn't added a bio yet."}
+                {scannedUser.bio || t("This user hasn't added a bio yet.")}
               </Text>
 
               {/* Action */}
               {isAlreadyFriend ? (
                 <View style={styles.alreadyFriendChip}>
                   <MaterialCommunityIcons name="check-circle" size={16} color="#4caf50" />
-                  <Text style={styles.alreadyFriendText}>Already Friends</Text>
+                  <Text style={styles.alreadyFriendText}>{t("Already Friends")}</Text>
                 </View>
               ) : (
                 <Pressable style={styles.addFriendBtn} onPress={onAddFriend}>
-                  <Text style={styles.addFriendBtnText}>Add Friend</Text>
+                  <Text style={styles.addFriendBtnText}>{t("Add Friend")}</Text>
                 </Pressable>
               )}
 
               <Pressable style={styles.closeModalBtn} onPress={onClose}>
-                <Text style={styles.closeModalText}>Close</Text>
+                <Text style={styles.closeModalText}>{t("Close")}</Text>
               </Pressable>
             </View>
           </Pressable>
