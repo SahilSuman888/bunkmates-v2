@@ -158,15 +158,7 @@ const SettingRowMemo = React.memo(function SettingRow({
         )}
       </View>
 
-      <View
-        style={[
-          styles.modernRowContent,
-          !isLast && {
-            borderBottomWidth: StyleSheet.hairlineWidth,
-            borderBottomColor: dividerColor,
-          },
-        ]}
-      >
+      <View style={styles.modernRowContent}>
         <View style={styles.modernRowTextGroup}>
           <View style={styles.modernRowTitleWrap}>
             <Text
@@ -366,12 +358,12 @@ export default function ProfileSettings() {
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  // **@** Memoized — only rebuilds when theme or accent changes, not on every render
+  // **@** Memoized design system tokens matching BUNKMATES_DESIGN_SYSTEM.md (Pure #000000 / #F1F1F1, zero borders)
   const colors = useMemo(() => ({
-    bg: isDark ? "#0A0A0C" : "#F4F6F9",
-    card: isDark ? "#141418" : "#FFFFFF",
-    cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-    divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
+    bg: isDark ? "#000000" : "#F1F1F1",
+    card: isDark ? "rgba(255, 255, 255, 0.06)" : "#FFFFFF",
+    cardBorder: "transparent",
+    divider: "transparent",
     textPrimary: isDark ? "#FFFFFF" : "#11141A",
     textSecondary: isDark ? "#8E95A2" : "#7E8590",
     sectionHeader: isDark ? "#8E95A2" : "#7E8590",
@@ -379,10 +371,10 @@ export default function ProfileSettings() {
     coralAccent: dynamicAccent,
     coralBg: isDark ? hexToRgba(dynamicAccent, 0.16) : hexToRgba(dynamicAccent, 0.09),
     greyishWhite: isDark ? "#E2E8F0" : "#4B5563", // **@** Greyish-white icon color as requested
-    iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)", // **@** Subtle neutral icon box
+    iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.04)", // **@** Subtle neutral icon box
     chevron: isDark ? "#555860" : "#B4B9C2",
-    logoutBorder: isDark ? "rgba(255, 90, 95, 0.45)" : "rgba(255, 90, 95, 0.4)",
-    logoutBg: isDark ? "rgba(255, 90, 95, 0.08)" : "rgba(255, 90, 95, 0.04)",
+    logoutBorder: "transparent",
+    logoutBg: isDark ? "rgba(255, 90, 95, 0.10)" : "rgba(255, 90, 95, 0.06)",
   }), [isDark, dynamicAccent]);
 
   // **@** Track scroll position for header mask gradient reveal on slide/scroll
@@ -2437,7 +2429,7 @@ export default function ProfileSettings() {
         <LinearGradient
           colors={[
             colors.bg,
-            isDark ? "rgba(10, 10, 12, 0.85)" : "rgba(244, 246, 249, 0.85)",
+            isDark ? "rgba(0, 0, 0, 0.85)" : "rgba(241, 241, 241, 0.85)",
             "transparent",
           ]}
           style={StyleSheet.absoluteFill}
@@ -5021,7 +5013,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -5069,13 +5061,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 14,
     padding: 16,
-    borderRadius: 24,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
-    elevation: 1,
+    elevation: 0,
   },
 
   modernProfileAvatar: {
@@ -5106,8 +5098,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -5123,14 +5114,14 @@ const styles = StyleSheet.create({
 
   modernCardGroup: {
     marginHorizontal: 20,
-    borderRadius: 22,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.03,
     shadowRadius: 6,
-    elevation: 1,
+    elevation: 0,
   },
 
   modernRow: {
@@ -5176,8 +5167,7 @@ const styles = StyleSheet.create({
 
   modernHotBadge: {
     backgroundColor: "rgba(255, 149, 0, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 149, 0, 0.45)",
+    borderWidth: 0,
     paddingHorizontal: 7,
     paddingVertical: 1.5,
     borderRadius: 9,
@@ -5210,8 +5200,8 @@ const styles = StyleSheet.create({
 
   modernLogoutBtn: {
     height: 52,
-    borderRadius: 16,
-    borderWidth: 1.5,
+    borderRadius: 26,
+    borderWidth: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -5241,7 +5231,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     borderRadius: 22,
-    borderWidth: 1,
+    borderWidth: 0,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 14,
@@ -5307,7 +5297,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    borderWidth: 1,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,
@@ -5331,7 +5321,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 9,
     borderRadius: 18,
-    borderWidth: 1,
+    borderWidth: 0,
   },
 
   modernEmptyClearBtnText: {
