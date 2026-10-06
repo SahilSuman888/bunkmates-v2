@@ -318,7 +318,7 @@ const ExpoGoMap = ({
             pointerEvents="none"
           >
             <View style={s.greenMarkerPill}>
-              <Ionicons name="location-sharp" size={16} color="#00e676" />
+              <Ionicons name="location-sharp" size={16} color="#ffffff" />
             </View>
             <View style={s.markerBadge}>
               <Text style={s.markerBadgeText} numberOfLines={1}>
@@ -1199,9 +1199,9 @@ export default function CreateTripSheet({
                         hitSlop={6}
                       >
                         {isLocating ? (
-                          <ActivityIndicator size="small" color="#00e676" style={{ transform: [{ scale: 0.65 }] }} />
+                          <ActivityIndicator size="small" color="#ffffff" style={{ transform: [{ scale: 0.65 }] }} />
                         ) : (
-                          <Ionicons name="navigate-circle" size={13} color="#00e676" />
+                          <Ionicons name="navigate-circle" size={13} color="#ffffff" />
                         )}
                         <Text style={s.useLocationText}>
                           {isLocating ? "Detecting..." : "Use Current Location"}
@@ -1209,7 +1209,7 @@ export default function CreateTripSheet({
                       </Pressable>
                     </View>
                     <View style={s.inputInner}>
-                      <Ionicons name="location-sharp" size={16} color="#00e676" />
+                      <Ionicons name="location-sharp" size={16} color="#ffffff" />
                       <TextInput
                         value={fromLocation}
                         onChangeText={handleFromTextChange}
@@ -1233,7 +1233,7 @@ export default function CreateTripSheet({
                         </Pressable>
                       ) : (
                         <Pressable onPress={handleUseCurrentLocation} hitSlop={8}>
-                          <Ionicons name="locate" size={18} color="#00e676" />
+                          <Ionicons name="locate" size={18} color="#ffffff" />
                         </Pressable>
                       )}
                     </View>
@@ -1285,7 +1285,7 @@ export default function CreateTripSheet({
                       onPress={() => handleSelectFrom(item)}
                       style={s.dropdownItem}
                     >
-                      <Ionicons name="location-sharp" size={15} color="#00e676" />
+                      <Ionicons name="location-sharp" size={15} color="#ffffff" />
                       <Text style={s.dropdownText} numberOfLines={2}>
                         {item.name}
                       </Text>
@@ -1324,7 +1324,7 @@ export default function CreateTripSheet({
                   style={s.mapToggleBadge}
                 >
                   <Text style={s.mapToggleText}>{activeMapField.toUpperCase()}</Text>
-                  <Ionicons name="swap-horizontal" size={12} color="#00e676" />
+                  <Ionicons name="swap-horizontal" size={12} color="#ffffff" />
                 </Pressable>
               </View>
 
@@ -1448,7 +1448,7 @@ export default function CreateTripSheet({
                     <Text style={{ color: "#fff", fontSize: 20, fontWeight: "900" }}>
                       {weatherData.current_weather.temperature}°C
                     </Text>
-                    <Text style={{ color: "#00e676", fontSize: 11, fontWeight: "700", marginTop: 2 }}>
+                    <Text style={{ color: "#ffffff", fontSize: 11, fontWeight: "700", marginTop: 2 }}>
                       Ideal Time to Visit • Weather conditions are favorable for outdoors.
                     </Text>
                   </View>
@@ -1477,7 +1477,7 @@ export default function CreateTripSheet({
                     placeholderTextColor="#666"
                     style={s.mainInput}
                   />
-                  <Ionicons name="sparkles" size={18} color="#00e676" />
+                  <Ionicons name="sparkles" size={18} color="#ffffff" />
                 </View>
               </View>
 
@@ -1597,7 +1597,7 @@ export default function CreateTripSheet({
                   <Ionicons
                     name="calculator-outline"
                     size={14}
-                    color={splitMode === "auto" ? "#00e676" : "rgba(255,255,255,0.6)"}
+                    color={splitMode === "auto" ? "#ffffff" : "rgba(255,255,255,0.6)"}
                     style={{ marginRight: 4 }}
                   />
                   <Text style={[s.splitText, splitMode === "auto" && s.splitTextActive]}>AUTO</Text>
@@ -1659,7 +1659,7 @@ export default function CreateTripSheet({
               {/* Celebration Icon & Title */}
               <View style={s.step5Hero}>
                 <View style={s.sparkleBadge}>
-                  <Ionicons name="sparkles" size={26} color="#00e676" />
+                  <Ionicons name="sparkles" size={26} color="#ffffff" />
                 </View>
                 <Text style={s.step5Title}>🎉 Review & Fine-tune Timeline & Checklist</Text>
                 <Text style={s.step5Sub}>
@@ -1670,7 +1670,7 @@ export default function CreateTripSheet({
               {/* Itinerary Timeline Card */}
               <View style={s.step5Card}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 }}>
-                  <Feather name="trending-up" size={16} color="#00e676" />
+                  <Feather name="trending-up" size={16} color="#ffffff" />
                   <Text style={s.step5CardTitle}>
                     Itinerary Timeline ({previewTimeline.length} Days)
                   </Text>
@@ -1785,14 +1785,8 @@ export default function CreateTripSheet({
                 <Pressable
                   onPress={() => handleFinishAndSaveTrip(false)}
                   disabled={isFinishing}
-                  style={s.finishBtn}
+                  style={[s.finishBtn, { backgroundColor: "#ffffff" }]}
                 >
-                  <LinearGradient
-                    colors={["#00e676", "#00b0ff"]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={StyleSheet.absoluteFill}
-                  />
                   {isFinishing ? (
                     <ActivityIndicator size="small" color="#000" />
                   ) : (
@@ -1878,8 +1872,8 @@ const s = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.08)",
   },
   locInputBoxFocused: {
-    borderColor: "#00e676",
-    backgroundColor: "rgba(0, 230, 118, 0.04)",
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
   },
   inputHeaderRow: {
     flexDirection: "row",
@@ -1891,15 +1885,15 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "rgba(0, 230, 118, 0.12)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(0, 230, 118, 0.25)",
+    borderColor: "rgba(255, 255, 255, 0.25)",
   },
   useLocationText: {
-    color: "#00e676",
+    color: "#ffffff",
     fontSize: 9.5,
     fontWeight: "800",
   },
@@ -1921,7 +1915,7 @@ const s = StyleSheet.create({
     backgroundColor: "#161922",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(0, 230, 118, 0.3)",
+    borderColor: "rgba(255, 255, 255, 0.2)",
     marginBottom: 12,
     overflow: "hidden",
     elevation: 5,
@@ -1955,15 +1949,15 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "rgba(0, 230, 118, 0.15)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "rgba(0, 230, 118, 0.3)",
+    borderColor: "rgba(255, 255, 255, 0.25)",
   },
   mapToggleText: {
-    color: "#00e676",
+    color: "#ffffff",
     fontSize: 11,
     fontWeight: "900",
   },
@@ -1988,9 +1982,9 @@ const s = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "rgba(0, 230, 118, 0.2)",
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
     borderWidth: 2,
-    borderColor: "#00e676",
+    borderColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
     elevation: 4,
@@ -2243,7 +2237,7 @@ const s = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.06)",
   },
   dayBadge: {
-    backgroundColor: "#00e676",
+    backgroundColor: "#ffffff",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 10,
@@ -2391,14 +2385,14 @@ const cal = StyleSheet.create({
     justifyContent: "center",
   },
   dayCellSelected: {
-    backgroundColor: "#00e676",
+    backgroundColor: "#ffffff",
     borderRadius: 19,
   },
   dayCellRange: {
-    backgroundColor: "rgba(0, 230, 118, 0.22)",
+    backgroundColor: "rgba(255, 255, 255, 0.18)",
     borderRadius: 0,
   },
   dayText: { color: "#ffffff", fontSize: 13, fontWeight: "600" },
   dayTextSelected: { color: "#000000", fontWeight: "900" },
-  dayTextRange: { color: "#00e676", fontWeight: "800" },
+  dayTextRange: { color: "#ffffff", fontWeight: "800" },
 });

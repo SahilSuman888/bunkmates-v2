@@ -421,7 +421,7 @@ const ShareDrawer: React.FC<Props> = ({
               {loadingConnections && connections.length === 0 ? (
                 <ActivityIndicator
                   size="small"
-                  color="#00e676"
+                  color="#ffffff"
                   style={{ marginVertical: 14 }}
                 />
               ) : filteredConnections.length === 0 ? (
@@ -627,15 +627,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   activePillBadge: {
-    backgroundColor: "rgba(0, 230, 118, 0.15)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 5,
     borderWidth: 1,
-    borderColor: "rgba(0, 230, 118, 0.3)",
+    borderColor: "rgba(255, 255, 255, 0.25)",
   },
   activePillText: {
-    color: "#00e676",
+    color: "#ffffff",
     fontSize: 12,
     fontWeight: "700",
   },

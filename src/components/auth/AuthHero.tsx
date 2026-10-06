@@ -6,6 +6,7 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  withTiming,
   Easing,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +28,7 @@ interface AuthHeroProps {
   subtitle?: string;
   title?: string;
   mode?: 'welcome' | 'login' | 'signup' | 'recovery' | 'continue';
+  isKeyboardVisible?: boolean;
 }
 
 export const AuthHero: React.FC<AuthHeroProps> = ({
@@ -35,6 +37,7 @@ export const AuthHero: React.FC<AuthHeroProps> = ({
   subtitle,
   title,
   mode = 'welcome',
+  isKeyboardVisible = false,
 }) => {
   const insets = useSafeAreaInsets();
   const textColor = activeTheme.light.text;
@@ -57,21 +60,43 @@ export const AuthHero: React.FC<AuthHeroProps> = ({
     }
   };
 
+  const getKeyboardHeroHeight = () => {
+    switch (mode) {
+      case 'login':
+        return Math.max(130, Math.round(SCREEN_HEIGHT * 0.16));
+      case 'recovery':
+        return Math.max(110, Math.round(SCREEN_HEIGHT * 0.13));
+      case 'signup':
+        return Math.max(85, Math.round(SCREEN_HEIGHT * 0.10));
+      default:
+        return 0;
+    }
+  };
+
   const isRoundedBottom = mode === 'welcome' || mode === 'continue';
   const isTopAligned = mode === 'recovery' || mode === 'signup';
 
   const animatedHeight = useSharedValue(getHeroHeight());
   const animatedRadius = useSharedValue(isRoundedBottom ? 36 : 0);
+  const animatedHeroOpacity = useSharedValue(1);
 
   useEffect(() => {
-    animatedHeight.value = withSpring(getHeroHeight(), springTransition);
-    animatedRadius.value = withSpring(isRoundedBottom ? 36 : 0, springTransition);
-  }, [mode]);
+    if (isKeyboardVisible) {
+      animatedHeight.value = withSpring(getKeyboardHeroHeight(), springTransition);
+      animatedRadius.value = withSpring(0, springTransition);
+      animatedHeroOpacity.value = withTiming(1, { duration: 200 });
+    } else {
+      animatedHeight.value = withSpring(getHeroHeight(), springTransition);
+      animatedRadius.value = withSpring(isRoundedBottom ? 36 : 0, springTransition);
+      animatedHeroOpacity.value = withTiming(1, { duration: 250 });
+    }
+  }, [mode, isKeyboardVisible]);
 
   const animatedContainerStyle = useAnimatedStyle(() => ({
     height: animatedHeight.value,
     borderBottomLeftRadius: animatedRadius.value,
     borderBottomRightRadius: animatedRadius.value,
+    opacity: animatedHeroOpacity.value,
   }));
 
   return (
@@ -80,7 +105,8 @@ export const AuthHero: React.FC<AuthHeroProps> = ({
         styles.container,
         {
           backgroundColor: bgColor,
-          paddingTop: Math.max(insets.top + 14, 32),
+          paddingTop: Math.max(insets.top + (isKeyboardVisible ? 6 : 14), 28),
+          paddingBottom: isKeyboardVisible ? 12 : 28,
           justifyContent: isTopAligned ? 'flex-start' : 'flex-end',
         },
         animatedContainerStyle,
@@ -111,6 +137,7 @@ export const AuthHero: React.FC<AuthHeroProps> = ({
                 styles.slogan,
                 { color: textColor },
                 mode === 'login' && styles.sloganLogin,
+                isKeyboardVisible && styles.sloganKeyboard,
               ]}
             >
               {slogan}
@@ -128,6 +155,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 26,
     paddingBottom: 28,
     justifyContent: 'flex-end',
+    overflow: 'hidden',
   },
   content: {
     justifyContent: 'flex-end',
@@ -160,6 +188,12 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: -1.1,
     lineHeight: 38,
+  },
+  sloganKeyboard: {
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.6,
+    lineHeight: 26,
   },
 });
 

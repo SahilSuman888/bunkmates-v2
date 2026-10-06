@@ -435,6 +435,19 @@ export default function NotesScreen() {
       return;
     }
 
+    // 1. Immediately hydrate cached notes for instant offline display
+    AsyncStorage.getItem(`@bunkmates_cached_notes_${user.uid}`).then((cached) => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setNotes(parsed);
+            setLoading(false);
+          }
+        } catch (e) {}
+      }
+    });
+
     const q = query(
       collection(db, "notes"),
       where("owners", "array-contains", user.uid)
@@ -473,6 +486,7 @@ export default function NotesScreen() {
         setNotes(fetched);
         setAllLabels(Array.from(labelCollector));
         setLoading(false);
+        AsyncStorage.setItem(`@bunkmates_cached_notes_${user.uid}`, JSON.stringify(fetched)).catch(() => {});
 
         // Keep detail note updated in real time if open
         if (detailNote) {

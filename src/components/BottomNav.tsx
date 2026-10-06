@@ -12,6 +12,7 @@ import {
 import { BlurView } from "./ui/AppBlurView";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, usePathname } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUser } from "../contexts/UserContext";
 import { db } from "../lib/firebase";
 import { doc, onSnapshot } from "firebase/firestore";
@@ -21,6 +22,7 @@ const { width } = Dimensions.get("window");
 export default function BottomNav() {
   const router = useRouter();
   const pathname = usePathname();
+  const insets = useSafeAreaInsets();
   const { user, userData } = useUser();
   const [profile, setProfile] = useState<any>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -84,7 +86,14 @@ export default function BottomNav() {
   };
 
   return (
-    <View style={styles.outerContainer}>
+    <View
+      style={[
+        styles.outerContainer,
+        {
+          bottom: Math.max(insets.bottom, 10) + 8,
+        },
+      ]}
+    >
       {/* Main Navigation Pill */}
       <BlurView intensity={30} tint="dark" style={styles.navPillContainer}>
         <NavItem route="/home" icon="home" />

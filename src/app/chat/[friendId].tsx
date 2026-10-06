@@ -18,6 +18,8 @@ import {
   Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useChatSettings, wallpaperList } from "../../contexts/ChatSettingsContext";
 import { useCall } from "../../contexts/CallContext";
 import * as ImagePicker from "expo-image-picker";
@@ -42,6 +44,7 @@ import UserProfileModal from "../../components/UserProfileModal";
 import { sendChatMessageNotification } from "../../lib/sendAppNotification";
 
 export default function ChatRoom() {
+  const insets = useSafeAreaInsets();
   const { friendId: rawId } = useLocalSearchParams();
   const router = useRouter();
   const { user, userData } = useUser();
@@ -103,11 +106,31 @@ export default function ChatRoom() {
 
   useEffect(() => {
     if (!chatId || !user) return;
+
+    // 1. Immediately hydrate previous messages from local offline cache
+    AsyncStorage.getItem(`@bunkmates_chat_msgs_${chatId}`).then((cached) => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setMessages(parsed);
+            setTimeout(() => {
+              flatListRef.current?.scrollToEnd({ animated: false });
+            }, 50);
+          }
+        } catch (e) {}
+      }
+    });
+
+    // 2. Real-time Firestore subscription (auto-refreshes when net is connected)
     const q = query(collection(db, "chats", chatId, "messages"), orderBy("timestamp", "asc"), limit(300));
     const unsub = onSnapshot(q, (snapshot) => {
       const msgs: any[] = [];
       snapshot.forEach((docSnap) => msgs.push({ id: docSnap.id, ...docSnap.data() }));
       setMessages(msgs);
+
+      // Persist to local cache for offline reading
+      AsyncStorage.setItem(`@bunkmates_chat_msgs_${chatId}`, JSON.stringify(msgs)).catch(() => {});
 
       msgs.forEach(async (msg) => {
         if (msg.senderId !== user.uid && !msg.isRead) {
@@ -120,7 +143,7 @@ export default function ChatRoom() {
       }, 100);
     });
     return () => unsub();
-  }, [chatId]);
+  }, [chatId, user?.uid]);
 
   const sendMessage = async () => {
     if (!input.trim() || !chatId || !user) return;
@@ -520,7 +543,7 @@ export default function ChatRoom() {
         )}
 
         {/* INPUT BAR matching Screenshot 1 */}
-        <View style={styles.inputArea}>
+        <View style={[styles.inputArea, { paddingBottom: Math.max(insets.bottom, 10) + 4 }]}>
           <Pressable style={styles.cameraCircleBtn} onPress={pickImage} disabled={uploading}>
             {uploading ? (
               <ActivityIndicator size="small" color="#fff" />

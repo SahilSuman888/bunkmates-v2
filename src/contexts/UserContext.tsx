@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { AppState } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
 import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
@@ -60,10 +61,25 @@ export const UserProvider = ({ children }: UserProviderProps) => {
       return;
     }
 
+    // 1. Immediately hydrate cached profile offline
+    AsyncStorage.getItem(`@bunkmates_cached_profile_${user.uid}`).then((cached) => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed === 'object') {
+            setUserData((prev: any) => prev || parsed);
+          }
+        } catch (e) {}
+      }
+    });
+
+    // 2. Real-time Firestore sync
     const ref = doc(db, 'users', user.uid);
     const unsub = onSnapshot(ref, (snap) => {
       if (snap.exists()) {
-        setUserData(snap.data());
+        const data = snap.data();
+        setUserData(data);
+        AsyncStorage.setItem(`@bunkmates_cached_profile_${user.uid}`, JSON.stringify(data)).catch(() => {});
       } else {
         setUserData(null);
       }

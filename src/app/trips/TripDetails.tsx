@@ -746,7 +746,7 @@ Return strictly raw JSON format without reasoning or explanation:
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#00e676" />
+        <ActivityIndicator size="large" color="#ffffff" />
       </View>
     );
   }
@@ -855,7 +855,7 @@ Return strictly raw JSON format without reasoning or explanation:
           <View style={styles.sectionContainer}>
             <View style={styles.sectionHeaderRow}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Ionicons name="compass" size={22} color="#00e676" />
+                <Ionicons name="compass" size={22} color="#ffffff" />
                 <Text style={styles.sectionMainTitle}>Famous Places & Top Attractions</Text>
               </View>
               <TouchableOpacity
@@ -864,10 +864,10 @@ Return strictly raw JSON format without reasoning or explanation:
                 disabled={isGeneratingPlaces}
               >
                 {isGeneratingPlaces ? (
-                  <ActivityIndicator size="small" color="#00e676" />
+                  <ActivityIndicator size="small" color="#ffffff" />
                 ) : (
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                    <Ionicons name="sparkles" size={13} color="#00e676" />
+                    <Ionicons name="sparkles" size={13} color="#ffffff" />
                     <Text style={styles.discoverPlacesText}>Discover Places</Text>
                   </View>
                 )}
@@ -932,16 +932,16 @@ Return strictly raw JSON format without reasoning or explanation:
               <Text style={styles.sectionSectionHeader}>Checklist</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <TouchableOpacity
-                  style={styles.aiGreenBtn}
+                  style={styles.aiWhiteBtn}
                   onPress={handleGenerateAiChecklist}
                   disabled={isGeneratingChecklist}
                 >
                   {isGeneratingChecklist ? (
-                    <ActivityIndicator size="small" color="#00e676" />
+                    <ActivityIndicator size="small" color="#ffffff" />
                   ) : (
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                      <Ionicons name="sparkles" size={13} color="#00e676" />
-                      <Text style={styles.aiGreenBtnText}>AI Checklist</Text>
+                      <Ionicons name="sparkles" size={13} color="#ffffff" />
+                      <Text style={styles.aiWhiteBtnText}>AI Checklist</Text>
                     </View>
                   )}
                 </TouchableOpacity>
@@ -963,7 +963,7 @@ Return strictly raw JSON format without reasoning or explanation:
                 <Ionicons
                   name={task.completed ? "checkbox" : "square-outline"}
                   size={22}
-                  color={task.completed ? "#00e676" : "rgba(255,255,255,0.4)"}
+                  color={task.completed ? "#ffffff" : "rgba(255,255,255,0.4)"}
                   style={{ marginRight: 14 }}
                 />
                 <Text
@@ -992,16 +992,16 @@ Return strictly raw JSON format without reasoning or explanation:
               <Text style={styles.sectionSectionHeader}>Trip Timeline</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <TouchableOpacity
-                  style={styles.aiGreenBtn}
+                  style={styles.aiWhiteBtn}
                   onPress={handleGenerateAiTimeline}
                   disabled={isGeneratingTimeline}
                 >
                   {isGeneratingTimeline ? (
-                    <ActivityIndicator size="small" color="#00e676" />
+                    <ActivityIndicator size="small" color="#ffffff" />
                   ) : (
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                      <Ionicons name="sparkles" size={13} color="#00e676" />
-                      <Text style={styles.aiGreenBtnText}>AI Timeline</Text>
+                      <Ionicons name="sparkles" size={13} color="#ffffff" />
+                      <Text style={styles.aiWhiteBtnText}>AI Timeline</Text>
                     </View>
                   )}
                 </TouchableOpacity>
@@ -1029,7 +1029,7 @@ Return strictly raw JSON format without reasoning or explanation:
                   <Ionicons
                     name={item.completed ? "checkbox" : "square-outline"}
                     size={20}
-                    color={item.completed ? "#00e676" : "rgba(255,255,255,0.4)"}
+                    color={item.completed ? "#ffffff" : "rgba(255,255,255,0.4)"}
                     style={{ marginRight: 12, marginTop: 2 }}
                   />
                   <View style={{ flex: 1 }}>
@@ -1406,29 +1406,29 @@ const styles = StyleSheet.create({
   },
   discoverPlacesBtn: {
     borderWidth: 1.2,
-    borderColor: "rgba(0, 230, 118, 0.5)",
+    borderColor: "rgba(255, 255, 255, 0.4)",
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: "rgba(0, 230, 118, 0.1)",
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
   discoverPlacesText: {
-    color: "#00e676",
+    color: "#ffffff",
     fontSize: 12,
     fontWeight: "800",
   },
-  aiGreenBtn: {
+  aiWhiteBtn: {
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1.2,
-    borderColor: "rgba(0, 230, 118, 0.5)",
+    borderColor: "rgba(255, 255, 255, 0.4)",
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: "rgba(0, 230, 118, 0.1)",
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
-  aiGreenBtnText: {
-    color: "#00e676",
+  aiWhiteBtnText: {
+    color: "#ffffff",
     fontSize: 12,
     fontWeight: "800",
   },
@@ -1505,13 +1505,13 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   placeTimeBadge: {
-    backgroundColor: "rgba(0, 230, 118, 0.15)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 3,
   },
   placeTimeText: {
-    color: "#00e676",
+    color: "#ffffff",
     fontSize: 11,
     fontWeight: "700",
   },
@@ -1634,7 +1634,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: "100%",
-    backgroundColor: "#00e676",
+    backgroundColor: "#ffffff",
     borderRadius: 3,
   },
 

@@ -26,6 +26,8 @@ interface AuthInputProps {
   rightLabelAction?: React.ReactNode;
   activeTheme: ExpressiveTheme;
   autoComplete?: string;
+  onFocus?: () => void;
+  onBlur?: () => void;
 }
 
 export const AuthInput: React.FC<AuthInputProps> = ({
@@ -41,6 +43,8 @@ export const AuthInput: React.FC<AuthInputProps> = ({
   disabled = false,
   rightLabelAction,
   activeTheme,
+  onFocus,
+  onBlur,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [showPassword, setShowPassword] = useState(!secureTextEntry);
@@ -92,8 +96,14 @@ export const AuthInput: React.FC<AuthInputProps> = ({
           keyboardType={keyboardType}
           autoCapitalize={autoCapitalize}
           editable={!disabled}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
+          onFocus={() => {
+            setIsFocused(true);
+            onFocus?.();
+          }}
+          onBlur={() => {
+            setIsFocused(false);
+            onBlur?.();
+          }}
           style={styles.input}
         />
 

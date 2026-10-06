@@ -14,6 +14,7 @@ import {
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { collection, onSnapshot, doc, getDoc } from "firebase/firestore";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { db } from "../lib/firebase"; 
 import { useUser } from "../contexts/UserContext"; 
 
@@ -42,6 +43,20 @@ export const useUserChats = (userId: string | null) => {
       return;
     }
 
+    // 1. Immediately hydrate cached chats for instant offline display (like WhatsApp)
+    AsyncStorage.getItem(`@bunkmates_cached_chats_${userId}`).then((cached) => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setChats(parsed);
+            setLoading(false);
+          }
+        } catch (e) {}
+      }
+    });
+
+    // 2. Real-time Firestore listener (auto-refreshes when net connects)
     const unsubscribe = onSnapshot(collection(db, "chats"), async (snapshot) => {
       try {
         const results: ChatUser[] = [];
@@ -83,6 +98,9 @@ export const useUserChats = (userId: string | null) => {
         results.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
         setChats(results);
         setLoading(false);
+
+        // Persist to local cache for offline reading
+        AsyncStorage.setItem(`@bunkmates_cached_chats_${userId}`, JSON.stringify(results)).catch(() => {});
       } catch (err) {
         console.error("Realtime chat error:", err);
         setLoading(false);

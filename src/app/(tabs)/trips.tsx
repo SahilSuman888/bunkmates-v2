@@ -84,7 +84,7 @@ const isSameDay = (d1: Date, d2: Date) =>
   d1.getDate() === d2.getDate();
 
 const getTripAccent = (id: string) => {
-  const colors = ["#4A90D9", "#34D399", "#FBBF24"];
+  const colors = ["#4A90D9", "#ffffff", "#FBBF24"];
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
@@ -211,12 +211,26 @@ export default function TripsScreen() {
     });
   }, [user?.uid]);
 
-  /* ── Realtime Firestore Subscription for Trips ── */
+  /* ── Realtime Firestore Subscription for Trips with Offline Resilience ── */
   useEffect(() => {
     if (!user?.uid) {
       setLoading(false);
       return;
     }
+
+    // 1. Immediately hydrate previous trips from offline cache (like WhatsApp)
+    AsyncStorage.getItem(`bunkmate.cachedTrips.${user.uid}`).then((cached) => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setTrips(parsed);
+            setLoading(false);
+          }
+        } catch (e) {}
+      }
+    });
+
     setLoading(true);
     const q = query(collection(db, "trips"), where("members", "array-contains", user.uid));
 
@@ -325,6 +339,7 @@ export default function TripsScreen() {
         );
         setTrips(fetchedTrips);
         setLoading(false);
+        AsyncStorage.setItem(`bunkmate.cachedTrips.${user.uid}`, JSON.stringify(fetchedTrips)).catch(() => {});
       },
       () => setLoading(false)
     );
@@ -760,7 +775,7 @@ export default function TripsScreen() {
       {/* ── SCROLLABLE TRIPS DASHBOARD ── */}
       {loading ? (
         <View style={s.loadingBox}>
-          <ActivityIndicator size="large" color="#00e676" />
+          <ActivityIndicator size="large" color="#ffffff" />
         </View>
       ) : (
         <ScrollView
@@ -807,7 +822,7 @@ export default function TripsScreen() {
               <View style={s.spotlightContent}>
                 <View style={s.spotlightBadgeRow}>
                   <View style={s.spotlightTagPill}>
-                    <Ionicons name="sparkles" size={12} color="#00e676" />
+                    <Ionicons name="sparkles" size={12} color="#ffffff" />
                     <Text style={s.spotlightTagText}>NEXT ADVENTURE</Text>
                   </View>
                   <View style={s.spotlightCountdownPill}>
@@ -824,7 +839,7 @@ export default function TripsScreen() {
                 {/* Origin ➔ Destination Route Bar */}
                 <View style={s.spotlightRouteRow}>
                   <View style={s.spotlightCityBadge}>
-                    <Ionicons name="navigate-circle" size={13} color="#00e676" />
+                    <Ionicons name="navigate-circle" size={13} color="#ffffff" />
                     <Text style={s.spotlightCityText}>
                       {nextTrip.from ? nextTrip.from.split(",")[0].trim() : "Origin"}
                     </Text>
@@ -865,7 +880,7 @@ export default function TripsScreen() {
               <Text style={s.statLabel}>Total Trips</Text>
             </View>
             <View style={[s.statCard, s.statCardHighlight]}>
-              <Text style={[s.statNumber, { color: "#00e676" }]}>
+              <Text style={[s.statNumber, { color: "#ffffff" }]}>
                 {nextTripDays !== null ? (nextTripDays === 0 ? "Today" : `${nextTripDays}d`) : "—"}
               </Text>
               <Text style={s.statLabel} numberOfLines={1}>
@@ -914,7 +929,7 @@ export default function TripsScreen() {
           {(filterPlace || filterStartDate || filterEndDate) ? (
             <View style={s.activeFilterRow}>
               <View style={s.activeFilterPill}>
-                <Ionicons name="funnel" size={11} color="#00e676" />
+                <Ionicons name="funnel" size={11} color="#ffffff" />
                 <Text style={s.activeFilterText} numberOfLines={1}>
                   {filterPlace ? `"${filterPlace}" ` : ""}{filterStartDate ? `${filterStartDate} ` : ""}{filterEndDate ? `→ ${filterEndDate}` : ""}
                 </Text>
@@ -984,7 +999,7 @@ export default function TripsScreen() {
                     style={[
                       s.calDayPill,
                       isToday && s.calDayPillToday,
-                      hasTrips && !isToday && { borderColor: "rgba(0, 230, 118, 0.45)" },
+                      hasTrips && !isToday && { borderColor: "rgba(255, 255, 255, 0.45)" },
                     ]}
                   >
                     <Text style={[s.calDayName, isToday && s.calDayNameToday]}>
@@ -1028,7 +1043,7 @@ export default function TripsScreen() {
                   <Ionicons
                     name={t.icon as any}
                     size={14}
-                    color={active ? "#00e676" : "rgba(255, 255, 255, 0.45)"}
+                    color={active ? "#ffffff" : "rgba(255, 255, 255, 0.45)"}
                   />
                   <Text style={[s.statusTabText, active && s.statusTabTextActive]}>
                     {t.key}
@@ -1195,7 +1210,7 @@ export default function TripsScreen() {
 
                       {/* Route Row: Origin ➔ Destination */}
                       <View style={s.routeRow}>
-                        <Ionicons name="location-sharp" size={14} color="#00e676" />
+                        <Ionicons name="location-sharp" size={14} color="#ffffff" />
                         <Text style={s.routeText} numberOfLines={1}>
                           {routeDisplay}
                         </Text>
@@ -1252,7 +1267,7 @@ export default function TripsScreen() {
 
                         <View style={s.explorePill}>
                           <Text style={s.explorePillText}>Details</Text>
-                          <Ionicons name="arrow-forward" size={12} color="#00e676" />
+                          <Ionicons name="arrow-forward" size={12} color="#ffffff" />
                         </View>
                       </View>
                     </View>
@@ -1525,7 +1540,7 @@ export default function TripsScreen() {
                 <MaterialCommunityIcons
                   name={isSelectedPinned ? "pin" : "pin-outline"}
                   size={19}
-                  color={isSelectedPinned ? "#00e6b0" : "#ffffff"}
+                  color={isSelectedPinned ? "#fbbf24" : "#ffffff"}
                   style={!isSelectedPinned ? { transform: [{ rotate: "45deg" }] } : undefined}
                 />
               </Pressable>
@@ -1721,7 +1736,7 @@ const s = StyleSheet.create({
     paddingTop: 4,
   },
   welcomeSubText: {
-    color: "#00e676",
+    color: "rgba(255, 255, 255, 0.75)",
     fontSize: 10.5,
     fontWeight: "800",
     letterSpacing: 1.2,
@@ -1743,20 +1758,20 @@ const s = StyleSheet.create({
     height: 38,
     borderRadius: 19,
     borderWidth: 1.5,
-    borderColor: "#00e676",
+    borderColor: "#ffffff",
   },
   userAvatarHeaderPlaceholder: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: "rgba(0, 230, 118, 0.15)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderWidth: 1.5,
-    borderColor: "#00e676",
+    borderColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
   },
   userAvatarInitial: {
-    color: "#00e676",
+    color: "#ffffff",
     fontSize: 16,
     fontWeight: "900",
   },
@@ -1768,7 +1783,7 @@ const s = StyleSheet.create({
     overflow: "hidden",
     marginBottom: 18,
     borderWidth: 1.2,
-    borderColor: "rgba(0, 230, 118, 0.35)",
+    borderColor: "rgba(255, 255, 255, 0.2)",
     backgroundColor: "#121520",
     position: "relative",
   },
@@ -1796,15 +1811,15 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    backgroundColor: "rgba(0, 230, 118, 0.18)",
+    backgroundColor: "rgba(255, 255, 255, 0.14)",
     paddingHorizontal: 9,
     paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(0, 230, 118, 0.4)",
+    borderColor: "rgba(255, 255, 255, 0.3)",
   },
   spotlightTagText: {
-    color: "#00e676",
+    color: "#ffffff",
     fontSize: 10.5,
     fontWeight: "900",
     letterSpacing: 0.5,
@@ -1883,7 +1898,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    backgroundColor: "#00e676",
+    backgroundColor: "#ffffff",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
@@ -1912,8 +1927,8 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
   statCardHighlight: {
-    borderColor: "rgba(0, 230, 118, 0.3)",
-    backgroundColor: "rgba(0, 230, 118, 0.08)",
+    borderColor: "rgba(255, 255, 255, 0.25)",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   statNumber: {
     color: "#ffffff",
@@ -1963,8 +1978,8 @@ const s = StyleSheet.create({
     position: "relative",
   },
   filterActionBtnActive: {
-    borderColor: "#00e676",
-    backgroundColor: "rgba(0, 230, 118, 0.15)",
+    borderColor: "#ffffff",
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
   },
   filterActiveDot: {
     position: "absolute",
@@ -1973,7 +1988,7 @@ const s = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#00e676",
+    backgroundColor: "#ffffff",
   },
 
   activeFilterRow: {
@@ -1987,16 +2002,16 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "rgba(0, 230, 118, 0.12)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderWidth: 1,
-    borderColor: "rgba(0, 230, 118, 0.3)",
+    borderColor: "rgba(255, 255, 255, 0.25)",
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 14,
     maxWidth: "80%",
   },
   activeFilterText: {
-    color: "#00e676",
+    color: "#ffffff",
     fontSize: 11,
     fontWeight: "700",
   },
@@ -2039,7 +2054,7 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   calTodayBtnText: {
-    color: "#00e676",
+    color: "#ffffff",
     fontSize: 11,
     fontWeight: "700",
   },
@@ -2118,7 +2133,7 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   statusTabCountActive: {
-    backgroundColor: "#00e676",
+    backgroundColor: "#ffffff",
   },
   statusTabCountText: {
     color: "rgba(255, 255, 255, 0.6)",
@@ -2177,8 +2192,8 @@ const s = StyleSheet.create({
     borderWidth: 1,
   },
   statusChipOngoing: {
-    borderColor: "rgba(0, 230, 118, 0.5)",
-    backgroundColor: "rgba(0, 230, 118, 0.15)",
+    borderColor: "rgba(255, 255, 255, 0.4)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
   },
   statusChipUpcoming: {
     borderColor: "rgba(56, 189, 248, 0.5)",
@@ -2193,7 +2208,7 @@ const s = StyleSheet.create({
     height: 6,
     borderRadius: 3,
   },
-  statusDotOngoing: { backgroundColor: "#00e676" },
+  statusDotOngoing: { backgroundColor: "#ffffff" },
   statusDotUpcoming: { backgroundColor: "#38bdf8" },
   statusDotPast: { backgroundColor: "rgba(255, 255, 255, 0.4)" },
   statusChipText: {
@@ -2306,7 +2321,7 @@ const s = StyleSheet.create({
   },
   cardBudgetFill: {
     height: "100%",
-    backgroundColor: "#00e676",
+    backgroundColor: "#ffffff",
     borderRadius: 2,
   },
   avatarOverlapRow: {
@@ -2358,15 +2373,15 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "rgba(0, 230, 118, 0.12)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderWidth: 1,
-    borderColor: "rgba(0, 230, 118, 0.3)",
+    borderColor: "rgba(255, 255, 255, 0.25)",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
   },
   explorePillText: {
-    color: "#00e676",
+    color: "#ffffff",
     fontSize: 12,
     fontWeight: "800",
   },
@@ -2400,14 +2415,14 @@ const s = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 22,
-    backgroundColor: "rgba(0, 230, 118, 0.15)",
+    backgroundColor: "#ffffff",
     borderWidth: 1.2,
-    borderColor: "rgba(0, 230, 118, 0.4)",
+    borderColor: "#ffffff",
   },
   emptyStateCreateBtnText: {
-    color: "#00e676",
+    color: "#000000",
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "900",
   },
 
   /* Floating Create Trip Button (Bottom Right) */

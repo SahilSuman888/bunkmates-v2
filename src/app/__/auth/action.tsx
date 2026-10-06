@@ -1,5 +1,6 @@
 import React from 'react';
 import { Redirect, useLocalSearchParams } from 'expo-router';
+import { parseAuthParams } from '../../../lib/authUrlHelper';
 
 /**
  * Handles incoming Firebase Auth action links like:
@@ -8,22 +9,15 @@ import { Redirect, useLocalSearchParams } from 'expo-router';
  * bunkmates://__/auth/action?mode=resetPassword&oobCode=...
  */
 export default function FirebaseAuthActionRoute() {
-  const params = useLocalSearchParams<{
-    mode?: string;
-    oobCode?: string;
-    apiKey?: string;
-    continueUrl?: string;
-  }>();
-
-  const oobCode = params.oobCode;
-  const isReset = params.mode === 'resetPassword' || Boolean(oobCode);
+  const rawParams = useLocalSearchParams<Record<string, string>>();
+  const parsed = parseAuthParams(rawParams);
 
   return (
     <Redirect
       href={{
         pathname: '/login',
-        params: isReset
-          ? { mode: 'reset-password', oobCode: oobCode || '' }
+        params: parsed.isReset
+          ? { mode: 'reset-password', oobCode: parsed.oobCode || '' }
           : { mode: 'login' },
       }}
     />

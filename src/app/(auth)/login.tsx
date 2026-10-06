@@ -70,6 +70,7 @@ import AuthInput from '../../components/auth/AuthInput';
 import GoogleColoredIcon from '../../components/auth/GoogleColoredIcon';
 import PasswordCriteriaGrid from '../../components/auth/PasswordCriteriaGrid';
 import UserProfileCard from '../../components/auth/UserProfileCard';
+import { extractResetCode, parseAuthParams } from '../../lib/authUrlHelper';
 
 let GoogleSignin: any = null;
 try {
@@ -84,65 +85,6 @@ try {
 }
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-/**
- * Helper to extract Firebase oobCode (out-of-band password reset code)
- * from action links, custom scheme URLs, nested Firebase email links, or raw clipboard strings.
- */
-function extractResetCodeFromUrl(urlOrText: string): string | null {
-  if (!urlOrText) return null;
-  let current = urlOrText.trim();
-
-  // Try parsing directly and iteratively unescaping nested URLs (e.g. Firebase email links with link=...)
-  for (let attempt = 0; attempt < 3; attempt++) {
-    // Pattern 1: URL with oobCode parameter
-    const oobMatch = current.match(/[?&]oobCode=([^&#\s]+)/i);
-    if (oobMatch && oobMatch[1]) {
-      try {
-        return decodeURIComponent(oobMatch[1]);
-      } catch {
-        return oobMatch[1];
-      }
-    }
-
-    // Pattern 2: URL with code parameter
-    const codeMatch = current.match(/[?&]code=([^&#\s]+)/i);
-    if (codeMatch && codeMatch[1]) {
-      try {
-        return decodeURIComponent(codeMatch[1]);
-      } catch {
-        return codeMatch[1];
-      }
-    }
-
-    // Pattern 3: URL-encoded parameter like oobCode%3D...
-    const encodedMatch = current.match(/oobCode(?:%3D|=)([^%&#\s]+)/i);
-    if (encodedMatch && encodedMatch[1]) {
-      try {
-        return decodeURIComponent(encodedMatch[1]);
-      } catch {
-        return encodedMatch[1];
-      }
-    }
-
-    // Try decoding query component for next iteration
-    try {
-      const decoded = decodeURIComponent(current);
-      if (decoded === current) break;
-      current = decoded;
-    } catch {
-      break;
-    }
-  }
-
-  // Pattern 4: Raw action code string (20+ chars, alphanumeric, hyphens, underscores)
-  const raw = urlOrText.trim();
-  if (!raw.includes('://') && !raw.includes('/') && /^[A-Za-z0-9_-]{20,}$/.test(raw)) {
-    return raw;
-  }
-
-  return null;
-}
 
 export type ViewMode =
   | 'welcome'
@@ -216,16 +158,47 @@ const AnimatedTouchableScale: React.FC<AnimatedTouchableScaleProps> = ({
 export default function AuthScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ mode?: string; oobCode?: string }>();
+  const params = useLocalSearchParams<Record<string, string>>();
+  const parsedParams = useMemo(() => parseAuthParams(params), [params]);
 
   const initialMode = useMemo<ViewMode>(() => {
+    if (parsedParams.isReset) return 'reset-password';
     if (params.mode && ['welcome', 'login', 'signup', 'forgot-password', 'reset-password', 'continue'].includes(params.mode)) {
       return params.mode as ViewMode;
     }
     return 'welcome';
-  }, [params.mode]);
+  }, [params.mode, parsedParams.isReset]);
 
   const [viewMode, setViewMode] = useState<ViewMode>(initialMode);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setIsKeyboardVisible(true);
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setIsKeyboardVisible(false);
+      setKeyboardHeight(0);
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const handleInputFocus = useCallback((offset: number) => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: offset, animated: true });
+    }, 90);
+  }, []);
 
   // Track mode history stack for route -1 back navigation
   const modeHistoryRef = useRef<ViewMode[]>(
@@ -319,7 +292,7 @@ export default function AuthScreen() {
   const [isBlocked, setIsBlocked] = useState(false);
 
   // Reset password state
-  const [oobCode, setOobCode] = useState(params.oobCode || '');
+  const [oobCode, setOobCode] = useState(parsedParams.oobCode || params.oobCode || '');
   const [newPassword, setNewPassword] = useState('');
   const [confirmResetPassword, setConfirmResetPassword] = useState('');
   const [resetSuccessMessage, setResetSuccessMessage] = useState('');
@@ -442,13 +415,13 @@ export default function AuthScreen() {
     const handleIncomingUrl = (url: string | null) => {
       if (!url) return;
       console.log('Incoming deep link in AuthScreen:', url);
-      const code = extractResetCodeFromUrl(url);
-      if (code) {
-        setOobCode(code);
+      const parsed = parseAuthParams(url);
+      if (parsed.oobCode) {
+        setOobCode(parsed.oobCode);
         setViewMode('reset-password');
         setError('');
         haptic('medium');
-      } else if (url.includes('reset-password') || url.includes('mode=resetPassword')) {
+      } else if (parsed.isReset) {
         setViewMode('reset-password');
       }
     };
@@ -472,14 +445,16 @@ export default function AuthScreen() {
 
   // Sync mode and oobCode params if navigated via Expo Router
   useEffect(() => {
-    if (params.mode && ['welcome', 'login', 'signup', 'forgot-password', 'reset-password', 'continue'].includes(params.mode)) {
+    const parsed = parseAuthParams(params);
+    if (parsed.oobCode) {
+      setOobCode(parsed.oobCode);
+      setViewMode('reset-password');
+    } else if (parsed.isReset) {
+      setViewMode('reset-password');
+    } else if (params.mode && ['welcome', 'login', 'signup', 'forgot-password', 'reset-password', 'continue'].includes(params.mode)) {
       setViewMode(params.mode as ViewMode);
     }
-    if (params.oobCode) {
-      setOobCode(params.oobCode);
-      setViewMode('reset-password');
-    }
-  }, [params.mode, params.oobCode]);
+  }, [params]);
 
   // Verify password reset code when in reset-password mode with oobCode
   useEffect(() => {
@@ -903,7 +878,7 @@ export default function AuthScreen() {
         setError('Clipboard is empty. Copy the reset link from your email first.');
         return;
       }
-      const code = extractResetCodeFromUrl(text);
+      const code = extractResetCode(text);
       if (code) {
         setError('');
         setOobCode(code);
@@ -1016,7 +991,22 @@ export default function AuthScreen() {
     : "inset 0 1px 1px rgba(255, 255, 255, 0.8), inset 0 -1px 1px rgba(0, 0, 0, 0.1)";
 
   return (
-    <View style={[styles.screen, { backgroundColor: screenBg }]}>
+    <View style={[styles.screen, { backgroundColor: '#000000' }]}>
+      {/* Top Hero Backdrop to ensure top status bar and pull bounce show the hero theme color */}
+      {isFormPage && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: Math.max(340, Math.round(SCREEN_HEIGHT * 0.45)),
+            backgroundColor: primaryBg,
+          }}
+        />
+      )}
+
       {/* Subtle ambient lighting orb in background matching React AuthPage.jsx */}
       <Animated.View
         pointerEvents="none"
@@ -1031,9 +1021,13 @@ export default function AuthScreen() {
         style={styles.keyboardContainer}
       >
         <ScrollView
+          ref={scrollViewRef}
           contentContainerStyle={[
             styles.scrollContent,
-            { backgroundColor: screenBg },
+            {
+              backgroundColor: 'transparent',
+              paddingBottom: isKeyboardVisible ? Math.max(keyboardHeight - 80, 80) : 0,
+            },
           ]}
           keyboardShouldPersistTaps="handled"
           bounces={false}
@@ -1042,6 +1036,7 @@ export default function AuthScreen() {
           {/* ================= TOP HERO SECTION ================= */}
           <AuthHero
             activeTheme={activeTheme}
+            isKeyboardVisible={isKeyboardVisible}
             slogan={
               viewMode === 'continue'
                 ? 'Explore\nTogether\nAlways'
@@ -1080,7 +1075,11 @@ export default function AuthScreen() {
           <Animated.View
             style={[
               styles.cardContainer,
-              { paddingBottom: bottomInset },
+              {
+                minHeight: Math.round(SCREEN_HEIGHT * 0.70),
+                paddingBottom: isKeyboardVisible ? 24 : Math.max(insets.bottom + 16, 28),
+                paddingTop: isFormPage ? 28 : 24,
+              },
               viewMode === 'welcome' && styles.cardWelcome,
               isFormPage && styles.cardForm,
               viewMode === 'continue' && styles.cardContinue,
@@ -1277,6 +1276,7 @@ export default function AuthScreen() {
                       keyboardType="email-address"
                       autoCapitalize="none"
                       activeTheme={activeTheme}
+                      onFocus={() => handleInputFocus(0)}
                     />
                   </Animated.View>
 
@@ -1293,6 +1293,7 @@ export default function AuthScreen() {
                       secureTextEntry
                       isPassword
                       activeTheme={activeTheme}
+                      onFocus={() => handleInputFocus(70)}
                     />
                   </Animated.View>
 
@@ -1460,6 +1461,7 @@ export default function AuthScreen() {
                       onChangeText={(val) => handleSignupChange('name', val)}
                       autoCapitalize="words"
                       activeTheme={activeTheme}
+                      onFocus={() => handleInputFocus(0)}
                     />
                   </Animated.View>
 
@@ -1473,6 +1475,7 @@ export default function AuthScreen() {
                       onChangeText={(val) => handleSignupChange('mobile', val)}
                       keyboardType="phone-pad"
                       activeTheme={activeTheme}
+                      onFocus={() => handleInputFocus(50)}
                     />
                   </Animated.View>
 
@@ -1487,6 +1490,7 @@ export default function AuthScreen() {
                       keyboardType="email-address"
                       autoCapitalize="none"
                       activeTheme={activeTheme}
+                      onFocus={() => handleInputFocus(110)}
                     />
                   </Animated.View>
 
@@ -1500,6 +1504,7 @@ export default function AuthScreen() {
                       onChangeText={(val) => handleSignupChange('username', val)}
                       autoCapitalize="none"
                       activeTheme={activeTheme}
+                      onFocus={() => handleInputFocus(170)}
                       rightLabelAction={
                         checkingUsername ? (
                           <Text style={styles.statusMuted}>Checking...</Text>
@@ -1523,6 +1528,7 @@ export default function AuthScreen() {
                       secureTextEntry
                       isPassword
                       activeTheme={activeTheme}
+                      onFocus={() => handleInputFocus(240)}
                     />
                   </Animated.View>
 
@@ -1542,6 +1548,7 @@ export default function AuthScreen() {
                       secureTextEntry
                       isPassword
                       activeTheme={activeTheme}
+                      onFocus={() => handleInputFocus(340)}
                     />
                   </Animated.View>
 
@@ -1712,6 +1719,7 @@ export default function AuthScreen() {
                       keyboardType="email-address"
                       autoCapitalize="none"
                       activeTheme={activeTheme}
+                      onFocus={() => handleInputFocus(0)}
                       rightLabelAction={
                         searchingProfile ? (
                           <Text style={styles.statusMuted}>Searching...</Text>
@@ -1952,6 +1960,7 @@ export default function AuthScreen() {
                               secureTextEntry
                               isPassword
                               activeTheme={activeTheme}
+                              onFocus={() => handleInputFocus(0)}
                             />
                           </Animated.View>
 
@@ -1972,6 +1981,7 @@ export default function AuthScreen() {
                               secureTextEntry
                               isPassword
                               activeTheme={activeTheme}
+                              onFocus={() => handleInputFocus(80)}
                             />
                           </Animated.View>
 
