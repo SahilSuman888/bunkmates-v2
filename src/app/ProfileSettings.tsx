@@ -260,6 +260,30 @@ export default function ProfileSettings() {
     [router]
   );
 
+  // **@** Redirect to Google Play Store to rate BunkMates
+  const handleRateApp = useCallback(async () => {
+    const playStoreUrl = "https://play.google.com/store/apps/details?id=com.bm.bunkmates";
+    const marketUrl = "market://details?id=com.bm.bunkmates";
+
+    try {
+      if (Platform.OS === "android") {
+        const canOpenMarket = await Linking.canOpenURL(marketUrl);
+        if (canOpenMarket) {
+          await Linking.openURL(marketUrl);
+          return;
+        }
+      }
+      await Linking.openURL(playStoreUrl);
+    } catch {
+      Linking.openURL(playStoreUrl).catch(() => {
+        Alert.alert(
+          tr("Rate BunkMates"),
+          "Unable to open Play Store. Please search 'BunkMates' on Google Play Store."
+        );
+      });
+    }
+  }, [tr]);
+
   const { user, loading: authLoading } = useUser();
 
   const [loading, setLoading] = useState(true);
@@ -1004,7 +1028,7 @@ export default function ProfileSettings() {
       icon: "ribbon-outline",
       onPress: () => {
         setIsSearching(false);
-        Alert.alert("Rate BunkMates", "Thank you for rating BunkMates 5 stars! ⭐⭐⭐⭐⭐");
+        handleRateApp();
       },
     },
     {
@@ -2790,12 +2814,7 @@ export default function ProfileSettings() {
             icon="ribbon-outline"
             title={tr("Rate BunkMates")}
             subtitle={tr("Show us some love on the store")}
-            onPress={() =>
-              Alert.alert(
-                tr("Rate BunkMates"),
-                "Thank you for rating BunkMates 5 stars! ⭐⭐⭐⭐⭐"
-              )
-            }
+            onPress={handleRateApp}
           />
           {/* Preserved v2 feature: Licenses */}
           <SettingRow
