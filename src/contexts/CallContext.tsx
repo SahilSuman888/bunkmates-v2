@@ -750,6 +750,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
             sendMissedCallPushAndFirestoreNotification({
               receiverId,
               callerId: user.uid,
+              callId: callDocId,
               callerName,
               callerAvatar,
               callType,
@@ -998,6 +999,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         sendMissedCallPushAndFirestoreNotification({
           receiverId: currentActive.receiverId,
           callerId: user?.uid || currentActive.callerId,
+          callId: currentActive.id,
           callerName: currentActive.callerName,
           callerAvatar: currentActive.callerAvatar,
           callType: currentActive.callType,

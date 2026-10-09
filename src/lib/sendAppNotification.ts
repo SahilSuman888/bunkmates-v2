@@ -214,12 +214,14 @@ export async function sendCallPushAndFirestoreNotification({
 export async function sendMissedCallPushAndFirestoreNotification({
   receiverId,
   callerId,
+  callId,
   callerName,
   callerAvatar,
   callType,
 }: {
   receiverId: string;
   callerId: string;
+  callId: string;
   callerName: string;
   callerAvatar?: string;
   callType: "audio" | "video";
@@ -244,6 +246,7 @@ export async function sendMissedCallPushAndFirestoreNotification({
     ],
     data: {
       type: "missed_call",
+      callId,
       callerId,
       callerName,
       callerAvatar,

@@ -46,10 +46,10 @@ import LinkDrawer from "../../components/trip_components/LinkDrawer";
 import SettingsDrawer from "../../components/trip_components/SettingsDrawer";
 
 import { useGroqAI } from "../../hooks/useGroqAI";
+import { functions } from "../../lib/firebase";
+import { httpsCallable } from "firebase/functions";
 
 const { width } = Dimensions.get("window");
-
-const DEFAULT_GROQ_KEY = "[REMOVED]";
 
 const getCurrentDate = () => {
   const now = new Date();
@@ -457,14 +457,7 @@ export default function TripDetails() {
   };
 
   /* ─── REAL-TIME GROQ AI FROM FIRESTORE ─── */
-  const { groqApiKey: hookGroqApiKey, defaultModel, fetchKeyDirectly } = useGroqAI();
-
-  const getActiveGroqKey = async (): Promise<string> => {
-    if (hookGroqApiKey && hookGroqApiKey.trim().length > 0) return hookGroqApiKey.trim();
-    const direct = await fetchKeyDirectly();
-    if (direct && direct.trim().length > 0) return direct.trim();
-    return DEFAULT_GROQ_KEY;
-  };
+  const { defaultModel } = useGroqAI();
 
   const parseAiJson = (rawContent: string) => {
     if (!rawContent) return null;
@@ -485,7 +478,11 @@ export default function TripDetails() {
   /**
    * Resilient Groq Chat Completion API caller with multi-model fallback
    */
-  const callGroqChatApi = async (apiKey: string, prompt: string) => {
+  const callGroqChatApi = async (prompt: string) => {
+    const generateCompletion = httpsCallable<
+      { model: string; prompt: string },
+      { content: string }
+    >(functions, "generateGroqChatCompletion");
     const modelsToTry = [
       defaultModel || "llama-3.3-70b-versatile",
       "llama-3.3-70b-versatile",
@@ -504,21 +501,9 @@ export default function TripDetails() {
       }
 
       try {
-        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({
-            model: modelCandidate,
-            messages: [{ role: "user", content: prompt }],
-            temperature: 0.3,
-          }),
-        });
-
-        const data = await res.json();
-        if (res.ok && data?.choices?.[0]?.message?.content) {
-          return data.choices[0].message.content;
-        }
-        lastError = new Error(data?.error?.message || `API Error (${res.status})`);
+        const result = await generateCompletion({ model: modelCandidate, prompt });
+        if (result.data?.content) return result.data.content;
+        lastError = new Error("Groq returned an empty completion.");
       } catch (err) {
         lastError = err;
       }
@@ -539,12 +524,11 @@ export default function TripDetails() {
     let placesToAdd: any[] = [];
 
     try {
-      const activeKey = await getActiveGroqKey();
       const prompt = `Give me 5 famous, must-visit tourist attractions and local places to visit in "${dest}".
 Return strictly raw JSON format without reasoning or explanation:
 {"places":[{"name":"Place Name","category":"Historical Monument","description":"Short description.","suggestedTime":"Morning"}]}`;
 
-      const rawContent = await callGroqChatApi(activeKey, prompt);
+      const rawContent = await callGroqChatApi(prompt);
       const parsed = parseAiJson(rawContent);
       if (parsed?.places?.length) {
         placesToAdd = parsed.places;
@@ -588,7 +572,6 @@ Return strictly raw JSON format without reasoning or explanation:
     let timelineToAdd: any[] = [];
 
     try {
-      const activeKey = await getActiveGroqKey();
       let numDays = 3;
       if (trip?.startDate && trip?.endDate) {
         const diff = Math.abs(new Date(trip.endDate).getTime() - new Date(trip.startDate).getTime());
@@ -599,7 +582,7 @@ Return strictly raw JSON format without reasoning or explanation:
 Return strictly raw JSON format without reasoning or explanation:
 {"timeline":[{"title":"Day 1 - Arrival & Hotel Check-in","time":"${trip?.startDate || getCurrentDate()}T10:00","note":"Transit to destination, check in and evening sightseeing."}]}`;
 
-      const rawContent = await callGroqChatApi(activeKey, prompt);
+      const rawContent = await callGroqChatApi(prompt);
       const parsed = parseAiJson(rawContent);
       if (parsed?.timeline?.length) {
         timelineToAdd = parsed.timeline;
@@ -643,12 +626,11 @@ Return strictly raw JSON format without reasoning or explanation:
     let checklistToAdd: string[] = [];
 
     try {
-      const activeKey = await getActiveGroqKey();
       const prompt = `Generate an essential packing checklist for a trip to "${dest}".
 Return strictly raw JSON format without reasoning or explanation:
 {"checklist":["Government IDs & Tickets","Phone Chargers","First Aid Kit","Comfortable Shoes"]}`;
 
-      const rawContent = await callGroqChatApi(activeKey, prompt);
+      const rawContent = await callGroqChatApi(prompt);
       const parsed = parseAiJson(rawContent);
       if (parsed?.checklist?.length) {
         checklistToAdd = parsed.checklist;

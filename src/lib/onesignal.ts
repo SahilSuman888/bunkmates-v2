@@ -4,12 +4,9 @@ import { router } from "expo-router";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { setupCallNotificationCategories } from "./callNotifications";
+import { sendOneSignalNotification } from "./oneSignalApi";
 
 export const ONESIGNAL_APP_ID = "263ae218-7fa0-49cf-9503-d7d0fab26d60";
-
-// OneSignal App API Key (Rich Authentication Token, scoped to BunkMates App)
-export const ONESIGNAL_APP_API_KEY =
-  "[REMOVED]";
 
 // Safe native module loader (prevents crash in Expo Go where custom native modules cannot run)
 let OneSignal: any = null;
@@ -204,68 +201,20 @@ export async function sendOneSignalPush({
   if (targetIds.length === 0) return;
 
   try {
-    const isCallType = data?.type === "call" || data?.type === "group_call" || data?.type === "incoming_call";
-    const resolvedSound = androidSound && androidSound !== "default"
-      ? androidSound
-      : isCallType
-      ? "call_ringtone"
-      : "default";
-
-    const payload: any = {
-      app_id: ONESIGNAL_APP_ID,
-      include_aliases: {
-        external_id: targetIds,
-      },
-      target_channel: "push",
+    await sendOneSignalNotification({
+      externalUserIds: targetIds,
       headings,
       contents,
-      data: data || {},
+      data,
       priority,
-      android_sound: resolvedSound,
-      android_visibility: 1, // Show on lockscreen
-      ios_sound: isCallType ? "call_ringtone.wav" : "default",
-    };
-
-    if (largeIcon) {
-      payload.large_icon = largeIcon;
-    }
-
-    if (androidAccentColor) {
-      payload.android_accent_color = androidAccentColor;
-    }
-
-    // Route to dedicated Android NotificationChannel configured in client code
-    payload.existing_android_channel_id = androidChannelId || "bunkmates_default_channel_v1";
-
-    if (typeof ttl === "number") {
-      payload.ttl = ttl;
-    }
-
-    if (contentAvailable) {
-      payload.content_available = true;
-      payload.apns_push_type_background = "voip";
-    }
-
-    if (buttons && buttons.length > 0) {
-      payload.buttons = buttons;
-    }
-
-    const res = await fetch("https://api.onesignal.com/notifications", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Key ${ONESIGNAL_APP_API_KEY}`,
-      },
-      body: JSON.stringify(payload),
+      androidChannelId,
+      contentAvailable,
+      ttl,
+      largeIcon,
+      androidSound,
+      androidAccentColor,
+      buttons,
     });
-
-    const json = await res.json();
-    if (json.errors) {
-      console.warn("[OneSignal REST] Push response errors:", json.errors);
-    } else {
-      console.log(`[OneSignal REST] Notification sent to ${targetIds.length} user(s):`, json.id);
-    }
-    return json;
   } catch (err) {
     console.error("[OneSignal REST] Push request failed:", err);
   }

@@ -5,6 +5,7 @@ import {
   getReactNativePersistence
 } from "firebase/auth";
 import { getFirestore, setLogLevel } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 import { getStorage } from "firebase/storage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -22,7 +23,7 @@ const firebaseConfig = {
   measurementId: "G-Y78WBDGF5Z"
 };
 
-const app =
+export const app =
   getApps().length === 0
     ? initializeApp(firebaseConfig)
     : getApps()[0];
@@ -32,6 +33,7 @@ export const auth = initializeAuth(app, {
 });
 
 export const db = getFirestore(app);
+export const functions = getFunctions(app);
 export const storage = getStorage(app);
 
 // Note: For React Native, Firebase Messaging should be initialized using:

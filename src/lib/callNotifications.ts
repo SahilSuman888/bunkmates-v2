@@ -1,6 +1,7 @@
 import { Platform, NativeModules } from "react-native";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "./firebase";
+import { sendOneSignalNotification } from "./oneSignalApi";
 
 export const CALL_CHANNEL_ID = "bunkmates_call_ringtone_channel_v7";
 export const ONGOING_CALL_CHANNEL_ID = "bunkmates-ongoing-calls-v5";
@@ -259,22 +260,8 @@ export async function showMissedCallNotification(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// OneSignal credentials
-// ─────────────────────────────────────────────────────────────────────────────
-const ONESIGNAL_APP_ID = "263ae218-7fa0-49cf-9503-d7d0fab26d60";
-
-// OneSignal App API Key (Rich Authentication Token, scoped to BunkMates App)
-const ONESIGNAL_REST_API_KEY =
-  "[REMOVED]";
-
 /**
- * Send a call push notification via OneSignal REST API.
- *
- * Targets the receiver by their Firebase UID (set as OneSignal External User ID
- * via OneSignal.login() in UserContext). No Firestore lookup needed.
- *
- * Works even when the receiver's app is fully closed (FCM/APNs delivery).
+ * Send a call push notification through the authenticated Cloud Function.
  */
 export async function sendOneSignalCallNotification({
   receiverId,
@@ -293,11 +280,6 @@ export async function sendOneSignalCallNotification({
 }) {
   if (!receiverId) return;
 
-  if (!ONESIGNAL_REST_API_KEY || ONESIGNAL_REST_API_KEY.length < 10) {
-    console.warn("[CallNotifications] OneSignal REST API Key is not configured.");
-    return;
-  }
-
   try {
     const isVideo = callType === "video";
     const callEmoji = isGroupCall ? "👥" : isVideo ? "📹" : "📞";
@@ -307,20 +289,10 @@ export async function sendOneSignalCallNotification({
       ? "Incoming Video Call"
       : "Incoming Voice Call";
 
-    const body: any = {
-      app_id: ONESIGNAL_APP_ID,
-
-      // Target by Firebase UID (External User ID set via OneSignal.login)
-      include_aliases: {
-        external_id: [receiverId],
-      },
-      target_channel: "push",
-
-      // Notification content
+    const result = await sendOneSignalNotification({
+      externalUserIds: [receiverId],
       headings: { en: `${callEmoji} ${callLabel}` },
       contents: { en: `${callerName} is calling you on BunkMates...` },
-
-      // Custom data — used by OneSignalHandler.tsx onClick to open call screen
       data: {
         type: isGroupCall ? "group_call" : "call",
         callId,
@@ -329,44 +301,17 @@ export async function sendOneSignalCallNotification({
         isGroupCall,
         groupName: groupName || null,
       },
-
-      existing_android_channel_id: CALL_CHANNEL_ID,
-      android_sound: "call_ringtone",
-      android_visibility: 1, // PUBLIC — show on lock screen
-      priority: 10,          // max urgency
-      ttl: 35,               // expire after 35 s if not delivered (call timeout)
-
-      // iOS: wake app in background for Firestore listener to pick up the call
-      content_available: true,
-      apns_push_type_background: "voip",
-
-      // Action buttons (Android only — deep-link handled in OneSignalHandler)
+      androidChannelId: CALL_CHANNEL_ID,
+      androidSound: "call_ringtone",
+      priority: 10,
+      ttl: 35,
+      contentAvailable: true,
       buttons: [
-        { id: "ACCEPT_CALL",  text: "✅ Accept" },
+        { id: "ACCEPT_CALL", text: "✅ Accept" },
         { id: "DECLINE_CALL", text: "❌ Decline" },
       ],
-    };
-
-    const res = await fetch("https://api.onesignal.com/notifications", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // v2 org keys use "Key" prefix (not "Basic")
-        Authorization: `Key ${ONESIGNAL_REST_API_KEY}`,
-      },
-      body: JSON.stringify(body),
     });
-
-    const json = await res.json();
-
-    if (json.errors) {
-      console.error("[CallNotifications] OneSignal error:", json.errors);
-    } else {
-      console.log(
-        `[CallNotifications] OneSignal call push sent → ${receiverId}`,
-        json
-      );
-    }
+    console.log("[CallNotifications] OneSignal call push sent:", result);
   } catch (e) {
     console.error("[CallNotifications] Failed to send OneSignal call notification:", e);
   }
