@@ -34,10 +34,11 @@ import {
   Platform, // **@** Added Platform import
   Appearance, // **@** Added Appearance for theme detection
   Animated, // **@** Added Animated for header mask gradient reveal on scroll
+  BackHandler,
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUser } from "../contexts/UserContext";
 import { useThemeToggle } from "../contexts/ThemeContext"; // **@** Added dynamic theme hook
 import { useLanguage } from "../contexts/LanguageContext"; // **@** Dynamic language hook
@@ -244,6 +245,17 @@ const SettingRowMemo = React.memo(function SettingRow({
 
 export default function ProfileSettings() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const topInset = useMemo(
+    () =>
+      insets.top > 0
+        ? insets.top
+        : Platform.OS === "android"
+        ? (StatusBar.currentHeight || 24)
+        : 44,
+    [insets.top]
+  );
+  const { language: activeLanguage, t: tr } = useLanguage();
 
   // **@** Snappy, instant navigation helper with minimal 200ms double-tap protection
   const isNavigatingRef = useRef(false);
@@ -304,7 +316,6 @@ export default function ProfileSettings() {
 
   const [tripCount, setTripCount] = useState(4);
   const [selectedLanguage, setSelectedLanguage] = useState("English (US)");
-  const { language: activeLanguage, t: tr } = useLanguage();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   useEffect(() => {
@@ -395,8 +406,8 @@ export default function ProfileSettings() {
   const headerMaskOpacity = useMemo(
     () =>
       scrollY.interpolate({
-        inputRange: [0, 15, 45],
-        outputRange: [0, 0.7, 1],
+        inputRange: [0, 16, 40],
+        outputRange: [0, 0.85, 1],
         extrapolate: "clamp",
       }),
     [scrollY]
@@ -700,6 +711,20 @@ export default function ProfileSettings() {
       router.replace("/(tabs)" as any);
     }
   };
+
+  // **@** Hardware back press listener for Android
+  useEffect(() => {
+    const backSub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (isSearching) {
+        setIsSearching(false);
+        setSearchQuery("");
+        return true;
+      }
+      handleInternalBack();
+      return true;
+    });
+    return () => backSub.remove();
+  }, [isSearching, handleInternalBack]);
 
 
   // =========================================================
@@ -2268,57 +2293,95 @@ export default function ProfileSettings() {
   // =========================================================
 
   return (
-    <SafeAreaView
-      style={[styles.container, { backgroundColor: colors.bg }]}
-      edges={["top", "left", "right"]}
-    >
+    <View style={[styles.container, { backgroundColor: colors.bg }]}>
       {renderDeveloperPasskeyModal()}
       <StatusBar
         barStyle={isDark ? "light-content" : "dark-content"}
-        backgroundColor={colors.bg}
+        backgroundColor="transparent"
+        translucent
       />
 
-      {/* **@** Top Header: Standard mode with back button, left-aligned title, and action buttons */}
+      {/* **@** Header Mask Gradient — Pinned to physical top edge BEHIND the header items */}
+      <Animated.View
+        style={[
+          styles.modernHeaderGradientMask,
+          {
+            height: topInset + (Platform.OS === "android" ? 6 : 4) + 48 + 24,
+            opacity: headerMaskOpacity,
+          },
+        ]}
+        pointerEvents="none"
+      >
+        <LinearGradient
+          colors={[
+            colors.bg,
+            colors.bg,
+            isDark ? "rgba(0, 0, 0, 0.96)" : "rgba(241, 241, 241, 0.96)",
+            isDark ? "rgba(0, 0, 0, 0.82)" : "rgba(241, 241, 241, 0.82)",
+            isDark ? "rgba(0, 0, 0, 0.50)" : "rgba(241, 241, 241, 0.50)",
+            isDark ? "rgba(0, 0, 0, 0.18)" : "rgba(241, 241, 241, 0.18)",
+            "transparent",
+          ]}
+          locations={[0, 0.44, 0.65, 0.78, 0.90, 0.96, 1.0]}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
+
+      {/* **@** Invisible Floating App Bar: Back arrow, Settings, QR, and Search stay in their exact positions floating on top */}
       {!isSearching ? (
-        <View style={styles.modernHeader}>
-          {/* **@** Left side: Back navigation button + Settings Title (UI/UX aligned) */}
+        <View
+          style={[
+            styles.modernHeader,
+            {
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: topInset + (Platform.OS === "android" ? 6 : 4),
+            },
+          ]}
+        >
+          {/* Left side: Back navigation button + Settings Title */}
           <View style={styles.modernHeaderLeft}>
             <Pressable
               style={({ pressed }) => [
                 styles.modernHeaderBtn,
-                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                { backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)" },
                 pressed && styles.pressed,
               ]}
               onPress={handleInternalBack}
               accessibilityLabel="Go back"
-              hitSlop={6}
+              hitSlop={8}
             >
               <Ionicons
                 name="arrow-back"
-                size={20}
+                size={21}
                 color={colors.textPrimary}
               />
             </Pressable>
 
             <Text
-              style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}
+              style={[
+                styles.modernHeaderTitle,
+                { color: colors.textPrimary, fontSize: Math.round(22 * dynamicFontScale) },
+              ]}
               numberOfLines={1}
             >
               {tr("Settings")}
             </Text>
           </View>
 
-          {/* **@** Action buttons (QR Code & Search) on the right */}
+          {/* Right side: Action buttons (QR Code & Search) */}
           <View style={styles.modernHeaderIcons}>
             {/* QR Code Action Button */}
             <Pressable
               style={({ pressed }) => [
                 styles.modernHeaderBtn,
-                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                { backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)" },
                 pressed && styles.pressed,
               ]}
               onPress={() => smoothNavigate("/qr-code")}
               accessibilityLabel="QR Code"
+              hitSlop={8}
             >
               <Ionicons
                 name="qr-code-outline"
@@ -2327,15 +2390,16 @@ export default function ProfileSettings() {
               />
             </Pressable>
 
-            {/* **@** Search Settings Action Button (Opens in-settings search) */}
+            {/* Search Settings Action Button */}
             <Pressable
               style={({ pressed }) => [
                 styles.modernHeaderBtn,
-                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                { backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)" },
                 pressed && styles.pressed,
               ]}
               onPress={() => setIsSearching(true)}
               accessibilityLabel="Search settings"
+              hitSlop={8}
             >
               <Ionicons
                 name="search-outline"
@@ -2346,7 +2410,15 @@ export default function ProfileSettings() {
           </View>
         </View>
       ) : (
-        <View style={styles.modernSearchHeader}>
+        <View
+          style={[
+            styles.modernSearchHeader,
+            {
+              top: topInset + (Platform.OS === "android" ? 6 : 4),
+              backgroundColor: colors.bg,
+            },
+          ]}
+        >
           <View
             style={[
               styles.modernSearchInputWrapper,
@@ -2404,28 +2476,16 @@ export default function ProfileSettings() {
         </View>
       )}
 
-      {/* **@** Header Mask Gradient that appears when sliding/scrolling the settings list */}
-      <Animated.View
-        style={[
-          styles.modernHeaderGradientMask,
-          { opacity: headerMaskOpacity },
-        ]}
-        pointerEvents="none"
-      >
-        <LinearGradient
-          colors={[
-            colors.bg,
-            isDark ? "rgba(0, 0, 0, 0.85)" : "rgba(241, 241, 241, 0.85)",
-            "transparent",
-          ]}
-          style={StyleSheet.absoluteFill}
-        />
-      </Animated.View>
-
       <Animated.ScrollView
         style={styles.modernScroll}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.modernScrollContent}
+        contentContainerStyle={[
+          styles.modernScrollContent,
+          {
+            paddingTop: topInset + (Platform.OS === "android" ? 6 : 4) + 48 + 14,
+            paddingBottom: insets.bottom + 40,
+          },
+        ]}
         keyboardShouldPersistTaps="handled"
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -2879,7 +2939,7 @@ export default function ProfileSettings() {
           router.replace("/(auth)/login" as any);
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -4956,13 +5016,13 @@ const styles = StyleSheet.create({
   // ==========================================================
 
   modernHeader: {
+    height: 48,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20, // **@** Equal 20px edge spacing as requested
-    paddingTop: Platform.OS === "android" ? 14 : 8,
-    paddingBottom: 8,
-    minHeight: 56,
+    zIndex: 20,
+    backgroundColor: "transparent", // **@** App bar container is completely invisible
   },
 
   // **@** Left container holding the back arrow and Settings title
@@ -4976,9 +5036,9 @@ const styles = StyleSheet.create({
   // **@** Settings title positioned to the right of the arrow with clean visual hierarchy
   modernHeaderTitle: {
     fontSize: 22,
-    fontWeight: "600", // **@** Refined semi-bold weight for modern UI/UX visual balance
-    letterSpacing: -0.3,
-    marginLeft: 14, // **@** Clear breathing space between arrow and title
+    fontWeight: "700", // **@** Industry-standard bold weight for modern UI/UX visual balance
+    letterSpacing: -0.4,
+    marginLeft: 12, // **@** Clear breathing space between arrow and title
   },
 
   modernHeaderIcons: {
@@ -4988,21 +5048,20 @@ const styles = StyleSheet.create({
   },
 
   modernHeaderBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
 
-  // **@** Header mask gradient pinned under header edge that reveals on scroll/slide
+  // **@** Header mask gradient pinned to top edge BEHIND floating header that dissolves content on scroll
   modernHeaderGradientMask: {
     position: "absolute",
-    top: Platform.OS === "android" ? 64 : 58,
+    top: 0,
     left: 0,
     right: 0,
-    height: 36,
     zIndex: 10,
   },
 
@@ -5030,6 +5089,7 @@ const styles = StyleSheet.create({
   },
 
   modernScrollContent: {
+    paddingTop: Platform.OS === "android" ? 74 : 66,
     paddingBottom: 40,
   },
 
@@ -5037,7 +5097,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginHorizontal: 20,
-    marginTop: 14,
+    marginTop: 0,
     padding: 16,
     borderRadius: 28,
     borderWidth: 0,
@@ -5197,18 +5257,21 @@ const styles = StyleSheet.create({
 
   // **@** In-Settings Search Styles
   modernSearchHeader: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 48,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20, // **@** Exact 20px padding from screen edge
-    paddingTop: Platform.OS === "android" ? 14 : 8,
-    paddingBottom: 8,
     gap: 12,
+    zIndex: 30,
   },
 
   modernSearchInputWrapper: {
     flex: 1,
-    height: 44,
-    borderRadius: 22,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 0,
     flexDirection: "row",
     alignItems: "center",
