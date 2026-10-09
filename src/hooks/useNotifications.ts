@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 export const useNotifications = () => {
+  // **@** Fixed for Expo Go SDK 53: any type used for notification state and skip push registration in Expo Go
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [notification, setNotification] = useState<any | null>(null);
   const [permissionGranted, setPermissionGranted] = useState(false);

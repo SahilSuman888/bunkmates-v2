@@ -1,5 +1,6 @@
 import { Platform, NativeModules } from "react-native";
-import Notifications from "./safeNotifications";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "./firebase";
 
 export const CALL_CHANNEL_ID = "bunkmates_call_ringtone_channel_v7";
 export const ONGOING_CALL_CHANNEL_ID = "bunkmates-ongoing-calls-v5";
@@ -8,13 +9,24 @@ export const MISSED_CALL_CHANNEL_ID = "bunkmates-missed-calls-v5";
 let activeIncomingNotificationId: string | null = null;
 let activeOngoingNotificationId: string | null = null;
 
+import safeNotifications, { isExpoGo } from "./safeNotifications";
+
+let notificationsAvailable = !isExpoGo;
+
+async function getNotifications() {
+  return safeNotifications;
+}
+
 /**
  * Configure dedicated notification channels and action categories for Android & iOS
  */
 export async function setupCallNotificationCategories() {
+  const N = await getNotifications();
+  if (!N) return;
+
   try {
     // 1. Set notification categories with action buttons
-    await Notifications.setNotificationCategoryAsync("incoming_call_category", [
+    await N.setNotificationCategoryAsync("incoming_call_category", [
       {
         identifier: "DECLINE_ACTION",
         buttonTitle: "Decline",
@@ -32,7 +44,7 @@ export async function setupCallNotificationCategories() {
       },
     ]);
 
-    await Notifications.setNotificationCategoryAsync("ongoing_call_category", [
+    await N.setNotificationCategoryAsync("ongoing_call_category", [
       {
         identifier: "OPEN_CALL_ACTION",
         buttonTitle: "📱 Open Call",
@@ -50,8 +62,7 @@ export async function setupCallNotificationCategories() {
       },
     ]);
 
-    // Screenshot 2: "Call back" and "Message"
-    await Notifications.setNotificationCategoryAsync("missed_call_category", [
+    await N.setNotificationCategoryAsync("missed_call_category", [
       {
         identifier: "CALLBACK_ACTION",
         buttonTitle: "Call back",
@@ -70,46 +81,42 @@ export async function setupCallNotificationCategories() {
 
     // 2. Android Channels Configuration
     if (Platform.OS === "android") {
-      // Incoming Calls: High-priority heads-up banner & ringtone channel (Screenshot 1)
-      await Notifications.setNotificationChannelAsync(CALL_CHANNEL_ID, {
+      // Incoming Calls: High-priority full-screen intent channel
+      await N.setNotificationChannelAsync(CALL_CHANNEL_ID, {
         name: "Incoming Calls",
-        description: "Heads-up banner alerts and ringtone for incoming voice & video calls",
-        importance: Notifications.AndroidImportance.MAX,
-        sound: "call_ringtone.wav",
-        audioAttributes: {
-          usage: Notifications?.AndroidAudioUsage?.RINGTONE ?? 6,
-          contentType: Notifications?.AndroidAudioContentType?.SONIFICATION ?? 4,
-        },
-        vibrationPattern: [0, 1000, 800, 1000, 800, 1000],
+        description: "Full-screen alerts and ringtones for incoming voice & video calls",
+        importance: N.AndroidImportance.MAX,
+        vibrationPattern: [0, 600, 300, 600, 300, 600],
+        sound: "default",
         enableVibrate: true,
         enableLights: true,
         lightColor: "#00e6b0",
-        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        lockscreenVisibility: N.AndroidNotificationVisibility.PUBLIC,
         bypassDnd: true,
         showBadge: true,
       });
 
       // Ongoing Calls: Foreground sticky channel
-      await Notifications.setNotificationChannelAsync(ONGOING_CALL_CHANNEL_ID, {
+      await N.setNotificationChannelAsync(ONGOING_CALL_CHANNEL_ID, {
         name: "Ongoing Calls",
         description: "Active call status and quick control actions",
-        importance: Notifications.AndroidImportance.HIGH,
+        importance: N.AndroidImportance.HIGH,
         sound: undefined,
         vibrationPattern: [0],
         enableLights: false,
-        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        lockscreenVisibility: N.AndroidNotificationVisibility.PUBLIC,
         bypassDnd: true,
         showBadge: false,
       });
 
-      // Missed Calls: Standard high priority alert channel (Screenshot 2)
-      await Notifications.setNotificationChannelAsync(MISSED_CALL_CHANNEL_ID, {
+      // Missed Calls: Standard high priority alert channel
+      await N.setNotificationChannelAsync(MISSED_CALL_CHANNEL_ID, {
         name: "Missed Calls",
         description: "Notifications for missed incoming calls",
-        importance: Notifications.AndroidImportance.HIGH,
+        importance: N.AndroidImportance.HIGH,
         sound: "default",
         enableVibrate: true,
-        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        lockscreenVisibility: N.AndroidNotificationVisibility.PUBLIC,
         showBadge: true,
       });
     }
@@ -126,16 +133,19 @@ export async function showLocalIncomingCallNotification(
   callType: "audio" | "video",
   callId: string
 ) {
+  const N = await getNotifications();
+  if (!N) return null;
+
   try {
     await setupCallNotificationCategories();
 
-    const notifId = await Notifications.scheduleNotificationAsync({
+    const notifId = await N.scheduleNotificationAsync({
       content: {
         title: callType === "video" ? "📹 Incoming HD Video Call" : "📞 Incoming Voice Call",
         body: `${callerName} is calling you on BunkMates...`,
         data: { type: "call", callId, callType, callerName },
         sound: "default",
-        priority: Notifications.AndroidNotificationPriority.MAX,
+        priority: N.AndroidNotificationPriority.MAX,
         autoDismiss: false,
         sticky: true,
         categoryIdentifier: "incoming_call_category",
@@ -161,10 +171,13 @@ export async function showOngoingCallNotification(
   callId: string,
   formattedDuration: string
 ) {
+  const N = await getNotifications();
+  if (!N) return null;
+
   try {
     await setupCallNotificationCategories();
 
-    const notifId = await Notifications.scheduleNotificationAsync({
+    const notifId = await N.scheduleNotificationAsync({
       identifier: `ongoing_${callId}`,
       content: {
         title: `Ongoing ${callType === "video" ? "Video" : "Voice"} Call (${formattedDuration})`,
@@ -172,7 +185,7 @@ export async function showOngoingCallNotification(
         data: { type: "ongoing_call", callId, callType },
         sticky: true,
         autoDismiss: false,
-        priority: Notifications.AndroidNotificationPriority.HIGH,
+        priority: N.AndroidNotificationPriority.HIGH,
         categoryIdentifier: "ongoing_call_category",
         color: "#00e6b0",
       },
@@ -191,21 +204,24 @@ export async function showOngoingCallNotification(
  * Cancel the active incoming and ongoing call notifications
  */
 export async function cancelCallNotification(callId?: string) {
+  const N = await getNotifications();
+  if (!N) return;
+
   try {
     if (Platform.OS === "android" && NativeModules.BunkMatesRingtone) {
       NativeModules.BunkMatesRingtone.stop(callId || "");
     }
 
     if (activeIncomingNotificationId) {
-      await Notifications.dismissNotificationAsync(activeIncomingNotificationId);
+      await N.dismissNotificationAsync(activeIncomingNotificationId);
       activeIncomingNotificationId = null;
     }
     if (activeOngoingNotificationId) {
-      await Notifications.dismissNotificationAsync(activeOngoingNotificationId);
+      await N.dismissNotificationAsync(activeOngoingNotificationId);
       activeOngoingNotificationId = null;
     }
     if (callId) {
-      await Notifications.dismissNotificationAsync(`ongoing_${callId}`);
+      await N.dismissNotificationAsync(`ongoing_${callId}`);
     }
   } catch (e) {}
 }
@@ -219,17 +235,20 @@ export async function showMissedCallNotification(
   callerId?: string,
   callerAvatar?: string
 ) {
+  const N = await getNotifications();
+  if (!N) return;
+
   try {
     await cancelCallNotification();
     await setupCallNotificationCategories();
 
-    await Notifications.scheduleNotificationAsync({
+    await N.scheduleNotificationAsync({
       content: {
         title: callerName, // Matches Screenshot 2: "Mummy"
         body: `1 missed ${callType} call`, // Matches Screenshot 2: "1 missed voice call"
         data: { type: "missed_call", callerId, callerName, callerAvatar, callType },
         sound: "default",
-        priority: Notifications.AndroidNotificationPriority.HIGH,
+        priority: N.AndroidNotificationPriority.HIGH,
         categoryIdentifier: "missed_call_category",
         color: "#ff5252",
       },
