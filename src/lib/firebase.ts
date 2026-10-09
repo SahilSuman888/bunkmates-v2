@@ -4,9 +4,13 @@ import {
   // @ts-ignore
   getReactNativePersistence
 } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, setLogLevel } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+
+try {
+  setLogLevel("silent");
+} catch {}
 
 const firebaseConfig = {
   apiKey: "AIzaSyCP_l2uREbRMcV6aHhB8yZXK7NdGNltxpA",

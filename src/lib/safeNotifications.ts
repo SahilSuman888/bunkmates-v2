@@ -1,13 +1,13 @@
 import Constants from "expo-constants";
 
+export const isExpoGo =
+  Constants.appOwnership === "expo" ||
+  (Constants as any).executionEnvironment === "storeClient";
+
 let NotificationsModule: any = null;
 
 try {
   // Remote push notifications in expo-notifications throw an error in Expo Go on SDK 53+
-  const isExpoGo =
-    Constants.appOwnership === "expo" ||
-    (Constants as any).executionEnvironment === "storeClient";
-
   if (!isExpoGo) {
     NotificationsModule = require("expo-notifications");
   }

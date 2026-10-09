@@ -24,8 +24,6 @@ import {
   query,
   where,
 } from "firebase/firestore";
-// **@** Import Animated and FadeIn from react-native-reanimated
-import Animated, { FadeIn } from "react-native-reanimated";
 import { MotiView } from "moti";
 import placesData from "./data/data.json";
 

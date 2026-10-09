@@ -1,20 +1,8 @@
-import Notifications from "./safeNotifications";
 import { Platform } from "react-native";
-
-// **@** Fixed for Expo Go SDK 53: expo-notifications Android Push support removed from Expo Go.
-// Lazy-load to prevent crash in Expo Go; works fully in dev/prod builds.
-let Notifications: typeof import("expo-notifications") | null = null;
+import safeNotifications from "./safeNotifications";
 
 async function getNotifications() {
-  if (Notifications !== null) return Notifications;
-  try {
-    Notifications = await import("expo-notifications");
-  } catch (e) {
-    console.warn(
-      "[PreviewNotification] expo-notifications not available (Expo Go). Notifications disabled."
-    );
-  }
-  return Notifications;
+  return safeNotifications;
 }
 
 export async function setupPreviewNotifications() {

@@ -581,10 +581,25 @@ export default function CreateTripSheet({
   visible,
   onClose,
   initialPlace,
+  initialTripData,
 }: {
   visible: boolean;
   onClose: () => void;
   initialPlace?: any;
+  initialTripData?: {
+    name?: string;
+    from?: string;
+    to?: string;
+    location?: string;
+    startDate?: string;
+    endDate?: string;
+    travelType?: string;
+    budget?: string | number;
+    iconURL?: string;
+    description?: string;
+    destCoords?: [number, number];
+    originCoords?: [number, number];
+  } | null;
 }) {
   const insets = useSafeAreaInsets();
   const user = auth.currentUser;
@@ -677,6 +692,40 @@ export default function CreateTripSheet({
     }
   }, [visible, initialPlace]);
 
+  /* ── Prefill from initialTripData (e.g. AI Suggested Trip) ── */
+  useEffect(() => {
+    if (visible && initialTripData) {
+      setActiveStep(0);
+      if (initialTripData.name) setTripName(initialTripData.name);
+      if (initialTripData.from) setFromLocation(initialTripData.from);
+      if (initialTripData.to) setToLocation(initialTripData.to);
+      if (initialTripData.startDate) setStartDate(initialTripData.startDate);
+      if (initialTripData.endDate) setEndDate(initialTripData.endDate);
+      if (initialTripData.budget) setTotalBudget(String(initialTripData.budget));
+      if (initialTripData.iconURL) setIconURL(initialTripData.iconURL);
+      if (initialTripData.description) setTripDescription(initialTripData.description);
+      if (initialTripData.destCoords) {
+        setDestCoords(initialTripData.destCoords);
+        setMapCenter(initialTripData.destCoords);
+      }
+      if (initialTripData.originCoords) {
+        setOriginCoords(initialTripData.originCoords);
+      }
+      const bNum = parseFloat(String(initialTripData.budget)) || 0;
+      if (user) {
+        setActiveMembers([
+          {
+            uid: user.uid,
+            name: user.displayName || "You",
+            username: user.email?.split("@")[0] || "you",
+            photoURL: user.photoURL || `https://api.dicebear.com/7.x/identicon/png?seed=${user.uid}`,
+            contribution: bNum,
+          },
+        ]);
+      }
+    }
+  }, [visible, initialTripData, user]);
+
   const [isLocating, setIsLocating] = useState(false);
 
   /* ── Trigger "Use My Current Location" ── */
@@ -720,10 +769,10 @@ export default function CreateTripSheet({
 
   /* ── Auto-resolve GPS Location on mount ── */
   useEffect(() => {
-    if (visible && !fromLocation) {
+    if (visible && !fromLocation && !initialTripData?.from) {
       handleUseCurrentLocation();
     }
-  }, [visible]);
+  }, [visible, initialTripData]);
 
   /* ── Fetch Friends for Step 4 ── */
   useEffect(() => {
@@ -875,7 +924,7 @@ export default function CreateTripSheet({
 
   /* ── Auto AI Trip Name & Description Suggestions ── */
   useEffect(() => {
-    if (fromLocation && toLocation) {
+    if (fromLocation && toLocation && !initialTripData) {
       const cleanFrom = fromLocation.split(",")[0].trim();
       const cleanTo = toLocation.split(",")[0].trim();
       if (!tripName || tripName.includes("Adventure") || tripName.includes("Trip")) {
@@ -887,7 +936,7 @@ export default function CreateTripSheet({
         );
       }
     }
-  }, [fromLocation, toLocation]);
+  }, [fromLocation, toLocation, initialTripData]);
 
   /* ── Generate Day-by-day Timeline and Checklist ── */
   const generateTimelineAndChecklist = () => {

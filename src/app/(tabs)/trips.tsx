@@ -15,6 +15,8 @@ import {
   Animated,
   Alert,
   Linking,
+  PanResponder,
+  Easing,
 } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import * as FileSystem from "expo-file-system";
@@ -30,6 +32,8 @@ import {
   doc,
   getDoc,
   deleteDoc,
+  addDoc,
+  setDoc,
 } from "firebase/firestore";
 import { db, auth } from "../../lib/firebase";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -42,7 +46,7 @@ import { BlurView } from "expo-blur";
 import Svg, { Circle } from "react-native-svg";
 import { useUserGroups } from "../../hooks/useUserGroups";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 /* ──────── Types ──────── */
 
@@ -84,7 +88,7 @@ const isSameDay = (d1: Date, d2: Date) =>
   d1.getDate() === d2.getDate();
 
 const getTripAccent = (id: string) => {
-  const colors = ["#4A90D9", "#ffffff", "#FBBF24"];
+  const colors = ["#ffffff", "#e2e8f0", "#FBBF24"];
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
@@ -192,7 +196,34 @@ export default function TripsScreen() {
   const [pinnedTripIds, setPinnedTripIds] = useState<string[]>([]);
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date>(new Date());
 
+  /* ── 3-Trip Limit & Load More State ── */
+  const INITIAL_TRIP_LIMIT = 3;
+  const [visibleTripsCount, setVisibleTripsCount] = useState<number>(INITIAL_TRIP_LIMIT);
+
+  // Automatically reset to initial 3 trips when filters, search, or active tab change
+  useEffect(() => {
+    setVisibleTripsCount(INITIAL_TRIP_LIMIT);
+  }, [searchQuery, filterPlace, filterStartDate, filterEndDate, activeTab]);
+
   const detailsAnim = useRef(new Animated.Value(0)).current;
+  const panY = useRef(new Animated.Value(0)).current;
+  const modalScrollOffset = useRef(0);
+  const mainScrollY = useRef(new Animated.Value(0)).current;
+
+  /* ── Calendar Drawer (Instagram Stories Archive style) ── */
+  const [calendarDrawerOpen, setCalendarDrawerOpen] = useState(false);
+  const [archiveMonthOffset, setArchiveMonthOffset] = useState(0);
+  const [selectedArchiveTrip, setSelectedArchiveTrip] = useState<TripData | null>(null);
+  const calendarDrawerAnim = useRef(new Animated.Value(0)).current;
+  const calendarDrawerPanY = useRef(new Animated.Value(0)).current;
+  const calendarDrawerScrollOffset = useRef(0);
+
+  /* ── AI Suggested Trips State ── */
+  const [suggestedModalOpen, setSuggestedModalOpen] = useState(false);
+  const [visibleSuggestedCount, setVisibleSuggestedCount] = useState(3);
+  const [prefilledTripData, setPrefilledTripData] = useState<any>(null);
+  const suggestedModalAnim = useRef(new Animated.Value(0)).current;
+  const suggestedPanY = useRef(new Animated.Value(0)).current;
 
   /* ── Open create sheet from params ── */
   useEffect(() => {
@@ -227,7 +258,7 @@ export default function TripsScreen() {
             setTrips(parsed);
             setLoading(false);
           }
-        } catch (e) {}
+        } catch (e) { }
       }
     });
 
@@ -339,7 +370,7 @@ export default function TripsScreen() {
         );
         setTrips(fetchedTrips);
         setLoading(false);
-        AsyncStorage.setItem(`bunkmate.cachedTrips.${user.uid}`, JSON.stringify(fetchedTrips)).catch(() => {});
+        AsyncStorage.setItem(`bunkmate.cachedTrips.${user.uid}`, JSON.stringify(fetchedTrips)).catch(() => { });
       },
       () => setLoading(false)
     );
@@ -505,6 +536,13 @@ export default function TripsScreen() {
     today,
     parseFlexibleDate,
   ]);
+
+  const displayedTrips = useMemo(() => {
+    return filteredTrips.slice(0, visibleTripsCount);
+  }, [filteredTrips, visibleTripsCount]);
+
+  const remainingTripsCount = Math.max(0, filteredTrips.length - visibleTripsCount);
+  const hasMoreTrips = remainingTripsCount > 0;
 
   /* ── Dynamic Calendar Days ── */
   const calendarDays = useMemo(() => {
@@ -694,29 +732,711 @@ export default function TripsScreen() {
     }
   };
 
-  /* ── Details Modal Animations ── */
-  const openDetailsModal = (trip: TripData) => {
-    const resolvedImage = getTripDisplayImage(trip);
-    setSelectedTrip({ ...trip, iconURL: resolvedImage });
-    setDetailsModalOpen(true);
-    Animated.spring(detailsAnim, {
-      toValue: 1,
-      damping: 18,
-      stiffness: 220,
-      mass: 0.8,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const closeDetailsModal = () => {
-    Animated.timing(detailsAnim, {
-      toValue: 0,
-      duration: 180,
-      useNativeDriver: true,
-    }).start(() => {
+  /* ── Details Modal Fluid Animations & Gesture Mechanics ── */
+  const dismissModalWithAnimation = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(panY, {
+        toValue: SCREEN_HEIGHT,
+        duration: 280,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        useNativeDriver: true,
+      }),
+      Animated.timing(detailsAnim, {
+        toValue: 0,
+        duration: 280,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
       setDetailsModalOpen(false);
       setSelectedTrip(null);
+      panY.setValue(0);
+      detailsAnim.setValue(0);
+      modalScrollOffset.current = 0;
     });
+  }, [detailsAnim, panY]);
+
+  const closeDetailsModal = useCallback(() => {
+    dismissModalWithAnimation();
+  }, [dismissModalWithAnimation]);
+
+  const openDetailsModal = useCallback(
+    (trip: TripData) => {
+      const resolvedImage = getTripDisplayImage(trip);
+      setSelectedTrip({ ...trip, iconURL: resolvedImage });
+      panY.setValue(0);
+      modalScrollOffset.current = 0;
+      detailsAnim.setValue(0);
+      setDetailsModalOpen(true);
+      requestAnimationFrame(() => {
+        Animated.spring(detailsAnim, {
+          toValue: 1,
+          damping: 24,
+          stiffness: 190,
+          mass: 0.9,
+          useNativeDriver: true,
+        }).start();
+      });
+    },
+    [getTripDisplayImage, detailsAnim, panY]
+  );
+
+  // Dedicated PanResponder for the top visual pull handle (instant, guaranteed response)
+  const handlePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          panY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 70 || gestureState.vy > 0.4) {
+          dismissModalWithAnimation();
+        } else {
+          Animated.spring(panY, {
+            toValue: 0,
+            damping: 24,
+            stiffness: 300,
+            mass: 0.8,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  // Container PanResponder for swiping down from the cards when scroll is at top
+  const containerPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+        return (
+          modalScrollOffset.current <= 0 &&
+          gestureState.dy > 8 &&
+          Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3
+        );
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          panY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 80 || gestureState.vy > 0.4) {
+          dismissModalWithAnimation();
+        } else {
+          Animated.spring(panY, {
+            toValue: 0,
+            damping: 24,
+            stiffness: 300,
+            mass: 0.8,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  const modalTranslateY = Animated.add(
+    detailsAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [SCREEN_HEIGHT, 0],
+    }),
+    panY
+  );
+
+  const modalScale = panY.interpolate({
+    inputRange: [0, SCREEN_HEIGHT],
+    outputRange: [1, 0.88],
+    extrapolate: "clamp",
+  });
+
+  const backdropFade = panY.interpolate({
+    inputRange: [0, SCREEN_HEIGHT * 0.7],
+    outputRange: [1, 0.15],
+    extrapolate: "clamp",
+  });
+
+  /* ── Calendar Drawer (Instagram Stories Archive style) Handlers ── */
+  const closeCalendarDrawer = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(calendarDrawerPanY, {
+        toValue: SCREEN_HEIGHT,
+        duration: 260,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        useNativeDriver: true,
+      }),
+      Animated.timing(calendarDrawerAnim, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setCalendarDrawerOpen(false);
+      setSelectedArchiveTrip(null);
+      calendarDrawerPanY.setValue(0);
+      calendarDrawerAnim.setValue(0);
+      calendarDrawerScrollOffset.current = 0;
+    });
+  }, [calendarDrawerAnim, calendarDrawerPanY]);
+
+  const openCalendarDrawer = useCallback(() => {
+    calendarDrawerPanY.setValue(0);
+    calendarDrawerAnim.setValue(0);
+    setSelectedArchiveTrip(null);
+    calendarDrawerScrollOffset.current = 0;
+    setCalendarDrawerOpen(true);
+    requestAnimationFrame(() => {
+      Animated.spring(calendarDrawerAnim, {
+        toValue: 1,
+        damping: 24,
+        stiffness: 190,
+        mass: 0.9,
+        useNativeDriver: true,
+      }).start();
+    });
+  }, [calendarDrawerAnim, calendarDrawerPanY]);
+
+  const calendarHandlePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          calendarDrawerPanY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 70 || gestureState.vy > 0.4) {
+          closeCalendarDrawer();
+        } else {
+          Animated.spring(calendarDrawerPanY, {
+            toValue: 0,
+            damping: 24,
+            stiffness: 300,
+            mass: 0.8,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  const calendarDrawerPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+        return (
+          calendarDrawerScrollOffset.current <= 0 &&
+          gestureState.dy > 8 &&
+          Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3
+        );
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          calendarDrawerPanY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 80 || gestureState.vy > 0.4) {
+          closeCalendarDrawer();
+        } else {
+          Animated.spring(calendarDrawerPanY, {
+            toValue: 0,
+            damping: 24,
+            stiffness: 300,
+            mass: 0.8,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  // Swiping down on horizontal calendar strip triggers the calendar drawer!
+  const calStripPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+        // Capture immediately when pulling down so inner horizontal ScrollView does not intercept it
+        return gestureState.dy > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.1;
+      },
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return gestureState.dy > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.1;
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 12 || gestureState.vy > 0.3) {
+          openCalendarDrawer();
+        }
+      },
+    })
+  ).current;
+
+  // Vibrant scenic background wallpaper for ambient blur (matches User Image 2)
+  const calendarBackgroundImage = useMemo(() => {
+    if (selectedTrip) return getTripDisplayImage(selectedTrip);
+    if (trips.length > 0 && trips[0]) return getTripDisplayImage(trips[0]);
+    return "https://images.unsplash.com/photo-1506461883276-594a12b11cf3?q=80&w=1200&auto=format&fit=crop";
+  }, [selectedTrip, trips, getTripDisplayImage]);
+
+  const calendarDrawerTranslateY = Animated.add(
+    calendarDrawerAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [SCREEN_HEIGHT, 0],
+    }),
+    calendarDrawerPanY
+  );
+
+  const calendarDrawerScale = calendarDrawerPanY.interpolate({
+    inputRange: [0, SCREEN_HEIGHT],
+    outputRange: [1, 0.88],
+    extrapolate: "clamp",
+  });
+
+  const calendarBackdropFade = calendarDrawerPanY.interpolate({
+    inputRange: [0, SCREEN_HEIGHT * 0.7],
+    outputRange: [1, 0.15],
+    extrapolate: "clamp",
+  });
+
+  /* ── Instagram-Style Travel Archive Calendar Data ── */
+  const currentArchiveDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + archiveMonthOffset);
+    return d;
+  }, [archiveMonthOffset]);
+
+  const archiveMonthTitle = useMemo(() => {
+    return currentArchiveDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  }, [currentArchiveDate]);
+
+  const archiveGridDays = useMemo(() => {
+    const year = currentArchiveDate.getFullYear();
+    const month = currentArchiveDate.getMonth();
+    const firstDay = new Date(year, month, 1).getDay(); // 0 = Sun
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const grid: ({ dayNum: number; date: Date } | null)[] = [];
+    for (let i = 0; i < firstDay; i++) {
+      grid.push(null);
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      grid.push({ dayNum: d, date: new Date(year, month, d) });
+    }
+    return grid;
+  }, [currentArchiveDate]);
+
+  const getTripForArchiveDate = useCallback(
+    (date: Date): TripData | null => {
+      const target = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+      return (
+        trips.find((t) => {
+          if (!t.startDate) return false;
+          const st = parseFlexibleDate(t.startDate);
+          if (!st) return false;
+          const et = t.endDate ? parseFlexibleDate(t.endDate) || st : st;
+          const sTime = new Date(st.getFullYear(), st.getMonth(), st.getDate()).getTime();
+          const eTime = new Date(et.getFullYear(), et.getMonth(), et.getDate()).getTime();
+          return target >= sTime && target <= eTime;
+        }) || null
+      );
+    },
+    [trips, parseFlexibleDate]
+  );
+
+  /* ── AI Suggested Trips Handlers ── */
+  const closeSuggestedModal = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(suggestedPanY, {
+        toValue: SCREEN_HEIGHT,
+        duration: 250,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        useNativeDriver: true,
+      }),
+      Animated.timing(suggestedModalAnim, {
+        toValue: 0,
+        duration: 250,
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setSuggestedModalOpen(false);
+      suggestedPanY.setValue(0);
+      suggestedModalAnim.setValue(0);
+    });
+  }, [suggestedModalAnim, suggestedPanY]);
+
+  const openSuggestedModal = useCallback(() => {
+    suggestedPanY.setValue(0);
+    suggestedModalAnim.setValue(0);
+    setSuggestedModalOpen(true);
+    requestAnimationFrame(() => {
+      Animated.spring(suggestedModalAnim, {
+        toValue: 1,
+        damping: 24,
+        stiffness: 200,
+        mass: 0.9,
+        useNativeDriver: true,
+      }).start();
+    });
+  }, [suggestedModalAnim, suggestedPanY]);
+
+  const suggestedScrollOffset = useRef(0);
+
+  const suggestedHandlePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          suggestedPanY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 70 || gestureState.vy > 0.4) {
+          closeSuggestedModal();
+        } else {
+          Animated.spring(suggestedPanY, {
+            toValue: 0,
+            damping: 24,
+            stiffness: 300,
+            mass: 0.8,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  const suggestedContainerPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return (
+          suggestedScrollOffset.current <= 0 &&
+          gestureState.dy > 12 &&
+          Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3
+        );
+      },
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+        return (
+          suggestedScrollOffset.current <= 0 &&
+          gestureState.dy > 12 &&
+          Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3
+        );
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          suggestedPanY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 80 || gestureState.vy > 0.4) {
+          closeSuggestedModal();
+        } else {
+          Animated.spring(suggestedPanY, {
+            toValue: 0,
+            damping: 24,
+            stiffness: 300,
+            mass: 0.8,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  const suggestedModalTranslateY = Animated.add(
+    suggestedModalAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [SCREEN_HEIGHT, 0],
+    }),
+    suggestedPanY
+  );
+
+  const suggestedModalScale = suggestedPanY.interpolate({
+    inputRange: [0, SCREEN_HEIGHT],
+    outputRange: [1, 0.88],
+    extrapolate: "clamp",
+  });
+
+  const suggestedBackdropFade = suggestedPanY.interpolate({
+    inputRange: [0, SCREEN_HEIGHT * 0.7],
+    outputRange: [1, 0.15],
+    extrapolate: "clamp",
+  });
+
+  /* ── AI Analysis for Genuine Suggested Trips based on User Past Trips ── */
+  const suggestedTripsData = useMemo(() => {
+    let totalBudgetSum = 0;
+    let budgetCount = 0;
+    const typeFreq: Record<string, number> = {};
+    const fromFreq: Record<string, number> = {};
+    const visitedKeywords: string[] = [];
+
+    trips.forEach((t) => {
+      if (t.travelType) {
+        typeFreq[t.travelType] = (typeFreq[t.travelType] || 0) + 1;
+      }
+      if (t.from) {
+        const city = t.from.split(",")[0].trim();
+        if (city) fromFreq[city] = (fromFreq[city] || 0) + 1;
+      }
+      const text = `${t.name || ""} ${t.location || ""} ${t.to || ""}`.toLowerCase();
+      visitedKeywords.push(text);
+
+      const b = t.budget?.total || parseFloat(t.budget as any) || 0;
+      if (b > 0) {
+        totalBudgetSum += b;
+        budgetCount++;
+      }
+    });
+
+    // Detect user's main origin city from past trips (e.g. Jaipur, Delhi, Mumbai)
+    let originCity = "Jaipur";
+    let maxFromCount = 0;
+    Object.entries(fromFreq).forEach(([city, count]) => {
+      if (count > maxFromCount) {
+        maxFromCount = count;
+        originCity = city;
+      }
+    });
+
+    const avgBudget = budgetCount > 0 ? Math.round(totalBudgetSum / budgetCount) : 18000;
+
+    let favType = "Adventure";
+    let maxC = 0;
+    Object.entries(typeFreq).forEach(([tp, c]) => {
+      if (c > maxC) {
+        maxC = c;
+        favType = tp;
+      }
+    });
+
+    const allVisited = visitedKeywords.join(" ");
+    const likesRajasthan =
+      allVisited.includes("jaipur") ||
+      allVisited.includes("udaipur") ||
+      allVisited.includes("jodhpur") ||
+      allVisited.includes("rajasthan") ||
+      allVisited.includes("bunk");
+    const likesMountains =
+      allVisited.includes("manali") ||
+      allVisited.includes("shimla") ||
+      allVisited.includes("kasol") ||
+      allVisited.includes("spiti") ||
+      allVisited.includes("himachal") ||
+      allVisited.includes("mountain");
+    const likesUttarakhand =
+      allVisited.includes("rishikesh") ||
+      allVisited.includes("dehradun") ||
+      allVisited.includes("mussoorie") ||
+      allVisited.includes("uttarakhand");
+
+    const curatedList = [
+      {
+        id: "sug-jaisalmer",
+        name: "Jaisalmer Desert & Sam Dunes Safari",
+        location: "Jaisalmer, Rajasthan",
+        from: originCity,
+        to: "Jaisalmer & Thar Desert",
+        travelType: "Heritage & Desert",
+        budget: Math.max(12000, Math.round(avgBudget * 0.95)),
+        days: 4,
+        coords: [26.9157, 70.9083],
+        originCoords: [26.9124, 75.7873],
+        image: "https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?q=80&w=800&auto=format&fit=crop",
+        insight: `Analyzed from your Rajasthan trips • Camel safari & Thar desert camp fitting your ₹${avgBudget.toLocaleString()} budget`,
+      },
+      {
+        id: "sug-jibhi",
+        name: "Jibhi & Tirthan Valley Riverside Escape",
+        location: "Tirthan Valley, Himachal Pradesh",
+        from: originCity === "Jaipur" ? "Delhi" : originCity,
+        to: "Jibhi & Great Himalayan National Park",
+        travelType: "Nature & Mountains",
+        budget: Math.max(13000, Math.round(avgBudget * 0.95)),
+        days: 4,
+        coords: [31.6375, 77.3820],
+        originCoords: [28.6139, 77.2090],
+        image: "https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?q=80&w=800&auto=format&fit=crop",
+        insight: `Pine forests, trout stream wooden huts & Jalori Pass • Perfect fresh mountain circuit`,
+      },
+      {
+        id: "sug-rishikesh",
+        name: "Rishikesh Rapids & Shivpuri River Camp",
+        location: "Rishikesh, Uttarakhand",
+        from: originCity === "Jaipur" ? "Delhi" : originCity,
+        to: "Rishikesh & Ganga Valley",
+        travelType: "Adventure & Rapids",
+        budget: Math.max(9000, Math.round(avgBudget * 0.75)),
+        days: 3,
+        coords: [30.1348, 78.3888],
+        originCoords: [28.6139, 77.2090],
+        image: "https://images.unsplash.com/photo-1530507629858-e4977d30e9e0?q=80&w=800&auto=format&fit=crop",
+        insight: `Grade-3 white-water rafting & cliff jumping • High energy adventure for your squad`,
+      },
+      {
+        id: "sug-kumbhalgarh",
+        name: "Kumbhalgarh Citadel & Ranakpur Valley",
+        location: "Kumbhalgarh, Rajasthan",
+        from: originCity,
+        to: "Kumbhalgarh & Ranakpur",
+        travelType: "Heritage & Scenic",
+        budget: Math.max(10000, Math.round(avgBudget * 0.85)),
+        days: 3,
+        coords: [25.1479, 73.5872],
+        originCoords: [26.9124, 75.7873],
+        image: "https://images.unsplash.com/photo-1599661046289-e31897846e41?q=80&w=800&auto=format&fit=crop",
+        insight: `Great Wall of India & lush Aravalli fortress trail • Matches your comfort spend`,
+      },
+      {
+        id: "sug-gokarna",
+        name: "Gokarna Coastal Trail & Kudle Sunsets",
+        location: "Gokarna, Karnataka",
+        from: "Goa",
+        to: "Gokarna Beach Trail",
+        travelType: "Coastal & Relaxation",
+        budget: Math.max(14000, Math.round(avgBudget * 1.05)),
+        days: 4,
+        coords: [14.5479, 74.3188],
+        originCoords: [15.2993, 74.1240],
+        image: "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?q=80&w=800&auto=format&fit=crop",
+        insight: `Cliffside beach treks & relaxed sea shacks • Fits your preferred relaxed journey pace`,
+      },
+      {
+        id: "sug-spiti",
+        name: "Spiti High-Pass Trans-Himalayan Circuit",
+        location: "Spiti Valley, Himachal Pradesh",
+        from: originCity === "Jaipur" ? "Delhi" : originCity,
+        to: "Kaza & Chandratal Lake",
+        travelType: "High Altitude Adventure",
+        budget: Math.max(16000, Math.round(avgBudget * 1.15)),
+        days: 6,
+        coords: [32.2461, 78.0349],
+        originCoords: [28.6139, 77.2090],
+        image: "https://images.unsplash.com/photo-1587474260584-136574528ed5?q=80&w=800&auto=format&fit=crop",
+        insight: `Key Monastery & highest postal post at Hikkim • Grand trans-Himalayan route`,
+      },
+      {
+        id: "sug-chopta",
+        name: "Chopta Tungnath & Chandrashila Ridge",
+        location: "Chopta, Uttarakhand",
+        from: originCity === "Jaipur" ? "Delhi" : originCity,
+        to: "Chopta & Tungnath Peak",
+        travelType: "Alpine Trek & Nature",
+        budget: Math.max(11000, Math.round(avgBudget * 0.85)),
+        days: 4,
+        coords: [30.4854, 79.1764],
+        originCoords: [28.6139, 77.2090],
+        image: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=800&auto=format&fit=crop",
+        insight: `Mini Switzerland of Uttarakhand & highest Shiva shrine • 360° summit views`,
+      },
+      {
+        id: "sug-varkala",
+        name: "Varkala Cliff & Alleppey Backwaters",
+        location: "Varkala, Kerala",
+        from: "Kochi",
+        to: "Varkala Cliff & Backwater Lagoon",
+        travelType: "Coastal & Tropical",
+        budget: Math.max(15000, Math.round(avgBudget * 1.1)),
+        days: 5,
+        coords: [8.7379, 76.7163],
+        originCoords: [9.9312, 76.2673],
+        image: "https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?q=80&w=800&auto=format&fit=crop",
+        insight: `Red laterite cliffs, sunset ocean cafes & private houseboat lagoons`,
+      },
+      {
+        id: "sug-pushkar",
+        name: "Pushkar Sacred Ghats & Desert Glamping",
+        location: "Pushkar, Rajasthan",
+        from: originCity,
+        to: "Pushkar Ghats & Thar Desert",
+        travelType: "Heritage & Culture",
+        budget: Math.max(8000, Math.round(avgBudget * 0.7)),
+        days: 3,
+        coords: [26.4897, 74.5511],
+        originCoords: [26.9124, 75.7873],
+        image: "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?q=80&w=800&auto=format&fit=crop",
+        insight: `Sacred lake ghats, camel safaris & peaceful sunset ridge viewpoints`,
+      },
+      {
+        id: "sug-coorg",
+        name: "Coorg Coffee Highlands & Abbey Falls",
+        location: "Coorg, Karnataka",
+        from: "Bengaluru",
+        to: "Madikeri & Coffee Plantations",
+        travelType: "Misty Hills & Nature",
+        budget: Math.max(12000, Math.round(avgBudget * 0.9)),
+        days: 3,
+        coords: [12.4244, 75.7382],
+        originCoords: [12.9716, 77.5946],
+        image: "https://images.unsplash.com/photo-1544735716-392fe2489ffa?q=80&w=800&auto=format&fit=crop",
+        insight: `Aroma spice plantations, misty morning waterfalls & Western Ghats greenery`,
+      },
+    ];
+
+    return {
+      list: curatedList.slice(0, visibleSuggestedCount),
+      totalCount: curatedList.length,
+      hasMore: visibleSuggestedCount < curatedList.length,
+      avgBudget,
+      favType,
+      originCity,
+    };
+  }, [trips, visibleSuggestedCount]);
+
+  /* ── Open Create Trip Sheet with Pre-filled Suggested Trip Data ── */
+  const handleOpenCreateWithSuggestion = (suggestion: any) => {
+    const start = new Date();
+    start.setDate(start.getDate() + 14);
+    const end = new Date(start);
+    end.setDate(end.getDate() + (suggestion.days || 4));
+
+    // Must be YYYY-MM-DD for CreateTripSheet calendar & state
+    const toYMD = (d: Date) => {
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}`;
+    };
+
+    setPrefilledTripData({
+      name: suggestion.name,
+      from: suggestion.from,
+      to: suggestion.to,
+      location: suggestion.location,
+      startDate: toYMD(start),
+      endDate: toYMD(end),
+      budget: suggestion.budget.toString(),
+      iconURL: suggestion.image,
+      travelType: suggestion.travelType,
+      destCoords: suggestion.coords || null,
+      originCoords: suggestion.originCoords || null,
+      description: `Curated ${suggestion.travelType} adventure to ${suggestion.to}. ${suggestion.insight || ""}`,
+    });
+
+    // Close suggested modal immediately to clear Android modal window stack
+    setSuggestedModalOpen(false);
+    suggestedPanY.setValue(0);
+    suggestedModalAnim.setValue(0);
+
+    // Mount CreateTripSheet smoothly without native modal collision
+    setTimeout(() => {
+      setCreateSheetOpen(true);
+    }, 120);
   };
 
   const isSelectedPinned = selectedTrip ? pinnedTripIds.includes(selectedTrip.id) : false;
@@ -772,526 +1492,729 @@ export default function TripsScreen() {
     <View style={s.safe}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
+      {/* Top Safe Area background spacer cap */}
+      <View style={{ height: insets.top, width: "100%", backgroundColor: "#0c0e15", zIndex: 999 }} />
+
       {/* ── SCROLLABLE TRIPS DASHBOARD ── */}
       {loading ? (
         <View style={s.loadingBox}>
           <ActivityIndicator size="large" color="#ffffff" />
         </View>
       ) : (
-        <ScrollView
+        <Animated.ScrollView
+          stickyHeaderIndices={[1]}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
-            paddingTop: insets.top + 8,
-            paddingHorizontal: 16,
             paddingBottom: insets.bottom + 120,
           }}
           scrollEventThrottle={16}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: mainScrollY } } }],
+            { useNativeDriver: true }
+          )}
         >
-          {/* 1. Sleek Ambient Header */}
-          <View style={s.topHeaderRow}>
-            <View>
-              <Text style={s.welcomeSubText}>{greetingWord.toUpperCase()} • READY TO EXPLORE?</Text>
-              <Text style={s.mainGreeting}>Where next, {userFirstName}?</Text>
+          {/* ── SECTION 0: COLLAPSIBLE TOP HEADER (SCROLLS UP AND COLLAPSES) ── */}
+          <View style={s.collapsibleTopSection}>
+            {/* 1. Sleek Ambient Header */}
+            <View style={s.topHeaderRow}>
+              <View>
+                <Text style={s.welcomeSubText}>{greetingWord.toUpperCase()} • READY TO EXPLORE?</Text>
+                <Text style={s.mainGreeting}>Where next, {userFirstName}?</Text>
+              </View>
+              <View style={s.topHeaderRight}>
+                <NotificationBell />
+              </View>
             </View>
-            <View style={s.topHeaderRight}>
-              <NotificationBell />
+
+            {/* 2. Featured Upcoming Adventure Spotlight Card */}
+            {nextTrip ? (
+              <Pressable
+                onPress={() => router.push(`/trips/${nextTrip.id}` as any)}
+                style={s.spotlightCard}
+              >
+                <ExpoImage
+                  source={{ uri: getTripDisplayImage(nextTrip) }}
+                  style={s.spotlightBg}
+                  contentFit="cover"
+                  transition={250}
+                />
+                <LinearGradient
+                  colors={[
+                    "rgba(10, 14, 22, 0.35)",
+                    "rgba(10, 14, 22, 0.78)",
+                    "rgba(12, 14, 21, 0.96)",
+                  ]}
+                  locations={[0, 0.45, 1]}
+                  style={StyleSheet.absoluteFill}
+                />
+                <View style={s.spotlightContent}>
+                  <View style={s.spotlightBadgeRow}>
+                    <View style={s.spotlightTagPill}>
+                      <Ionicons name="sparkles" size={12} color="#ffffff" />
+                      <Text style={s.spotlightTagText}>NEXT ADVENTURE</Text>
+                    </View>
+                    <View style={s.spotlightCountdownPill}>
+                      <Text style={s.spotlightCountdownText}>
+                        {nextTripDays === 0 ? "Departs Today!" : `In ${nextTripDays} ${nextTripDays === 1 ? "Day" : "Days"}`}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={s.spotlightTitle} numberOfLines={1}>
+                    {nextTrip.name}
+                  </Text>
+
+                  {/* Origin ➔ Destination Route Bar */}
+                  <View style={s.spotlightRouteRow}>
+                    <View style={s.spotlightCityBadge}>
+                      <Ionicons name="navigate-circle" size={13} color="#ffffff" />
+                      <Text style={s.spotlightCityText}>
+                        {nextTrip.from ? nextTrip.from.split(",")[0].trim() : "Origin"}
+                      </Text>
+                    </View>
+                    <View style={s.spotlightRouteDash}>
+                      <View style={s.spotlightRouteLine} />
+                      <Ionicons name="car-sport" size={15} color="rgba(255, 255, 255, 0.8)" />
+                      <View style={s.spotlightRouteLine} />
+                    </View>
+                    <View style={s.spotlightCityBadge}>
+                      <Ionicons name="location-sharp" size={13} color="#ffffff" />
+                      <Text style={s.spotlightCityText}>
+                        {nextTrip.to ? nextTrip.to.split(",")[0].trim() : nextTrip.location ? nextTrip.location.split(",")[0].trim() : "Destination"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={s.spotlightFooter}>
+                    <View style={s.spotlightDateWrap}>
+                      <Ionicons name="calendar-outline" size={13} color="rgba(255, 255, 255, 0.7)" />
+                      <Text style={s.spotlightDateText}>
+                        {formatDateRange(nextTrip.startDate, nextTrip.endDate)}
+                      </Text>
+                    </View>
+                    <View style={s.spotlightActionBtn}>
+                      <Text style={s.spotlightActionText}>View Itinerary</Text>
+                      <Ionicons name="arrow-forward" size={13} color="#000000" />
+                    </View>
+                  </View>
+                </View>
+              </Pressable>
+            ) : null}
+
+            {/* 3. Quick Travel Summary Stats Cards */}
+            <View style={s.statsSummaryRow}>
+              <View style={s.statCard}>
+                <Text style={s.statNumber}>{allCount}</Text>
+                <Text style={s.statLabel}>Total Trips</Text>
+              </View>
+              <View style={[s.statCard, s.statCardHighlight]}>
+                <Text style={[s.statNumber, { color: "#ffffff" }]}>
+                  {nextTripDays !== null ? (nextTripDays === 0 ? "Today" : `${nextTripDays}d`) : "—"}
+                </Text>
+                <Text style={s.statLabel} numberOfLines={1}>
+                  {nextTrip ? (nextTrip.location || nextTrip.name)?.split(",")[0] : "Next Trip"}
+                </Text>
+              </View>
+              <View style={s.statCard}>
+                <Text style={s.statNumber}>{uniqueBunkmates.size}</Text>
+                <Text style={s.statLabel}>Bunkmates</Text>
+              </View>
             </View>
           </View>
 
-          {/* 2. Featured Upcoming Adventure Spotlight Card */}
-          {nextTrip ? (
-            <Pressable
-              onPress={() => router.push(`/trips/${nextTrip.id}` as any)}
-              style={s.spotlightCard}
-            >
-              <ExpoImage
-                source={{ uri: getTripDisplayImage(nextTrip) }}
-                style={s.spotlightBg}
-                contentFit="cover"
-                transition={250}
-              />
-              <LinearGradient
-                colors={[
-                  "rgba(10, 14, 22, 0.35)",
-                  "rgba(10, 14, 22, 0.78)",
-                  "rgba(12, 14, 21, 0.96)",
+          {/* ── SECTION 1: STICKY SEARCH & CALENDAR HEADER WITH BLUR BACKDROP ── */}
+          <View style={s.stickyHeaderContainer}>
+            {/* Ambient Scenic Blurred Image matching 3-dots modal */}
+            {displayedTrips.length > 0 ? (
+              <Animated.View
+                style={[
+                  StyleSheet.absoluteFill,
+                  {
+                    opacity: mainScrollY.interpolate({
+                      inputRange: [80, 260],
+                      outputRange: [0, 0.95],
+                      extrapolate: "clamp",
+                    }),
+                  },
                 ]}
-                locations={[0, 0.45, 1]}
-                style={StyleSheet.absoluteFill}
-              />
-              <View style={s.spotlightContent}>
-                <View style={s.spotlightBadgeRow}>
-                  <View style={s.spotlightTagPill}>
-                    <Ionicons name="sparkles" size={12} color="#ffffff" />
-                    <Text style={s.spotlightTagText}>NEXT ADVENTURE</Text>
-                  </View>
-                  <View style={s.spotlightCountdownPill}>
-                    <Text style={s.spotlightCountdownText}>
-                      {nextTripDays === 0 ? "Departs Today!" : `In ${nextTripDays} ${nextTripDays === 1 ? "Day" : "Days"}`}
-                    </Text>
-                  </View>
-                </View>
+              >
+                <ExpoImage
+                  source={{ uri: getTripDisplayImage(displayedTrips[0]) }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                  blurRadius={Platform.OS === "ios" ? 40 : 28}
+                />
+              </Animated.View>
+            ) : null}
 
-                <Text style={s.spotlightTitle} numberOfLines={1}>
-                  {nextTrip.name}
-                </Text>
+            {/* Frosted Glass BlurView (exact intensity as 3-dots modal) */}
+            <BlurView
+              intensity={Platform.OS === "ios" ? 85 : 70}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+            />
 
-                {/* Origin ➔ Destination Route Bar */}
-                <View style={s.spotlightRouteRow}>
-                  <View style={s.spotlightCityBadge}>
-                    <Ionicons name="navigate-circle" size={13} color="#ffffff" />
-                    <Text style={s.spotlightCityText}>
-                      {nextTrip.from ? nextTrip.from.split(",")[0].trim() : "Origin"}
-                    </Text>
-                  </View>
-                  <View style={s.spotlightRouteDash}>
-                    <View style={s.spotlightRouteLine} />
-                    <Ionicons name="car-sport" size={15} color="rgba(255, 255, 255, 0.8)" />
-                    <View style={s.spotlightRouteLine} />
-                  </View>
-                  <View style={s.spotlightCityBadge}>
-                    <Ionicons name="location-sharp" size={13} color="#38bdf8" />
-                    <Text style={s.spotlightCityText}>
-                      {nextTrip.to ? nextTrip.to.split(",")[0].trim() : nextTrip.location ? nextTrip.location.split(",")[0].trim() : "Destination"}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={s.spotlightFooter}>
-                  <View style={s.spotlightDateWrap}>
-                    <Ionicons name="calendar-outline" size={13} color="rgba(255, 255, 255, 0.7)" />
-                    <Text style={s.spotlightDateText}>
-                      {formatDateRange(nextTrip.startDate, nextTrip.endDate)}
-                    </Text>
-                  </View>
-                  <View style={s.spotlightActionBtn}>
-                    <Text style={s.spotlightActionText}>View Itinerary</Text>
-                    <Ionicons name="arrow-forward" size={13} color="#000000" />
-                  </View>
-                </View>
-              </View>
-            </Pressable>
-          ) : null}
-
-          {/* 3. Quick Travel Summary Stats Cards */}
-          <View style={s.statsSummaryRow}>
-            <View style={s.statCard}>
-              <Text style={s.statNumber}>{allCount}</Text>
-              <Text style={s.statLabel}>Total Trips</Text>
-            </View>
-            <View style={[s.statCard, s.statCardHighlight]}>
-              <Text style={[s.statNumber, { color: "#ffffff" }]}>
-                {nextTripDays !== null ? (nextTripDays === 0 ? "Today" : `${nextTripDays}d`) : "—"}
-              </Text>
-              <Text style={s.statLabel} numberOfLines={1}>
-                {nextTrip ? (nextTrip.location || nextTrip.name)?.split(",")[0] : "Next Trip"}
-              </Text>
-            </View>
-            <View style={s.statCard}>
-              <Text style={s.statNumber}>{uniqueBunkmates.size}</Text>
-              <Text style={s.statLabel}>Bunkmates</Text>
-            </View>
-          </View>
-
-          {/* 4. Search & Filter Bar */}
-          <View style={s.searchBarRow}>
-            <View style={s.searchCapsule}>
-              <Feather name="search" size={17} color="rgba(255,255,255,0.45)" />
-              <TextInput
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Search trips by destination or name..."
-                placeholderTextColor="rgba(255,255,255,0.35)"
-                style={s.searchInputField}
-              />
-              {searchQuery ? (
-                <Pressable onPress={() => setSearchQuery("")} hitSlop={8}>
-                  <Ionicons name="close-circle" size={16} color="rgba(255,255,255,0.5)" />
-                </Pressable>
-              ) : null}
-            </View>
-
-            <Pressable
-              onPress={() => setFilterModalOpen(true)}
-              style={[
-                s.filterActionBtn,
-                (filterPlace || filterStartDate || filterEndDate) && s.filterActionBtnActive,
+            {/* Deep Translucent Gradient Veil */}
+            <LinearGradient
+              colors={[
+                "rgba(10, 14, 22, 0.55)",
+                "rgba(10, 14, 22, 0.72)",
+                "rgba(8, 10, 15, 0.92)",
               ]}
-            >
-              <Ionicons name="options-outline" size={19} color="#ffffff" />
+              locations={[0, 0.5, 1]}
+              style={StyleSheet.absoluteFill}
+            />
+
+            <View style={s.stickyHeaderContent}>
+              {/* 4. Search & Filter Bar */}
+              <View style={s.searchBarRow}>
+                <View style={s.searchCapsule}>
+                  <Feather name="search" size={17} color="rgba(255,255,255,0.45)" />
+                  <TextInput
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    placeholder="Search trips by destination or name..."
+                    placeholderTextColor="rgba(255,255,255,0.35)"
+                    style={s.searchInputField}
+                  />
+                  {searchQuery ? (
+                    <Pressable onPress={() => setSearchQuery("")} hitSlop={8}>
+                      <Ionicons name="close-circle" size={16} color="rgba(255,255,255,0.5)" />
+                    </Pressable>
+                  ) : null}
+                </View>
+
+                <Pressable
+                  onPress={() => setFilterModalOpen(true)}
+                  style={[
+                    s.filterActionBtn,
+                    (filterPlace || filterStartDate || filterEndDate) && s.filterActionBtnActive,
+                  ]}
+                >
+                  <Ionicons name="options-outline" size={19} color="#ffffff" />
+                  {(filterPlace || filterStartDate || filterEndDate) ? (
+                    <View style={s.filterActiveDot} />
+                  ) : null}
+                </Pressable>
+              </View>
+
+              {/* Active Filter Indicator Tag */}
               {(filterPlace || filterStartDate || filterEndDate) ? (
-                <View style={s.filterActiveDot} />
+                <View style={s.activeFilterRow}>
+                  <View style={s.activeFilterPill}>
+                    <Ionicons name="funnel" size={11} color="#ffffff" />
+                    <Text style={s.activeFilterText} numberOfLines={1}>
+                      {filterPlace ? `"${filterPlace}" ` : ""}{filterStartDate ? `${filterStartDate} ` : ""}{filterEndDate ? `→ ${filterEndDate}` : ""}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => {
+                      setFilterPlace("");
+                      setFilterStartDate("");
+                      setFilterEndDate("");
+                    }}
+                    hitSlop={8}
+                    style={s.activeFilterClear}
+                  >
+                    <Text style={s.activeFilterClearText}>Reset</Text>
+                    <Ionicons name="close-circle" size={13} color="#f87171" />
+                  </Pressable>
+                </View>
               ) : null}
-            </Pressable>
+
+              {/* 5. Horizontal Horizon Calendar Strip (Slide down or tap header opens Travel Calendar Drawer) */}
+              <View {...calStripPanResponder.panHandlers} style={s.calSectionWrap}>
+                <View style={s.calHeaderRow}>
+                  <Pressable
+                    onPress={openCalendarDrawer}
+                    hitSlop={8}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                  >
+                    <Text style={s.calMonthTitle}>
+                      {selectedCalendarDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                    </Text>
+                    <Ionicons name="chevron-down" size={14} color="rgba(255,255,255,0.7)" />
+                  </Pressable>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Pressable
+                      onPress={openCalendarDrawer}
+                      hitSlop={8}
+                      style={s.calArchiveBtn}
+                    >
+                      <Ionicons name="calendar-outline" size={13} color="#ffffff" />
+                      <Text style={s.calArchiveBtnText}>Calendar</Text>
+                      <Ionicons name="chevron-down" size={11} color="rgba(255,255,255,0.7)" />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => {
+                        setSelectedCalendarDate(new Date());
+                        centerCurrentDate(true);
+                      }}
+                      hitSlop={8}
+                      style={[
+                        s.calTodayBtn,
+                        isSameDay(selectedCalendarDate, new Date()) && s.calTodayBtnActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          s.calTodayBtnText,
+                          isSameDay(selectedCalendarDate, new Date()) && s.calTodayBtnTextActive,
+                        ]}
+                      >
+                        Today
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                {/* Subtle Pull Down Hint Bar */}
+                <Pressable onPress={openCalendarDrawer} style={s.calPullIndicatorWrap}>
+                  <View style={s.calPullIndicatorBar} />
+                </Pressable>
+
+                <ScrollView
+                  ref={calendarScrollRef}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={s.calScrollContent}
+                  onContentSizeChange={() => {
+                    centerCurrentDate(false);
+                  }}
+                  onLayout={() => {
+                    centerCurrentDate(false);
+                  }}
+                >
+                  {calendarDays.map((date, i) => {
+                    const isSelected = isSameDay(date, selectedCalendarDate);
+                    const isCurrentToday = isSameDay(date, new Date());
+                    const activeTrips = trips.filter((t) => {
+                      const st = new Date(t.startDate || "");
+                      const et = new Date(t.endDate || "");
+                      return date >= st && date <= et;
+                    });
+                    const hasTrips = activeTrips.length > 0;
+                    const dotColor = hasTrips ? getTripAccent(activeTrips[0].id) : "transparent";
+
+                    return (
+                      <Pressable
+                        key={i}
+                        onPress={() => {
+                          setSelectedCalendarDate(date);
+                          if (hasTrips) openDetailsModal(activeTrips[0]);
+                        }}
+                        style={[
+                          s.calDayPill,
+                          isSelected && s.calDayPillSelected,
+                          isCurrentToday && !isSelected && s.calDayPillCurrentToday,
+                          hasTrips && !isSelected && !isCurrentToday && { borderColor: "rgba(255, 255, 255, 0.4)" },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            s.calDayName,
+                            isSelected && s.calDayNameSelected,
+                            isCurrentToday && !isSelected && s.calDayNameCurrentToday,
+                          ]}
+                        >
+                          {date.toLocaleDateString("en-US", { weekday: "short" })}
+                        </Text>
+                        <Text
+                          style={[
+                            s.calDayNum,
+                            isSelected && s.calDayNumSelected,
+                            isCurrentToday && !isSelected && s.calDayNumCurrentToday,
+                          ]}
+                        >
+                          {date.getDate()}
+                        </Text>
+
+                        {/* Distinction for Today indicator & Trip dot */}
+                        {isCurrentToday ? (
+                          <View
+                            style={[
+                              s.calTodayDot,
+                              isSelected && { backgroundColor: "#000000" },
+                            ]}
+                          />
+                        ) : hasTrips ? (
+                          <View
+                            style={[
+                              s.calTripDot,
+                              { backgroundColor: isSelected ? "#000000" : dotColor },
+                            ]}
+                          />
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              {/* 6. Status Tabs Row with Counts (Including Pinned) */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={s.statusTabsScroll}
+                style={s.statusTabsScrollWrap}
+              >
+                {(
+                  [
+                    { key: "All", count: allCount, icon: "earth" },
+                    { key: "Upcoming", count: upcomingCount, icon: "time" },
+                    { key: "Ongoing", count: ongoingCount, icon: "navigate" },
+                    { key: "Pinned", count: pinnedCount, icon: "bookmark" },
+                    { key: "Past", count: pastCount, icon: "checkmark-circle" },
+                  ] as const
+                ).map((t) => {
+                  const active = activeTab === t.key;
+                  return (
+                    <Pressable
+                      key={t.key}
+                      onPress={() => setActiveTab(t.key as any)}
+                      style={[s.statusTabPill, active && s.statusTabPillActive]}
+                    >
+                      <Ionicons
+                        name={t.icon as any}
+                        size={14}
+                        color={active ? "#ffffff" : "rgba(255, 255, 255, 0.45)"}
+                      />
+                      <Text style={[s.statusTabText, active && s.statusTabTextActive]}>
+                        {t.key}
+                      </Text>
+                      <View style={[s.statusTabCount, active && s.statusTabCountActive]}>
+                        <Text style={[s.statusTabCountText, active && s.statusTabCountTextActive]}>
+                          {t.count}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
           </View>
 
-          {/* Active Filter Indicator Tag */}
-          {(filterPlace || filterStartDate || filterEndDate) ? (
-            <View style={s.activeFilterRow}>
-              <View style={s.activeFilterPill}>
-                <Ionicons name="funnel" size={11} color="#ffffff" />
-                <Text style={s.activeFilterText} numberOfLines={1}>
-                  {filterPlace ? `"${filterPlace}" ` : ""}{filterStartDate ? `${filterStartDate} ` : ""}{filterEndDate ? `→ ${filterEndDate}` : ""}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => {
-                  setFilterPlace("");
-                  setFilterStartDate("");
-                  setFilterEndDate("");
-                }}
-                hitSlop={8}
-                style={s.activeFilterClear}
-              >
-                <Text style={s.activeFilterClearText}>Reset</Text>
-                <Ionicons name="close-circle" size={13} color="#f87171" />
-              </Pressable>
-            </View>
-          ) : null}
+          {/* ── SECTION 2: LUXURY TRIP CARDS LIST (SCROLLS UNDER STICKY BLUR HEADER) ── */}
+          <View style={s.tripsListSection}>
+            {filteredTrips.length > 0 ? (
+              <>
+                {displayedTrips.map((trip) => {
+                  const isOngoing =
+                    trip.startDate &&
+                    trip.endDate &&
+                    Date.now() >= new Date(trip.startDate).getTime() &&
+                    Date.now() <= new Date(trip.endDate).getTime();
 
-          {/* 5. Horizontal Horizon Calendar Strip */}
-          <View style={s.calSectionWrap}>
-            <View style={s.calHeaderRow}>
-              <Text style={s.calMonthTitle}>
-                {selectedCalendarDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
-              </Text>
-              <Pressable
-                onPress={() => {
-                  setSelectedCalendarDate(new Date());
-                  centerCurrentDate(true);
-                }}
-                hitSlop={8}
-                style={s.calTodayBtn}
-              >
-                <Text style={s.calTodayBtnText}>Today</Text>
-              </Pressable>
-            </View>
+                  const isUpcoming =
+                    trip.startDate && new Date(trip.startDate).getTime() > Date.now();
 
-            <ScrollView
-              ref={calendarScrollRef}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={s.calScrollContent}
-              onContentSizeChange={() => {
-                centerCurrentDate(false);
-              }}
-              onLayout={() => {
-                centerCurrentDate(false);
-              }}
-            >
-              {calendarDays.map((date, i) => {
-                const isToday = isSameDay(date, selectedCalendarDate);
-                const activeTrips = trips.filter((t) => {
-                  const st = new Date(t.startDate || "");
-                  const et = new Date(t.endDate || "");
-                  return date >= st && date <= et;
-                });
-                const hasTrips = activeTrips.length > 0;
-                const dotColor = hasTrips ? getTripAccent(activeTrips[0].id) : "transparent";
+                  const daysUntil = trip.startDate
+                    ? Math.ceil((new Date(trip.startDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                    : 0;
 
-                return (
+                  const tripDays =
+                    trip.startDate && trip.endDate
+                      ? Math.max(
+                        1,
+                        Math.round(
+                          (new Date(trip.endDate).getTime() - new Date(trip.startDate).getTime()) /
+                          (1000 * 60 * 60 * 24)
+                        )
+                      )
+                      : 0;
+
+                  const budgetTotal = trip.budget?.total || 0;
+                  const budgetUsed = trip.budget?.used || 0;
+                  const budgetPct =
+                    budgetTotal > 0 ? Math.min(100, Math.round((budgetUsed / budgetTotal) * 100)) : 0;
+                  const budgetRemaining = Math.max(0, budgetTotal - budgetUsed);
+
+                  const members = trip.memberProfiles || [];
+                  const totalMembers = trip.members?.length || members.length || 1;
+                  const extraCount = Math.max(0, totalMembers - Math.min(3, members.length));
+
+                  const cardCoverImage = getTripDisplayImage(trip);
+
+                  const routeFrom = trip.from ? trip.from.split(",")[0].trim() : "";
+                  const routeTo = trip.to
+                    ? trip.to.split(",")[0].trim()
+                    : trip.location
+                      ? trip.location.split(",")[0].trim()
+                      : "";
+                  const routeDisplay = routeFrom && routeTo ? `${routeFrom} ➔ ${routeTo}` : routeTo || routeFrom || "Scenic Journey";
+
+                  const isPinned = pinnedTripIds.includes(trip.id);
+
+                  return (
+                    <View
+                      key={trip.id}
+                      style={s.premiumCard}
+                    >
+                      {/* Full-bleed scenic / group chat photo */}
+                      <ExpoImage
+                        source={{ uri: cardCoverImage }}
+                        style={s.premiumCardBg}
+                        contentFit="cover"
+                        transition={250}
+                      />
+
+                      {/* Multi-stage dark vignette & glass overlay */}
+                      <LinearGradient
+                        colors={[
+                          "rgba(10, 13, 20, 0.4)",
+                          "rgba(10, 13, 20, 0.76)",
+                          "rgba(12, 14, 21, 0.98)",
+                        ]}
+                        locations={[0, 0.45, 1]}
+                        style={StyleSheet.absoluteFill}
+                      />
+
+                      <View style={s.premiumCardBody}>
+                        {/* TOP ROW: Status badge, Travel Type, Direct Pin & 3-Dots Action */}
+                        <View style={s.cardTopRow}>
+                          <View style={s.cardBadgeGroup}>
+                            {/* Status Chip */}
+                            <View style={[s.statusChip, isOngoing ? s.statusChipOngoing : isUpcoming ? s.statusChipUpcoming : s.statusChipPast]}>
+                              <View style={[s.statusDot, isOngoing ? s.statusDotOngoing : isUpcoming ? s.statusDotUpcoming : s.statusDotPast]} />
+                              <Text style={s.statusChipText}>
+                                {isOngoing ? "Ongoing" : isUpcoming ? (daysUntil > 0 ? `In ${daysUntil}d` : "Upcoming") : "Past"}
+                              </Text>
+                            </View>
+
+                            {/* Travel Type Chip */}
+                            {trip.travelType ? (
+                              <View style={s.travelTypeChip}>
+                                <Text style={s.travelTypeText}>{trip.travelType}</Text>
+                              </View>
+                            ) : null}
+                          </View>
+
+                          {/* Right Icons: Companion Avatars (if any) + Direct Pin + 3-Dots Menu */}
+                          <View style={s.cardTopRightActions}>
+                            {members.length > 1 ? (
+                              <View style={s.avatarOverlapRow}>
+                                {members.slice(0, 3).map((m, idx) => (
+                                  m.photoURL ? (
+                                    <ExpoImage
+                                      key={m.uid}
+                                      source={{ uri: m.photoURL }}
+                                      style={[s.memberAv, idx > 0 && { marginLeft: -8 }]}
+                                      contentFit="cover"
+                                    />
+                                  ) : null
+                                ))}
+                                {extraCount > 0 && (
+                                  <View style={[s.memberAv, s.memberAvExtra, { marginLeft: -8 }]}>
+                                    <Text style={s.memberAvExtraText}>+{extraCount}</Text>
+                                  </View>
+                                )}
+                              </View>
+                            ) : null}
+
+                            <Pressable
+                              onPress={() => togglePinForTrip(trip.id)}
+                              hitSlop={10}
+                              style={[s.cardActionCircle, isPinned && s.cardPinActive]}
+                            >
+                              <Ionicons
+                                name={isPinned ? "bookmark" : "bookmark-outline"}
+                                size={16}
+                                color={isPinned ? "#fbbf24" : "rgba(255, 255, 255, 0.8)"}
+                              />
+                            </Pressable>
+
+                            <Pressable
+                              onPress={() => openDetailsModal(trip)}
+                              hitSlop={10}
+                              style={s.cardActionCircle}
+                            >
+                              <Ionicons name="ellipsis-horizontal" size={17} color="#ffffff" />
+                            </Pressable>
+                          </View>
+                        </View>
+
+                        {/* MIDDLE SECTION: Title, Route, Dates (Navigates to Trip Itinerary) */}
+                        <Pressable
+                          onPress={() => router.push(`/trips/${trip.id}` as any)}
+                          style={s.cardMidSection}
+                        >
+                          <Text style={s.premiumTripName} numberOfLines={1}>
+                            {trip.name}
+                          </Text>
+
+                          {/* Route Row: Origin ➔ Destination */}
+                          <View style={s.routeRow}>
+                            <Ionicons name="location-sharp" size={14} color="#ffffff" />
+                            <Text style={s.routeText} numberOfLines={1}>
+                              {routeDisplay}
+                            </Text>
+                          </View>
+
+                          {/* Date Span & Duration */}
+                          <View style={s.dateRow}>
+                            <Ionicons name="calendar-outline" size={13} color="rgba(255,255,255,0.6)" />
+                            <Text style={s.dateText}>
+                              {formatDateRange(trip.startDate, trip.endDate)}
+                            </Text>
+                            {tripDays > 0 ? (
+                              <View style={s.daysBadge}>
+                                <Text style={s.daysBadgeText}>{tripDays} {tripDays === 1 ? "Day" : "Days"}</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        </Pressable>
+
+                        {/* BOTTOM SECTION: Budget indicator & Dual Quick Action Buttons */}
+                        <View style={s.cardBottomSection}>
+                          {trip.budget && budgetTotal > 0 ? (
+                            <View style={s.cardBudgetBox}>
+                              <Text style={s.cardBudgetLabel}>
+                                ₹{budgetUsed.toLocaleString()} / ₹{budgetTotal.toLocaleString()}
+                              </Text>
+                              <View style={s.cardBudgetTrack}>
+                                <View
+                                  style={[
+                                    s.cardBudgetFill,
+                                    { width: `${budgetPct}%` },
+                                    budgetUsed > budgetTotal && { backgroundColor: "#ef4444" },
+                                  ]}
+                                />
+                              </View>
+                            </View>
+                          ) : (
+                            <View style={{ flex: 1 }} />
+                          )}
+
+                          {/* Quick Action Buttons on Bottom Right */}
+                          <View style={s.cardBottomRightActions}>
+                            <Pressable
+                              onPress={() => router.push(`/(tabs)/group-chatroom/${trip.id}` as any)}
+                              hitSlop={8}
+                              style={s.cardQuickChatBtn}
+                            >
+                              <Ionicons name="chatbubbles-outline" size={13} color="#ffffff" />
+                              <Text style={s.cardQuickChatText}>Chat</Text>
+                            </Pressable>
+
+                            <Pressable
+                              onPress={() => router.push(`/trips/${trip.id}` as any)}
+                              style={s.explorePill}
+                            >
+                              <Text style={s.explorePillText}>Details</Text>
+                              <Ionicons name="arrow-forward" size={12} color="#ffffff" />
+                            </Pressable>
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+
+                {/* Show More / Show Less Pagination Option after 3 Trips */}
+                {filteredTrips.length > INITIAL_TRIP_LIMIT && (
+                  <View style={s.showMoreContainer}>
+                    {hasMoreTrips ? (
+                      <Pressable
+                        onPress={() => setVisibleTripsCount((prev) => prev + 3)}
+                        style={({ pressed }) => [
+                          s.showMoreBtn,
+                          pressed && s.showMoreBtnPressed,
+                        ]}
+                      >
+                        <LinearGradient
+                          colors={["rgba(255, 255, 255, 0.12)", "rgba(255, 255, 255, 0.05)"]}
+                          style={StyleSheet.absoluteFill}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 1 }}
+                        />
+                        <View style={s.showMoreInner}>
+                          <View style={s.showMoreIconCircle}>
+                            <Ionicons name="sparkles" size={14} color="#ffffff" />
+                          </View>
+                          <View style={s.showMoreTextWrap}>
+                            <Text style={s.showMoreTitle}>Show More Trips</Text>
+                            <Text style={s.showMoreSubtitle}>
+                              +{remainingTripsCount} more {remainingTripsCount === 1 ? "adventure" : "adventures"} available
+                            </Text>
+                          </View>
+                          <View style={s.showMoreChevronCircle}>
+                            <Ionicons name="chevron-down" size={16} color="#ffffff" />
+                          </View>
+                        </View>
+                      </Pressable>
+                    ) : (
+                      <Pressable
+                        onPress={() => setVisibleTripsCount(INITIAL_TRIP_LIMIT)}
+                        style={({ pressed }) => [
+                          s.showLessBtn,
+                          pressed && s.showMoreBtnPressed,
+                        ]}
+                      >
+                        <View style={s.showLessInner}>
+                          <Text style={s.showLessText}>Show Less</Text>
+                          <Ionicons name="chevron-up" size={14} color="rgba(255, 255, 255, 0.7)" />
+                        </View>
+                      </Pressable>
+                    )}
+                  </View>
+                )}
+
+                {/* ── AI SUGGESTED TRIPS TRIGGER BUTTON ── */}
+                <View style={s.suggestedSectionContainer}>
                   <Pressable
-                    key={i}
-                    onPress={() => {
-                      setSelectedCalendarDate(date);
-                      if (hasTrips) openDetailsModal(activeTrips[0]);
-                    }}
-                    style={[
-                      s.calDayPill,
-                      isToday && s.calDayPillToday,
-                      hasTrips && !isToday && { borderColor: "rgba(255, 255, 255, 0.45)" },
+                    onPress={openSuggestedModal}
+                    style={({ pressed }) => [
+                      s.suggestedTripsTriggerBtn,
+                      pressed && s.showMoreBtnPressed,
                     ]}
                   >
-                    <Text style={[s.calDayName, isToday && s.calDayNameToday]}>
-                      {date.toLocaleDateString("en-US", { weekday: "short" })}
-                    </Text>
-                    <Text style={[s.calDayNum, isToday && s.calDayNumToday]}>
-                      {date.getDate()}
-                    </Text>
-                    {hasTrips && !isToday && (
-                      <View style={[s.calTripDot, { backgroundColor: dotColor }]} />
-                    )}
+                    <LinearGradient
+                      colors={["rgba(255, 255, 255, 0.12)", "rgba(255, 255, 255, 0.04)"]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    <View style={s.suggestedTriggerInner}>
+                      <View style={s.suggestedTriggerIconWrap}>
+                        <Ionicons name="sparkles" size={17} color="#ffffff" />
+                      </View>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <Text style={s.suggestedTriggerTitle}>Suggested Trips</Text>
+                          <View style={s.aiBadge}>
+                            <Text style={s.aiBadgeText}>AI CURATED</Text>
+                          </View>
+                        </View>
+                        <Text style={s.suggestedTriggerSub}>
+                          Analyzed from your past places, travel taste & budget
+                        </Text>
+                      </View>
+                      <View style={s.suggestedArrowCircle}>
+                        <Ionicons name="arrow-forward" size={15} color="#ffffff" />
+                      </View>
+                    </View>
                   </Pressable>
-                );
-              })}
-            </ScrollView>
+                </View>
+              </>
+            ) : (
+              <View style={s.emptyStateBox}>
+                <Text style={s.emptyStateIcon}>🧭</Text>
+                <Text style={s.emptyStateTitle}>No Adventures Found</Text>
+                <Text style={s.emptyStateDesc}>
+                  {searchQuery || filterPlace
+                    ? "No trips matched your search or active filters."
+                    : activeTab === "Pinned"
+                      ? "You haven't pinned any trips yet. Tap the bookmark icon on any trip card to pin it here!"
+                      : "You don't have any trips in this tab yet. Start planning your next memorable getaway!"}
+                </Text>
+                <Pressable style={s.emptyStateCreateBtn} onPress={() => setCreateSheetOpen(true)}>
+                  <Text style={s.emptyStateCreateBtnText}>+ Plan a Trip</Text>
+                </Pressable>
+              </View>
+            )}
           </View>
-
-          {/* 6. Status Tabs Row with Counts (Including Pinned) */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.statusTabsScroll}
-            style={s.statusTabsScrollWrap}
-          >
-            {(
-              [
-                { key: "All", count: allCount, icon: "earth" },
-                { key: "Upcoming", count: upcomingCount, icon: "time" },
-                { key: "Ongoing", count: ongoingCount, icon: "navigate" },
-                { key: "Pinned", count: pinnedCount, icon: "bookmark" },
-                { key: "Past", count: pastCount, icon: "checkmark-circle" },
-              ] as const
-            ).map((t) => {
-              const active = activeTab === t.key;
-              return (
-                <Pressable
-                  key={t.key}
-                  onPress={() => setActiveTab(t.key as any)}
-                  style={[s.statusTabPill, active && s.statusTabPillActive]}
-                >
-                  <Ionicons
-                    name={t.icon as any}
-                    size={14}
-                    color={active ? "#ffffff" : "rgba(255, 255, 255, 0.45)"}
-                  />
-                  <Text style={[s.statusTabText, active && s.statusTabTextActive]}>
-                    {t.key}
-                  </Text>
-                  <View style={[s.statusTabCount, active && s.statusTabCountActive]}>
-                    <Text style={[s.statusTabCountText, active && s.statusTabCountTextActive]}>
-                      {t.count}
-                    </Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          {/* 7. Luxury Trip Cards List */}
-          {filteredTrips.length > 0 ? (
-            filteredTrips.map((trip) => {
-              const isOngoing =
-                trip.startDate &&
-                trip.endDate &&
-                Date.now() >= new Date(trip.startDate).getTime() &&
-                Date.now() <= new Date(trip.endDate).getTime();
-
-              const isUpcoming =
-                trip.startDate && new Date(trip.startDate).getTime() > Date.now();
-
-              const daysUntil = trip.startDate
-                ? Math.ceil((new Date(trip.startDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-                : 0;
-
-              const tripDays =
-                trip.startDate && trip.endDate
-                  ? Math.max(
-                    1,
-                    Math.round(
-                      (new Date(trip.endDate).getTime() - new Date(trip.startDate).getTime()) /
-                      (1000 * 60 * 60 * 24)
-                    )
-                  )
-                  : 0;
-
-              const budgetTotal = trip.budget?.total || 0;
-              const budgetUsed = trip.budget?.used || 0;
-              const budgetPct =
-                budgetTotal > 0 ? Math.min(100, Math.round((budgetUsed / budgetTotal) * 100)) : 0;
-              const budgetRemaining = Math.max(0, budgetTotal - budgetUsed);
-
-              const members = trip.memberProfiles || [];
-              const totalMembers = trip.members?.length || members.length || 1;
-              const extraCount = Math.max(0, totalMembers - Math.min(3, members.length));
-
-              const cardCoverImage = getTripDisplayImage(trip);
-
-              const routeFrom = trip.from ? trip.from.split(",")[0].trim() : "";
-              const routeTo = trip.to
-                ? trip.to.split(",")[0].trim()
-                : trip.location
-                  ? trip.location.split(",")[0].trim()
-                  : "";
-              const routeDisplay = routeFrom && routeTo ? `${routeFrom} ➔ ${routeTo}` : routeTo || routeFrom || "Scenic Journey";
-
-              const isPinned = pinnedTripIds.includes(trip.id);
-
-              return (
-                <Pressable
-                  key={trip.id}
-                  onPress={() => router.push(`/trips/${trip.id}` as any)}
-                  style={s.premiumCard}
-                >
-                  {/* Full-bleed scenic / group chat photo */}
-                  <ExpoImage
-                    source={{ uri: cardCoverImage }}
-                    style={s.premiumCardBg}
-                    contentFit="cover"
-                    transition={250}
-                  />
-
-                  {/* Multi-stage dark vignette & glass overlay */}
-                  <LinearGradient
-                    colors={[
-                      "rgba(10, 13, 20, 0.4)",
-                      "rgba(10, 13, 20, 0.76)",
-                      "rgba(12, 14, 21, 0.98)",
-                    ]}
-                    locations={[0, 0.45, 1]}
-                    style={StyleSheet.absoluteFill}
-                  />
-
-                  <View style={s.premiumCardBody}>
-                    {/* TOP ROW: Status badge, Travel Type, Direct Pin & 3-Dots Action */}
-                    <View style={s.cardTopRow}>
-                      <View style={s.cardBadgeGroup}>
-                        {/* Status Chip */}
-                        <View style={[s.statusChip, isOngoing ? s.statusChipOngoing : isUpcoming ? s.statusChipUpcoming : s.statusChipPast]}>
-                          <View style={[s.statusDot, isOngoing ? s.statusDotOngoing : isUpcoming ? s.statusDotUpcoming : s.statusDotPast]} />
-                          <Text style={s.statusChipText}>
-                            {isOngoing ? "Ongoing" : isUpcoming ? (daysUntil > 0 ? `In ${daysUntil}d` : "Upcoming") : "Past"}
-                          </Text>
-                        </View>
-
-                        {/* Travel Type Chip */}
-                        {trip.travelType ? (
-                          <View style={s.travelTypeChip}>
-                            <Text style={s.travelTypeText}>{trip.travelType}</Text>
-                          </View>
-                        ) : null}
-                      </View>
-
-                      {/* Right Icons: Companion Avatars (if any) + Direct Pin + 3-Dots Menu */}
-                      <View style={s.cardTopRightActions}>
-                        {members.length > 1 ? (
-                          <View style={s.avatarOverlapRow}>
-                            {members.slice(0, 3).map((m, idx) => (
-                              m.photoURL ? (
-                                <ExpoImage
-                                  key={m.uid}
-                                  source={{ uri: m.photoURL }}
-                                  style={[s.memberAv, idx > 0 && { marginLeft: -8 }]}
-                                  contentFit="cover"
-                                />
-                              ) : null
-                            ))}
-                            {extraCount > 0 && (
-                              <View style={[s.memberAv, s.memberAvExtra, { marginLeft: -8 }]}>
-                                <Text style={s.memberAvExtraText}>+{extraCount}</Text>
-                              </View>
-                            )}
-                          </View>
-                        ) : null}
-
-                        <Pressable
-                          onPress={(e) => {
-                            e.stopPropagation?.();
-                            togglePinForTrip(trip.id);
-                          }}
-                          hitSlop={10}
-                          style={[s.cardActionCircle, isPinned && s.cardPinActive]}
-                        >
-                          <Ionicons
-                            name={isPinned ? "bookmark" : "bookmark-outline"}
-                            size={16}
-                            color={isPinned ? "#fbbf24" : "rgba(255, 255, 255, 0.8)"}
-                          />
-                        </Pressable>
-
-                        <Pressable
-                          onPress={(e) => {
-                            e.stopPropagation?.();
-                            openDetailsModal(trip);
-                          }}
-                          hitSlop={10}
-                          style={s.cardActionCircle}
-                        >
-                          <Ionicons name="ellipsis-horizontal" size={17} color="#ffffff" />
-                        </Pressable>
-                      </View>
-                    </View>
-
-                    {/* MIDDLE SECTION: Title, Route, Dates */}
-                    <View style={s.cardMidSection}>
-                      <Text style={s.premiumTripName} numberOfLines={1}>
-                        {trip.name}
-                      </Text>
-
-                      {/* Route Row: Origin ➔ Destination */}
-                      <View style={s.routeRow}>
-                        <Ionicons name="location-sharp" size={14} color="#ffffff" />
-                        <Text style={s.routeText} numberOfLines={1}>
-                          {routeDisplay}
-                        </Text>
-                      </View>
-
-                      {/* Date Span & Duration */}
-                      <View style={s.dateRow}>
-                        <Ionicons name="calendar-outline" size={13} color="rgba(255,255,255,0.6)" />
-                        <Text style={s.dateText}>
-                          {formatDateRange(trip.startDate, trip.endDate)}
-                        </Text>
-                        {tripDays > 0 ? (
-                          <View style={s.daysBadge}>
-                            <Text style={s.daysBadgeText}>{tripDays} {tripDays === 1 ? "Day" : "Days"}</Text>
-                          </View>
-                        ) : null}
-                      </View>
-                    </View>
-
-                    {/* BOTTOM SECTION: Budget indicator & Dual Quick Action Buttons */}
-                    <View style={s.cardBottomSection}>
-                      {trip.budget && budgetTotal > 0 ? (
-                        <View style={s.cardBudgetBox}>
-                          <Text style={s.cardBudgetLabel}>
-                            ₹{budgetUsed.toLocaleString()} / ₹{budgetTotal.toLocaleString()}
-                          </Text>
-                          <View style={s.cardBudgetTrack}>
-                            <View
-                              style={[
-                                s.cardBudgetFill,
-                                { width: `${budgetPct}%` },
-                                budgetUsed > budgetTotal && { backgroundColor: "#ef4444" },
-                              ]}
-                            />
-                          </View>
-                        </View>
-                      ) : (
-                        <View style={{ flex: 1 }} />
-                      )}
-
-                      {/* Quick Action Buttons on Bottom Right */}
-                      <View style={s.cardBottomRightActions}>
-                        <Pressable
-                          onPress={(e) => {
-                            e.stopPropagation?.();
-                            router.push(`/(tabs)/group-chatroom/${trip.id}` as any);
-                          }}
-                          hitSlop={8}
-                          style={s.cardQuickChatBtn}
-                        >
-                          <Ionicons name="chatbubbles-outline" size={13} color="#ffffff" />
-                          <Text style={s.cardQuickChatText}>Chat</Text>
-                        </Pressable>
-
-                        <View style={s.explorePill}>
-                          <Text style={s.explorePillText}>Details</Text>
-                          <Ionicons name="arrow-forward" size={12} color="#ffffff" />
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-                </Pressable>
-              );
-            })
-          ) : (
-            <View style={s.emptyStateBox}>
-              <Text style={s.emptyStateIcon}>🧭</Text>
-              <Text style={s.emptyStateTitle}>No Adventures Found</Text>
-              <Text style={s.emptyStateDesc}>
-                {searchQuery || filterPlace
-                  ? "No trips matched your search or active filters."
-                  : activeTab === "Pinned"
-                    ? "You haven't pinned any trips yet. Tap the bookmark icon on any trip card to pin it here!"
-                    : "You don't have any trips in this tab yet. Start planning your next memorable getaway!"}
-              </Text>
-              <Pressable style={s.emptyStateCreateBtn} onPress={() => setCreateSheetOpen(true)}>
-                <Text style={s.emptyStateCreateBtnText}>+ Plan a Trip</Text>
-              </Pressable>
-            </View>
-          )}
-        </ScrollView>
+        </Animated.ScrollView>
       )}
 
       {/* ── ONLY CREATE TRIP ICON AT BOTTOM ── */}
@@ -1302,7 +2225,7 @@ export default function TripsScreen() {
       </View>
 
       {/* ═══════════════════════════════════════════════════════════
-         TRIP DETAILS MODAL (Exact match to Image 4)
+         TRIP DETAILS MODAL (Exact match to Image with smooth animations & pull-down handle)
          ═══════════════════════════════════════════════════════════ */}
       <Modal
         animationType="none"
@@ -1310,259 +2233,577 @@ export default function TripsScreen() {
         visible={detailsModalOpen}
         onRequestClose={closeDetailsModal}
       >
-        {/* Full-screen ambient scenic backdrop with heavy blur (Matches Image 1) */}
-        {selectedTrip?.iconURL ? (
-          <ExpoImage
-            source={{ uri: selectedTrip.iconURL }}
-            style={StyleSheet.absoluteFill}
-            contentFit="cover"
-            blurRadius={Platform.OS === "ios" ? 40 : 28}
-          />
-        ) : null}
-        <BlurView intensity={Platform.OS === "ios" ? 85 : 70} tint="dark" style={StyleSheet.absoluteFill} />
-        <LinearGradient
-          colors={["rgba(10, 14, 22, 0.4)", "rgba(10, 14, 22, 0.7)", "rgba(8, 10, 15, 0.92)"]}
-          locations={[0, 0.5, 1]}
-          style={StyleSheet.absoluteFill}
-        />
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={closeDetailsModal}
-        />
+        {/* Full-screen ambient scenic backdrop with heavy blur and animated fade */}
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: detailsAnim }]}>
+          <Animated.View style={[StyleSheet.absoluteFill, { opacity: backdropFade }]}>
+            <ExpoImage
+              source={{ uri: selectedTrip ? getTripDisplayImage(selectedTrip) : calendarBackgroundImage }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              blurRadius={Platform.OS === "ios" ? 22 : 16}
+            />
+            <BlurView intensity={Platform.OS === "ios" ? 45 : 30} tint="dark" style={StyleSheet.absoluteFill} />
+            <LinearGradient
+              colors={["rgba(6, 9, 15, 0.35)", "rgba(8, 12, 20, 0.65)", "rgba(10, 14, 24, 0.88)"]}
+              locations={[0, 0.45, 1]}
+              style={StyleSheet.absoluteFill}
+            />
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={closeDetailsModal}
+            />
+          </Animated.View>
+        </Animated.View>
 
+        {/* Animated modal container with downward drag-to-dismiss gesture & Apple-like scale */}
         <Animated.View
+          {...containerPanResponder.panHandlers}
           style={[
-            s.modalWrapper,
+            StyleSheet.absoluteFill,
             {
-              paddingTop: insets.top + 8,
-              opacity: detailsAnim,
-              transform: [
-                {
-                  scale: detailsAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.9, 1],
-                  }),
-                },
-                {
-                  translateY: detailsAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [50, 0],
-                  }),
-                },
-              ],
+              transform: [{ translateY: modalTranslateY }, { scale: modalScale }],
             },
           ]}
         >
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            bounces={false}
-            contentContainerStyle={{ paddingBottom: 110 }}
+          {/* Top Pull Handle Indicator (Shows user clearly where to pull down) */}
+          <View
+            {...handlePanResponder.panHandlers}
+            style={[s.modalPullHeader, { paddingTop: insets.top + 8 }]}
           >
-            {/* 1. Hero Image Card (Matches Image 4) */}
-            <View style={s.heroCard}>
-              <ExpoImage
-                source={{ uri: selectedTrip?.iconURL }}
-                style={s.heroImg}
-                contentFit="cover"
-                transition={200}
-              />
-              <LinearGradient
-                colors={["transparent", "rgba(0,0,0,0.35)", "rgba(12,15,22,0.95)"]}
-                locations={[0, 0.45, 1]}
-                style={StyleSheet.absoluteFill}
-              />
+            <View style={s.modalPullPill} />
+          </View>
 
-              <View style={s.heroContent}>
-                <View style={s.heroTopRow}>
-                  <View style={{ flex: 1, marginRight: 10 }}>
-                    <Text style={s.heroName}>{selectedTrip?.name}</Text>
-                    <View style={s.heroUnderline} />
-                  </View>
-                  <View style={s.heroBadgeRow}>
-                    {isSelectedPinned && (
-                      <View style={s.heroBadgeFilled}>
-                        <Text style={s.heroBadgeFilledText}>PINNED</Text>
+          <View style={s.modalWrapper}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+              scrollEventThrottle={16}
+              onScroll={(e) => {
+                modalScrollOffset.current = e.nativeEvent.contentOffset.y;
+              }}
+              contentContainerStyle={{ paddingBottom: 110 }}
+            >
+              {/* 1. Hero Image Card (Matches Image 4) */}
+              <View style={s.heroCard}>
+                <ExpoImage
+                  source={{ uri: selectedTrip?.iconURL }}
+                  style={s.heroImg}
+                  contentFit="cover"
+                  transition={200}
+                />
+                <LinearGradient
+                  colors={["transparent", "rgba(0,0,0,0.35)", "rgba(12,15,22,0.95)"]}
+                  locations={[0, 0.45, 1]}
+                  style={StyleSheet.absoluteFill}
+                />
+
+                <View style={s.heroContent}>
+                  <View style={s.heroTopRow}>
+                    <View style={{ flex: 1, marginRight: 10 }}>
+                      <Text style={s.heroName}>{selectedTrip?.name}</Text>
+                      <View style={s.heroUnderline} />
+                    </View>
+                    <View style={s.heroBadgeRow}>
+                      {isSelectedPinned && (
+                        <View style={s.heroBadgeFilled}>
+                          <Text style={s.heroBadgeFilledText}>PINNED</Text>
+                        </View>
+                      )}
+                      <View style={s.heroBadge}>
+                        <Text style={s.heroBadgeText}>{selectedTrip?.travelType || "Adventure"}</Text>
                       </View>
-                    )}
-                    <View style={s.heroBadge}>
-                      <Text style={s.heroBadgeText}>{selectedTrip?.travelType || "Adventure"}</Text>
                     </View>
                   </View>
-                </View>
 
-                <View style={{ marginTop: 6 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Ionicons name="location-sharp" size={16} color="#fff" />
-                    <Text style={s.heroLoc}>{selectedTrip?.location}</Text>
+                  <View style={{ marginTop: 6 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Ionicons name="location-sharp" size={16} color="#fff" />
+                      <Text style={s.heroLoc}>{selectedTrip?.location}</Text>
+                    </View>
+                    {selectedTrip?.from || selectedTrip?.to ? (
+                      <Text style={s.heroRoute}>
+                        Route Direction Matrix: {selectedTrip?.from || selectedTrip?.location} →{" "}
+                        {selectedTrip?.to || "Destination"}
+                      </Text>
+                    ) : null}
                   </View>
-                  {selectedTrip?.from || selectedTrip?.to ? (
-                    <Text style={s.heroRoute}>
-                      Route Direction Matrix: {selectedTrip?.from || selectedTrip?.location} →{" "}
-                      {selectedTrip?.to || "Destination"}
-                    </Text>
-                  ) : null}
                 </View>
               </View>
-            </View>
 
-            {/* 2. Budget Utilization Spectrum Card (Matches Image 1 & 4) */}
-            {selectedTrip && (
-              <View style={s.infoCard}>
-                <BlurView intensity={Platform.OS === "ios" ? 35 : 25} tint="dark" style={StyleSheet.absoluteFill} />
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-                  {(() => {
-                    const budgetTotal = selectedTrip.budget?.total || 0;
-                    const budgetUsed = selectedTrip.budget?.used || 0;
-                    const pct =
-                      budgetTotal > 0
-                        ? Math.min(100, Math.round((budgetUsed / budgetTotal) * 100))
-                        : 0;
-                    const radius = 21;
-                    const strokeWidth = 4.5;
-                    const circumference = 2 * Math.PI * radius;
-                    const strokeDashoffset = circumference - (circumference * pct) / 100;
+              {/* 2. Budget Utilization Spectrum Card (Matches Image 1 & 4) */}
+              {selectedTrip && (
+                <View style={s.infoCard}>
+                  <BlurView intensity={Platform.OS === "ios" ? 35 : 25} tint="dark" style={StyleSheet.absoluteFill} />
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
+                    {(() => {
+                      const budgetTotal = selectedTrip.budget?.total || 0;
+                      const budgetUsed = selectedTrip.budget?.used || 0;
+                      const pct =
+                        budgetTotal > 0
+                          ? Math.min(100, Math.round((budgetUsed / budgetTotal) * 100))
+                          : 0;
+                      const radius = 21;
+                      const strokeWidth = 4.5;
+                      const circumference = 2 * Math.PI * radius;
+                      const strokeDashoffset = circumference - (circumference * pct) / 100;
 
-                    return (
-                      <View style={{ width: 54, height: 54, alignItems: "center", justifyContent: "center" }}>
-                        <Svg
-                          width={54}
-                          height={54}
-                          viewBox="0 0 54 54"
-                          style={{ transform: [{ rotate: "-90deg" }] }}
-                        >
-                          <Circle
-                            cx="27"
-                            cy="27"
-                            r={radius}
-                            stroke="rgba(255, 255, 255, 0.12)"
-                            strokeWidth={strokeWidth}
-                            fill="none"
-                          />
-                          <Circle
-                            cx="27"
-                            cy="27"
-                            r={radius}
-                            stroke="#ffffff"
-                            strokeWidth={strokeWidth}
-                            strokeDasharray={`${circumference} ${circumference}`}
-                            strokeDashoffset={strokeDashoffset}
-                            strokeLinecap="round"
-                            fill="none"
-                          />
-                        </Svg>
-                        <View style={{ position: "absolute", alignItems: "center", justifyContent: "center" }}>
-                          <Text style={{ color: "#ffffff", fontSize: 12.5, fontWeight: "900" }}>{pct}%</Text>
+                      return (
+                        <View style={{ width: 54, height: 54, alignItems: "center", justifyContent: "center" }}>
+                          <Svg
+                            width={54}
+                            height={54}
+                            viewBox="0 0 54 54"
+                            style={{ transform: [{ rotate: "-90deg" }] }}
+                          >
+                            <Circle
+                              cx="27"
+                              cy="27"
+                              r={radius}
+                              stroke="rgba(255, 255, 255, 0.12)"
+                              strokeWidth={strokeWidth}
+                              fill="none"
+                            />
+                            <Circle
+                              cx="27"
+                              cy="27"
+                              r={radius}
+                              stroke="#ffffff"
+                              strokeWidth={strokeWidth}
+                              strokeDasharray={`${circumference} ${circumference}`}
+                              strokeDashoffset={strokeDashoffset}
+                              strokeLinecap="round"
+                              fill="none"
+                            />
+                          </Svg>
+                          <View style={{ position: "absolute", alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ color: "#ffffff", fontSize: 12.5, fontWeight: "900" }}>{pct}%</Text>
+                          </View>
                         </View>
-                      </View>
-                    );
-                  })()}
+                      );
+                    })()}
 
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.infoCardLabel}>BUDGET UTILIZATION SPECTRUM</Text>
-                    <Text style={s.infoCardVal}>
-                      ₹{selectedTrip.budget?.used || 0}{" "}
-                      <Text style={{ fontWeight: "400", opacity: 0.5, fontSize: 13 }}>used of</Text>{" "}
-                      <Text style={{ fontWeight: "900" }}>₹{selectedTrip.budget?.total || 0}</Text>
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {/* 3. Timeline Span Horizon Card (Matches Image 1 & 4) */}
-            <View style={s.infoCard}>
-              <BlurView intensity={Platform.OS === "ios" ? 35 : 25} tint="dark" style={StyleSheet.absoluteFill} />
-              <Text style={s.infoCardLabel}>TIMELINE SPAN HORIZON</Text>
-              <Text style={s.infoCardDate}>
-                {formatSpanHorizon(selectedTrip?.startDate, selectedTrip?.endDate)}
-              </Text>
-            </View>
-
-            {/* 4. Account System Deployed Members Card (Matches Image 1 & 4) */}
-            <View style={s.infoCard}>
-              <BlurView intensity={Platform.OS === "ios" ? 35 : 25} tint="dark" style={StyleSheet.absoluteFill} />
-              <Text style={s.infoCardLabel}>ACCOUNT SYSTEM DEPLOYED MEMBERS</Text>
-              <View style={s.memberChips}>
-                {selectedTrip?.memberProfiles && selectedTrip.memberProfiles.length > 0 ? (
-                  selectedTrip.memberProfiles.map((m) => (
-                    <View key={m.uid} style={s.chip}>
-                      <ExpoImage source={{ uri: m.photoURL }} style={s.chipAv} contentFit="cover" />
-                      <Text style={s.chipName} numberOfLines={1}>
-                        {m.name || m.username}
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.infoCardLabel}>BUDGET UTILIZATION SPECTRUM</Text>
+                      <Text style={s.infoCardVal}>
+                        ₹{selectedTrip.budget?.used || 0}{" "}
+                        <Text style={{ fontWeight: "400", opacity: 0.5, fontSize: 13 }}>used of</Text>{" "}
+                        <Text style={{ fontWeight: "900" }}>₹{selectedTrip.budget?.total || 0}</Text>
                       </Text>
                     </View>
-                  ))
-                ) : (
-                  <View style={s.chip}>
-                    <View style={[s.chipAv, { backgroundColor: "#444" }]} />
-                    <Text style={s.chipName}>1 Deployed Member</Text>
                   </View>
-                )}
+                </View>
+              )}
+
+              {/* 3. Timeline Span Horizon Card (Matches Image 1 & 4) */}
+              <View style={s.infoCard}>
+                <BlurView intensity={Platform.OS === "ios" ? 35 : 25} tint="dark" style={StyleSheet.absoluteFill} />
+                <Text style={s.infoCardLabel}>TIMELINE SPAN HORIZON</Text>
+                <Text style={s.infoCardDate}>
+                  {formatSpanHorizon(selectedTrip?.startDate, selectedTrip?.endDate)}
+                </Text>
               </View>
+
+              {/* 4. Account System Deployed Members Card (Matches Image 1 & 4) */}
+              <View style={s.infoCard}>
+                <BlurView intensity={Platform.OS === "ios" ? 35 : 25} tint="dark" style={StyleSheet.absoluteFill} />
+                <Text style={s.infoCardLabel}>ACCOUNT SYSTEM DEPLOYED MEMBERS</Text>
+                <View style={s.memberChips}>
+                  {selectedTrip?.memberProfiles && selectedTrip.memberProfiles.length > 0 ? (
+                    selectedTrip.memberProfiles.map((m) => (
+                      <View key={m.uid} style={s.chip}>
+                        <ExpoImage source={{ uri: m.photoURL }} style={s.chipAv} contentFit="cover" />
+                        <Text style={s.chipName} numberOfLines={1}>
+                          {m.name || m.username}
+                        </Text>
+                      </View>
+                    ))
+                  ) : (
+                    <View style={s.chip}>
+                      <View style={[s.chipAv, { backgroundColor: "#444" }]} />
+                      <Text style={s.chipName}>1 Deployed Member</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+
+          {/* 5. Floating Bottom Toolbar (Matches Image 4) */}
+          {detailsModalOpen && selectedTrip && (
+            <View
+              style={[
+                s.modalToolbar,
+                {
+                  bottom: insets.bottom + 16,
+                },
+              ]}
+            >
+              <Pressable onPress={handleShare} style={s.tbCircleBtn}>
+                <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
+                <Ionicons name="share-outline" size={20} color="#fff" />
+              </Pressable>
+
+              <View style={s.tbCapsule}>
+                <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
+                <Pressable
+                  onPress={() => handleSaveToPhoneCalendar(selectedTrip)}
+                  style={s.tbCapsuleBtn}
+                  hitSlop={8}
+                >
+                  <Ionicons name="calendar-outline" size={19} color="#ffffff" />
+                </Pressable>
+                <Pressable onPress={togglePin} style={s.tbCapsuleBtn}>
+                  <MaterialCommunityIcons
+                    name={isSelectedPinned ? "pin" : "pin-outline"}
+                    size={19}
+                    color={isSelectedPinned ? "#fbbf24" : "#ffffff"}
+                    style={!isSelectedPinned ? { transform: [{ rotate: "45deg" }] } : undefined}
+                  />
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    closeDetailsModal();
+                    setTimeout(() => {
+                      if (selectedTrip) router.push(`/trips/${selectedTrip.id}` as any);
+                    }, 200);
+                  }}
+                  style={s.tbCapsuleBtn}
+                >
+                  <Ionicons name="arrow-forward" size={20} color="#ffffff" />
+                </Pressable>
+              </View>
+
+              <Pressable onPress={() => setDeleteDialogOpen(true)} style={s.tbCircleBtn}>
+                <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
+                <Ionicons name="trash-outline" size={20} color="#ffffff" />
+              </Pressable>
             </View>
-          </ScrollView>
+          )}
+        </Animated.View>
+      </Modal>
+
+      {/* ═══════════════════════════════════════════════════════════
+         INSTAGRAM-STYLE STORIES & TRAVEL ARCHIVE CALENDAR DRAWER
+         ═══════════════════════════════════════════════════════════ */}
+      <Modal
+        animationType="none"
+        transparent
+        visible={calendarDrawerOpen}
+        onRequestClose={closeCalendarDrawer}
+      >
+        {/* Ambient Blur Backdrop - Blurs the underlying Trip Page without random blue accent */}
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: calendarDrawerAnim }]}>
+          <Animated.View style={[StyleSheet.absoluteFill, { opacity: calendarBackdropFade }]}>
+            <BlurView
+              intensity={Platform.OS === "ios" ? 80 : 65}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+            />
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: "rgba(12, 14, 21, 0.76)" },
+              ]}
+            />
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeCalendarDrawer} />
+          </Animated.View>
         </Animated.View>
 
-        {/* 5. Floating Bottom Toolbar (Matches Image 4) */}
-        {detailsModalOpen && selectedTrip && (
-          <Animated.View
-            style={[
-              s.modalToolbar,
-              {
-                bottom: insets.bottom + 16,
-                opacity: detailsAnim,
-                transform: [
-                  {
-                    translateY: detailsAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [60, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}
+        {/* Animated Drawer Container with slide-down-to-close gesture */}
+        <Animated.View
+          {...calendarDrawerPanResponder.panHandlers}
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              transform: [{ translateY: calendarDrawerTranslateY }, { scale: calendarDrawerScale }],
+            },
+          ]}
+        >
+          {/* Top Pull Handle (Slide down to close) */}
+          <View
+            {...calendarHandlePanResponder.panHandlers}
+            style={[s.modalPullHeader, { paddingTop: insets.top + 8 }]}
           >
-            <Pressable onPress={handleShare} style={s.tbCircleBtn}>
-              <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
-              <Ionicons name="share-outline" size={20} color="#fff" />
-            </Pressable>
+            <View style={s.modalPullPill} />
+          </View>
 
-            <View style={s.tbCapsule}>
-              <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
-              <Pressable
-                onPress={() => handleSaveToPhoneCalendar(selectedTrip)}
-                style={s.tbCapsuleBtn}
-                hitSlop={8}
-              >
-                <Ionicons name="calendar-outline" size={19} color="#ffffff" />
+          <View style={s.archiveDrawerWrapper}>
+            {/* Clean Travel Calendar Header */}
+            <View style={s.archiveHeaderRow}>
+              <Pressable onPress={closeCalendarDrawer} hitSlop={10} style={s.archiveBackBtn}>
+                <Ionicons name="arrow-back" size={22} color="#ffffff" />
               </Pressable>
-              <Pressable onPress={togglePin} style={s.tbCapsuleBtn}>
-                <MaterialCommunityIcons
-                  name={isSelectedPinned ? "pin" : "pin-outline"}
-                  size={19}
-                  color={isSelectedPinned ? "#fbbf24" : "#ffffff"}
-                  style={!isSelectedPinned ? { transform: [{ rotate: "45deg" }] } : undefined}
-                />
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  closeDetailsModal();
-                  setTimeout(() => {
-                    if (selectedTrip) router.push(`/trips/${selectedTrip.id}` as any);
-                  }, 200);
-                }}
-                style={s.tbCapsuleBtn}
-              >
-                <Ionicons name="arrow-forward" size={20} color="#ffffff" />
+              <View style={s.archiveTitleRow}>
+                <Ionicons name="calendar-outline" size={18} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={s.archiveTitleText}>Travel Calendar</Text>
+              </View>
+              <Pressable onPress={closeCalendarDrawer} hitSlop={10} style={s.archiveCloseBtn}>
+                <Ionicons name="close" size={22} color="#ffffff" />
               </Pressable>
             </View>
 
-            <Pressable onPress={() => setDeleteDialogOpen(true)} style={s.tbCircleBtn}>
-              <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
-              <Ionicons name="trash-outline" size={20} color="#ffffff" />
-            </Pressable>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+              scrollEventThrottle={16}
+              onScroll={(e) => {
+                calendarDrawerScrollOffset.current = e.nativeEvent.contentOffset.y;
+              }}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
+            >
+              {/* 3. Month & Year Title with Navigation - Matches Image */}
+              <View style={s.archiveMonthNavRow}>
+                <Pressable
+                  onPress={() => setArchiveMonthOffset((prev) => prev - 1)}
+                  hitSlop={12}
+                  style={s.archiveMonthNavBtn}
+                >
+                  <Ionicons name="chevron-back" size={20} color="#ffffff" />
+                </Pressable>
+                <Text style={s.archiveMonthTitleText}>{archiveMonthTitle}</Text>
+                <Pressable
+                  onPress={() => setArchiveMonthOffset((prev) => prev + 1)}
+                  hitSlop={12}
+                  style={s.archiveMonthNavBtn}
+                >
+                  <Ionicons name="chevron-forward" size={20} color="#ffffff" />
+                </Pressable>
+              </View>
+
+              {/* 4. Weekday Header Labels (Sun, Mon, Tue, Wed, Thu, Fri, Sat) */}
+              <View style={s.archiveWeekdayRow}>
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((w, idx) => (
+                  <View key={idx} style={s.archiveWeekdayCell}>
+                    <Text style={s.archiveWeekdayText}>{w}</Text>
+                  </View>
+                ))}
+              </View>
+
+              {/* 5. Calendar Days Grid (Exact Instagram circular photo thumbnail style!) */}
+              <View style={s.archiveGridContainer}>
+                {archiveGridDays.map((item, idx) => {
+                  if (!item) {
+                    return <View key={`empty-${idx}`} style={s.archiveDayCell} />;
+                  }
+
+                  const tripOnDate = getTripForArchiveDate(item.date);
+                  const isToday = isSameDay(item.date, new Date());
+                  const isSelected = selectedArchiveTrip && tripOnDate && selectedArchiveTrip.id === tripOnDate.id;
+
+                  return (
+                    <View key={`day-${item.dayNum}`} style={s.archiveDayCell}>
+                      {tripOnDate ? (
+                        /* PHOTO CIRCLE WITH DAY NUMBER OVER IT (Exact Instagram style) */
+                        <Pressable
+                          onPress={() => setSelectedArchiveTrip(tripOnDate)}
+                          style={[
+                            s.archivePhotoCircle,
+                            isSelected && s.archivePhotoCircleSelected,
+                          ]}
+                        >
+                          <ExpoImage
+                            source={{ uri: getTripDisplayImage(tripOnDate) }}
+                            style={StyleSheet.absoluteFill}
+                            contentFit="cover"
+                          />
+                          <View style={s.archivePhotoCircleOverlay} />
+                          <Text style={s.archivePhotoDayText}>{item.dayNum}</Text>
+                        </Pressable>
+                      ) : isToday ? (
+                        /* Today indicator circle */
+                        <View style={s.archiveTodayCircle}>
+                          <Text style={s.archiveTodayDayText}>{item.dayNum}</Text>
+                        </View>
+                      ) : (
+                        /* Normal day number text */
+                        <View style={s.archivePlainDay}>
+                          <Text style={s.archivePlainDayText}>{item.dayNum}</Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+
+              {/* 6. Selected Trip Preview Card from Archive */}
+              {selectedArchiveTrip && (
+                <View style={s.archiveTripPreviewBox}>
+                  <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
+                  <ExpoImage
+                    source={{ uri: getTripDisplayImage(selectedArchiveTrip) }}
+                    style={s.archivePreviewCover}
+                    contentFit="cover"
+                  />
+                  <View style={{ flex: 1, paddingLeft: 12 }}>
+                    <Text style={s.archivePreviewName} numberOfLines={1}>
+                      {selectedArchiveTrip.name}
+                    </Text>
+                    <Text style={s.archivePreviewLoc} numberOfLines={1}>
+                      📍 {selectedArchiveTrip.location || "Scenic Location"}
+                    </Text>
+                    <Text style={s.archivePreviewDates}>
+                      📅 {formatSpanHorizon(selectedArchiveTrip.startDate, selectedArchiveTrip.endDate)}
+                    </Text>
+                    <Pressable
+                      onPress={() => {
+                        closeCalendarDrawer();
+                        setTimeout(() => openDetailsModal(selectedArchiveTrip), 200);
+                      }}
+                      style={s.archivePreviewActionBtn}
+                    >
+                      <Text style={s.archivePreviewActionText}>Open Trip Details</Text>
+                      <Ionicons name="arrow-forward" size={13} color="#000000" />
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </Animated.View>
+      </Modal>
+
+      {/* ═══════════════════════════════════════════════════════════
+         AI SUGGESTED TRIPS MODAL
+         ═══════════════════════════════════════════════════════════ */}
+      <Modal
+        animationType="none"
+        transparent
+        visible={suggestedModalOpen}
+        onRequestClose={closeSuggestedModal}
+      >
+        {/* Ambient Blur Backdrop - Blurs the underlying Trip Page without random blue accent */}
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: suggestedModalAnim }]}>
+          <Animated.View style={[StyleSheet.absoluteFill, { opacity: suggestedBackdropFade }]}>
+            <BlurView
+              intensity={Platform.OS === "ios" ? 80 : 65}
+              tint="dark"
+              style={StyleSheet.absoluteFill}
+            />
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: "rgba(12, 14, 21, 0.76)" },
+              ]}
+            />
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeSuggestedModal} />
           </Animated.View>
-        )}
+        </Animated.View>
+
+        {/* Modal Container with pull-down-to-close */}
+        <Animated.View
+          {...suggestedContainerPanResponder.panHandlers}
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              transform: [{ translateY: suggestedModalTranslateY }, { scale: suggestedModalScale }],
+            },
+          ]}
+        >
+          {/* Top Pull Handle */}
+          <View
+            {...suggestedHandlePanResponder.panHandlers}
+            style={[s.modalPullHeader, { paddingTop: insets.top + 8 }]}
+          >
+            <View style={s.modalPullPill} />
+          </View>
+
+          <View style={s.suggestedModalWrapper}>
+            {/* Header */}
+            <View style={s.suggestedHeaderRow}>
+              <View>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Text style={s.suggestedModalTitle}>Suggested Trips</Text>
+                  <View style={s.aiBadge}>
+                    <Text style={s.aiBadgeText}>AI CURATED</Text>
+                  </View>
+                </View>
+                <Text style={s.suggestedModalSubtitle}>
+                  Tailored to your {suggestedTripsData.favType} preference & ₹{suggestedTripsData.avgBudget.toLocaleString()} budget
+                </Text>
+              </View>
+              <Pressable onPress={closeSuggestedModal} hitSlop={10} style={s.suggestedCloseBtn}>
+                <Ionicons name="close" size={20} color="#ffffff" />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              scrollEventThrottle={16}
+              onScroll={(e) => {
+                suggestedScrollOffset.current = e.nativeEvent.contentOffset.y;
+              }}
+              nestedScrollEnabled={true}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
+            >
+              {suggestedTripsData.list.map((sug) => {
+                return (
+                  <View key={sug.id} style={s.sugCard}>
+                    <ExpoImage source={{ uri: sug.image }} style={s.sugCardBg} contentFit="cover" />
+                    <LinearGradient
+                      colors={["transparent", "rgba(10, 13, 20, 0.7)", "rgba(10, 13, 20, 0.96)"]}
+                      locations={[0, 0.45, 1]}
+                      style={StyleSheet.absoluteFill}
+                    />
+
+                    <View style={s.sugCardBody}>
+                      <View style={s.sugTopBadges}>
+                        <View style={s.sugBadgePill}>
+                          <Text style={s.sugBadgeText}>{sug.travelType}</Text>
+                        </View>
+                        <View style={s.sugBudgetPill}>
+                          <Text style={s.sugBudgetText}>₹{sug.budget.toLocaleString()} Estimated</Text>
+                        </View>
+                      </View>
+
+                      <Text style={s.sugTitle}>{sug.name}</Text>
+                      <View style={s.sugRouteRow}>
+                        <Ionicons name="location-sharp" size={13} color="#ffffff" />
+                        <Text style={s.sugRouteText}>{sug.from} ➔ {sug.to}</Text>
+                      </View>
+
+                      {/* AI Rationale Tag */}
+                      <View style={s.sugInsightBox}>
+                        <Ionicons name="sparkles" size={12} color="#fbbf24" />
+                        <Text style={s.sugInsightText}>{sug.insight}</Text>
+                      </View>
+
+                      {/* Create Trip Action Button (Directly opens CreateTripSheet with auto-fill) */}
+                      <Pressable
+                        onPress={() => handleOpenCreateWithSuggestion(sug)}
+                        style={({ pressed }) => [
+                          s.sugAdoptBtn,
+                          pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
+                        ]}
+                      >
+                        <Ionicons name="sparkles" size={15} color="#000000" />
+                        <Text style={s.sugAdoptBtnText}>Create Trip (Auto-fill)</Text>
+                        <Ionicons name="arrow-forward" size={14} color="#000000" />
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })}
+
+              {/* Load 2 More Suggestions Button */}
+              {suggestedTripsData.hasMore && (
+                <Pressable
+                  onPress={() => setVisibleSuggestedCount((prev) => prev + 2)}
+                  style={({ pressed }) => [
+                    s.moreSuggestionsBtn,
+                    pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
+                  ]}
+                >
+                  <Ionicons name="sparkles" size={15} color="#ffffff" />
+                  <Text style={s.moreSuggestionsBtnText}>
+                    Load 2 More Suggestions ({suggestedTripsData.totalCount - visibleSuggestedCount} more)
+                  </Text>
+                  <Ionicons name="chevron-down" size={15} color="#ffffff" />
+                </Pressable>
+              )}
+            </ScrollView>
+          </View>
+        </Animated.View>
       </Modal>
 
       {/* ── FILTER MODAL (Exact glossy glassmorphic style with blur effect) ── */}
@@ -1712,8 +2953,15 @@ export default function TripsScreen() {
         tripName={selectedTrip?.name}
       />
 
-      {/* ── CREATE TRIP SHEET ── */}
-      <CreateTripSheet visible={createSheetOpen} onClose={() => setCreateSheetOpen(false)} />
+      {/* ── CREATE TRIP SHEET (Supports Auto-fill from AI Suggested Trips) ── */}
+      <CreateTripSheet
+        visible={createSheetOpen}
+        onClose={() => {
+          setCreateSheetOpen(false);
+          setPrefilledTripData(null);
+        }}
+        initialTripData={prefilledTripData}
+      />
     </View>
   );
 }
@@ -1726,6 +2974,30 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#0c0e15" },
 
   loadingBox: { flex: 1, alignItems: "center", justifyContent: "center" },
+
+  collapsibleTopSection: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  stickyHeaderContainer: {
+    width: "100%",
+    zIndex: 20,
+    elevation: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(255, 255, 255, 0.12)",
+    overflow: "hidden",
+    backgroundColor: "transparent",
+  },
+  stickyHeaderContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  tripsListSection: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
 
   /* 1. Header */
   topHeaderRow: {
@@ -2047,16 +3319,51 @@ const s = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: -0.2,
   },
+  calArchiveBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  calArchiveBtnText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
   calTodayBtn: {
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 10,
     backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
+  calTodayBtnActive: {
+    backgroundColor: "#ffffff",
+  },
   calTodayBtnText: {
     color: "#ffffff",
     fontSize: 11,
     fontWeight: "700",
+  },
+  calTodayBtnTextActive: {
+    color: "#000000",
+    fontWeight: "900",
+  },
+  calPullIndicatorWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 2,
+    marginBottom: 6,
+  },
+  calPullIndicatorBar: {
+    width: 34,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.25)",
   },
   calScrollContent: { gap: 8, paddingHorizontal: 2 },
   calDayPill: {
@@ -2072,6 +3379,40 @@ const s = StyleSheet.create({
   calDayPillToday: {
     backgroundColor: "#ffffff",
     borderColor: "#ffffff",
+  },
+  calDayPillSelected: {
+    backgroundColor: "#ffffff",
+    borderColor: "#ffffff",
+    transform: [{ scale: 1.02 }],
+  },
+  calDayNameSelected: {
+    color: "#000000",
+    fontWeight: "900",
+  },
+  calDayNumSelected: {
+    color: "#000000",
+    fontWeight: "900",
+  },
+  calDayPillCurrentToday: {
+    backgroundColor: "rgba(255, 255, 255, 0.14)",
+    borderColor: "#ffffff",
+    borderWidth: 1.5,
+  },
+  calDayNameCurrentToday: {
+    color: "#ffffff",
+    fontWeight: "900",
+  },
+  calDayNumCurrentToday: {
+    color: "#ffffff",
+    fontWeight: "900",
+  },
+  calTodayDot: {
+    position: "absolute",
+    bottom: 5,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: "#ffffff",
   },
   calDayName: {
     color: "rgba(255, 255, 255, 0.6)",
@@ -2092,6 +3433,81 @@ const s = StyleSheet.create({
     width: 5,
     height: 5,
     borderRadius: 2.5,
+  },
+
+  /* Show More Button */
+  showMoreContainer: {
+    marginTop: 8,
+    marginBottom: 20,
+    alignItems: "center",
+  },
+  showMoreBtn: {
+    width: "100%",
+    borderRadius: 20,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.14)",
+    backgroundColor: "rgba(18, 22, 34, 0.85)",
+  },
+  showMoreBtnPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.99 }],
+  },
+  showMoreInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 12,
+  },
+  showMoreIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  showMoreTextWrap: {
+    flex: 1,
+  },
+  showMoreTitle: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: -0.2,
+  },
+  showMoreSubtitle: {
+    color: "rgba(255, 255, 255, 0.6)",
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  showMoreChevronCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  showLessBtn: {
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  showLessInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  showLessText: {
+    color: "rgba(255, 255, 255, 0.8)",
+    fontSize: 12.5,
+    fontWeight: "700",
   },
 
   /* 6. Status Tabs */
@@ -2450,6 +3866,19 @@ const s = StyleSheet.create({
   /* ═══════════════════════════════════════════════════════════
      DETAILS MODAL STYLES (Image 4)
      ═══════════════════════════════════════════════════════════ */
+  modalPullHeader: {
+    width: "100%",
+    paddingBottom: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 100,
+  },
+  modalPullPill: {
+    width: 46,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "rgba(255, 255, 255, 0.45)",
+  },
   modalWrapper: {
     flex: 1,
     paddingHorizontal: 16,
@@ -2751,6 +4180,421 @@ const s = StyleSheet.create({
   },
   applyText: {
     color: "#0a0e1a",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+
+  /* ── Suggested Trips Trigger & Modal Styles ── */
+  suggestedSectionContainer: {
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  suggestedTripsTriggerBtn: {
+    borderRadius: 22,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.14)",
+  },
+  suggestedTriggerInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    gap: 12,
+  },
+  suggestedTriggerIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.18)",
+  },
+  suggestedTriggerTitle: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  suggestedTriggerSub: {
+    color: "rgba(255, 255, 255, 0.65)",
+    fontSize: 11.5,
+    fontWeight: "500",
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  aiBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+  },
+  aiBadgeText: {
+    color: "#ffffff",
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+  },
+  suggestedArrowCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  suggestedModalWrapper: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  suggestedHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 16,
+    paddingTop: 4,
+  },
+  suggestedModalTitle: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: -0.4,
+  },
+  suggestedModalSubtitle: {
+    color: "rgba(255, 255, 255, 0.6)",
+    fontSize: 12,
+    fontWeight: "500",
+    marginTop: 3,
+  },
+  suggestedCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sugCard: {
+    height: 230,
+    borderRadius: 22,
+    overflow: "hidden",
+    marginBottom: 16,
+    backgroundColor: "#161922",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    position: "relative",
+  },
+  sugCardBg: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  sugCardBody: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 16,
+  },
+  sugTopBadges: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 6,
+  },
+  sugBadgePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+  },
+  sugBadgeText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  sugBudgetPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+  },
+  sugBudgetText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  sugTitle: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "900",
+    letterSpacing: -0.3,
+  },
+  sugRouteRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 3,
+  },
+  sugRouteText: {
+    color: "rgba(255, 255, 255, 0.8)",
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  sugInsightBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.35)",
+  },
+  sugInsightText: {
+    color: "rgba(255, 255, 255, 0.85)",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  sugAdoptBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#ffffff",
+    paddingVertical: 10,
+    borderRadius: 16,
+    marginTop: 10,
+  },
+  sugAdoptBtnText: {
+    color: "#000000",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+
+  /* ── Instagram-Style Travel Archive Calendar Drawer Styles ── */
+  archiveDrawerWrapper: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  archiveHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+  },
+  archiveBackBtn: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archiveTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  archiveTitleText: {
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  archiveCloseBtn: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archiveTabBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255, 255, 255, 0.1)",
+    paddingVertical: 8,
+    marginBottom: 16,
+  },
+  archiveTabItem: {
+    alignItems: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+  },
+  archiveTabItemActive: {
+    position: "relative",
+  },
+  archiveTabActiveLine: {
+    position: "absolute",
+    bottom: -8,
+    left: 4,
+    right: 4,
+    height: 2,
+    backgroundColor: "#ffffff",
+    borderRadius: 1,
+  },
+  archiveMonthNavRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+  },
+  archiveMonthNavBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archiveMonthTitleText: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  archiveWeekdayRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    paddingVertical: 10,
+  },
+  archiveWeekdayCell: {
+    width: (SCREEN_WIDTH - 32) / 7,
+    alignItems: "center",
+  },
+  archiveWeekdayText: {
+    color: "rgba(255, 255, 255, 0.45)",
+    fontSize: 11.5,
+    fontWeight: "700",
+  },
+  archiveGridContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingVertical: 8,
+  },
+  archiveDayCell: {
+    width: (SCREEN_WIDTH - 32) / 7,
+    height: 52,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archivePhotoCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.8)",
+  },
+  archivePhotoCircleSelected: {
+    borderColor: "#ffffff",
+    transform: [{ scale: 1.1 }],
+    elevation: 6,
+  },
+  archivePhotoCircleOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.35)",
+  },
+  archivePhotoDayText: {
+    color: "#ffffff",
+    fontSize: 13.5,
+    fontWeight: "900",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  archiveTodayCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archiveTodayDayText: {
+    color: "#000000",
+    fontSize: 13.5,
+    fontWeight: "900",
+  },
+  archivePlainDay: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archivePlainDayText: {
+    color: "rgba(255, 255, 255, 0.65)",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  archiveTripPreviewBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    marginTop: 20,
+    overflow: "hidden",
+  },
+  archivePreviewCover: {
+    width: 72,
+    height: 72,
+    borderRadius: 16,
+  },
+  archivePreviewName: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  archivePreviewLoc: {
+    color: "rgba(255, 255, 255, 0.7)",
+    fontSize: 11.5,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  archivePreviewDates: {
+    color: "rgba(255, 255, 255, 0.6)",
+    fontSize: 10.5,
+    fontWeight: "500",
+    marginTop: 2,
+  },
+  archivePreviewActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    alignSelf: "flex-start",
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+    marginTop: 6,
+  },
+  archivePreviewActionText: {
+    color: "#000000",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  moreSuggestionsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.22)",
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    marginTop: 8,
+    marginBottom: 44,
+  },
+  moreSuggestionsBtnText: {
+    color: "#ffffff",
     fontSize: 14,
     fontWeight: "800",
   },
