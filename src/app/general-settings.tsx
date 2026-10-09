@@ -1,1 +1,3 @@
-export { default } from "./appearance";
+import AppearanceScreen from "./appearance";
+
+export default AppearanceScreen;
