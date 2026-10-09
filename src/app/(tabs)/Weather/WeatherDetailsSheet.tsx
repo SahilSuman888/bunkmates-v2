@@ -14,7 +14,7 @@ import { BlurView } from "../../../components/ui/AppBlurView";
 import dayjs from "dayjs";
 import WeatherGridCard from "./WeatherGridCard";
 import HourlyForecast from "./HourlyForecast";
-import { fetchForecast } from "../../../lib/WeatherService";
+import { fetchForecast, parseRefreshIntervalMs } from "../../../lib/WeatherService";
 import { Feather } from "@expo/vector-icons";
 import { useAppSettings } from "../../../contexts/AppSettingsContext";
 
@@ -23,15 +23,27 @@ const { height } = Dimensions.get("window");
 export default function WeatherDetailsSheet({
   weather,
   aqiValue,
+  airPollution,
   visible,
   onClose,
 }: {
   weather: any;
   aqiValue?: number | null;
+  airPollution?: any;
   visible: boolean;
   onClose: () => void;
 }) {
-  const { formatTemperature } = useAppSettings();
+  const {
+    formatTemperature,
+    formatWindSpeed,
+    forecastHorizon,
+    showFeelsLike,
+    showWindSpeed,
+    severeAlerts,
+    rainNotifications,
+    highPollutionAlerts,
+    refreshInterval,
+  } = useAppSettings();
   const [forecast, setForecast] = useState<any[]>([]);
   const [modalVisible, setModalVisible] = useState(visible);
 
@@ -65,14 +77,15 @@ export default function WeatherDetailsSheet({
     }
   }, [visible]);
 
-  // Fetch 24-hour forecast data
+  // Fetch forecast data with dynamic cache lifetime according to refreshInterval
   useEffect(() => {
     if (visible && weather?.coord) {
-      fetchForecast(weather.coord.lat, weather.coord.lon)
+      const cacheLifetime = parseRefreshIntervalMs(refreshInterval);
+      fetchForecast(weather.coord.lat, weather.coord.lon, cacheLifetime)
         .then((data) => setForecast(data.list || []))
         .catch((err) => console.log("Forecast fetch error:", err));
     }
-  }, [visible, weather]);
+  }, [visible, weather, refreshInterval]);
 
   // Exit animation helper: smooth slide-down + backdrop fade-out
   const handleCloseAnimation = () => {
@@ -161,6 +174,75 @@ export default function WeatherDetailsSheet({
   };
   const aqiDetail = getAqiDetails(aqiNum);
 
+  const maxForecastItems =
+    forecastHorizon === "3 Days"
+      ? 12
+      : forecastHorizon === "5 Days"
+      ? 24
+      : forecastHorizon === "7 Days"
+      ? 32
+      : 40;
+
+  const weatherMain = weather?.weather?.[0]?.main || "";
+  const isSevere =
+    severeAlerts &&
+    (weatherMain === "Thunderstorm" ||
+      weatherMain === "Squall" ||
+      weatherMain === "Tornado" ||
+      Boolean(weather?.wind?.speed && weather.wind.speed > 15));
+
+  const isRaining =
+    rainNotifications &&
+    (weatherMain === "Rain" || weatherMain === "Drizzle");
+
+  const isHighPollution =
+    highPollutionAlerts && aqiNum > 100;
+
+  const pollutantsList = [
+    {
+      name: "PM2.5",
+      val:
+        airPollution?.pollutants?.PM25 != null
+          ? `${airPollution.pollutants.PM25} µg/m³`
+          : "18 µg/m³",
+    },
+    {
+      name: "PM10",
+      val:
+        airPollution?.pollutants?.PM10 != null
+          ? `${airPollution.pollutants.PM10} µg/m³`
+          : "42 µg/m³",
+    },
+    {
+      name: "NO2",
+      val:
+        airPollution?.pollutants?.NO2 != null
+          ? `${airPollution.pollutants.NO2} µg/m³`
+          : "12 µg/m³",
+    },
+    {
+      name: "O3",
+      val:
+        airPollution?.pollutants?.OZONE != null
+          ? `${airPollution.pollutants.OZONE} µg/m³`
+          : "24 µg/m³",
+    },
+    {
+      name: "CO",
+      val:
+        airPollution?.pollutants?.CO != null
+          ? `${airPollution.pollutants.CO} mg/m³`
+          : "0.4 mg/m³",
+    },
+    {
+      name: "SO2",
+      val:
+        airPollution?.pollutants?.SO2 != null
+          ? `${airPollution.pollutants.SO2} µg/m³`
+          : "5 µg/m³",
+    },
+  ];
+
   return (
     <Modal
       animationType="none"
@@ -210,6 +292,34 @@ export default function WeatherDetailsSheet({
                 Station ID: {stationId} • GMT+5.5
               </Text>
             </View>
+
+            {/* Live Alerts Banners if triggered by user preferences */}
+            {isSevere && (
+              <View style={styles.alertBannerSevere}>
+                <Feather name="alert-triangle" size={15} color="#ff4757" />
+                <Text style={styles.alertBannerSevereText}>
+                  Severe Weather Alert: {weatherMain || "Storm"} conditions detected
+                </Text>
+              </View>
+            )}
+
+            {isRaining && !isSevere && (
+              <View style={styles.alertBannerRain}>
+                <Feather name="cloud-rain" size={15} color="#38bdf8" />
+                <Text style={styles.alertBannerRainText}>
+                  Precipitation Notice: Active rainfall in current vicinity
+                </Text>
+              </View>
+            )}
+
+            {isHighPollution && (
+              <View style={styles.alertBannerPollution}>
+                <Feather name="alert-circle" size={15} color="#f97316" />
+                <Text style={styles.alertBannerPollutionText}>
+                  High Pollution Warning: AQI {aqiNum} ({aqiDetail.label})
+                </Text>
+              </View>
+            )}
 
             {/* Hero Temperature */}
             <View style={styles.mainTempContainer}>
@@ -270,14 +380,7 @@ export default function WeatherDetailsSheet({
               {/* Pollutants Breakdown Grid */}
               <Text style={styles.pollutantGridTitle}>POLLUTANTS BREAKDOWN</Text>
               <View style={styles.pollutantGrid}>
-                {[
-                  { name: "PM2.5", val: "18 µg/m³", status: "Good" },
-                  { name: "PM10", val: "42 µg/m³", status: "Good" },
-                  { name: "NO2", val: "12 ppb", status: "Low" },
-                  { name: "O3", val: "24 ppb", status: "Normal" },
-                  { name: "CO", val: "0.4 ppm", status: "Low" },
-                  { name: "SO2", val: "5 ppb", status: "Low" },
-                ].map((item) => (
+                {pollutantsList.map((item) => (
                   <View key={item.name} style={styles.pollutantItem}>
                     <Text style={styles.pollutantName}>{item.name}</Text>
                     <Text style={styles.pollutantVal}>{item.val}</Text>
@@ -286,15 +389,19 @@ export default function WeatherDetailsSheet({
               </View>
             </View>
 
-            {/* 24-Hour Forecast Timeline */}
-            <HourlyForecast data={forecast} />
+            {/* Forecast Timeline (Sliced dynamically to horizon: 3/5/7/10 days) */}
+            <HourlyForecast data={forecast} maxItems={maxForecastItems} />
 
             {/* Section 1: Meteorological Data */}
             <Text style={styles.sectionTitle}>1. METEOROLOGICAL DATA</Text>
             <View style={styles.grid}>
               <WeatherGridCard
                 label="Feels Like"
-                value={`${Math.round(weather?.main?.feels_like ?? currentTemp)}°C`}
+                value={
+                  showFeelsLike && weather?.main?.feels_like != null
+                    ? formatTemperature(weather.main.feels_like, "C")
+                    : currentTemp
+                }
               />
               <WeatherGridCard
                 label="Pressure"
@@ -334,17 +441,23 @@ export default function WeatherDetailsSheet({
             {/* Section 3: Wind & Atmosphere */}
             <Text style={styles.sectionTitle}>3. WIND & ATMOSPHERE</Text>
             <View style={styles.grid}>
-              <WeatherGridCard
-                label="Wind Speed"
-                value={`${weather?.wind?.speed ?? 3.6} m/s`}
-              />
+              {showWindSpeed ? (
+                <WeatherGridCard
+                  label="Wind Speed"
+                  value={formatWindSpeed(weather?.wind?.speed ?? 3.6)}
+                />
+              ) : null}
               <WeatherGridCard
                 label="Direction"
                 value={`${weather?.wind?.deg ?? 180}°`}
               />
               <WeatherGridCard
                 label="Gusts"
-                value={`${weather?.wind?.gust ?? "—"} m/s`}
+                value={
+                  weather?.wind?.gust
+                    ? formatWindSpeed(weather.wind.gust)
+                    : "—"
+                }
               />
             </View>
 
@@ -385,7 +498,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.6)",
   },
   container: {
@@ -563,5 +676,62 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 25,
     marginBottom: 10,
+  },
+  alertBannerSevere: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(255, 71, 87, 0.15)",
+    borderColor: "rgba(255, 71, 87, 0.4)",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  alertBannerSevereText: {
+    color: "#ff6b81",
+    fontSize: 11,
+    fontWeight: "700",
+    flex: 1,
+  },
+  alertBannerRain: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(56, 189, 248, 0.15)",
+    borderColor: "rgba(56, 189, 248, 0.4)",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  alertBannerRainText: {
+    color: "#7dd3fc",
+    fontSize: 11,
+    fontWeight: "700",
+    flex: 1,
+  },
+  alertBannerPollution: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(249, 115, 22, 0.15)",
+    borderColor: "rgba(249, 115, 22, 0.4)",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  alertBannerPollutionText: {
+    color: "#fdba74",
+    fontSize: 11,
+    fontWeight: "700",
+    flex: 1,
   },
 });

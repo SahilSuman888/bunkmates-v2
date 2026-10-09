@@ -33,6 +33,8 @@ import { useRouter } from "expo-router";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { db, auth } from "../lib/firebase";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useThemeToggle } from "../contexts/ThemeContext";
+import { SettingsActionModal } from "../components/ui/SettingsActionModal";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const BASE_WIDTH = 375;
@@ -46,6 +48,8 @@ type KeyStatus = "idle" | "valid" | "invalid";
 export default function AISettingsScreen() {
   const router = useRouter();
   const { t } = useLanguage();
+  const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
+  const isAtmosphere = background.mode !== "solid";
   const uid = auth.currentUser?.uid || null;
 
   const [apiKey, setApiKey] = useState("");
@@ -56,6 +60,7 @@ export default function AISettingsScreen() {
   const [status, setStatus] = useState<KeyStatus>("idle");
   const [validatedAt, setValidatedAt] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [showClearKeyModal, setShowClearKeyModal] = useState(false);
 
   /* ─── Real-time Firestore listener (same as bunk-mates-master Profile.js) ─── */
   useEffect(() => {
@@ -143,40 +148,10 @@ export default function AISettingsScreen() {
     }
   };
 
-  /* ─── Clear Key (exact logic from bunk-mates-master Profile.js) ─── */
-  const handleClearGroqKey = async () => {
+  /* ─── Clear Key ─── */
+  const handleClearGroqKey = () => {
     if (!uid) return;
-    Alert.alert(
-      "Remove API Key",
-      "Are you sure you want to remove your Groq API Key from all devices?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              setApiKey("");
-              setStatus("idle");
-              setModels([]);
-              setValidatedAt(null);
-              setError("");
-
-              await updateDoc(doc(db, "users", uid), {
-                groqApiKey: "",
-                groqApiKeyStatus: "idle",
-                groqApiKeyValidatedAt: null,
-                groqModels: [],
-              });
-
-              Alert.alert("Removed", "Groq API Key removed from your account.");
-            } catch (e) {
-              console.error("Error clearing key:", e);
-            }
-          },
-        },
-      ]
-    );
+    setShowClearKeyModal(true);
   };
 
   /* ─── Status display helpers ─── */
@@ -195,7 +170,7 @@ export default function AISettingsScreen() {
       : styles.statusWaiting;
 
   return (
-    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: isAtmosphere ? "transparent" : themeColors.background }]} edges={["top", "left", "right"]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -205,36 +180,36 @@ export default function AISettingsScreen() {
         <View style={styles.header}>
           <Pressable
             onPress={() => router.back()}
-            style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.backButton, { backgroundColor: isDark ? "#202024" : "#F4F5F7" }, pressed && styles.pressed]}
           >
-            <Ionicons name="arrow-back" size={rs(18)} color="#dddddd" />
+            <Ionicons name="arrow-back" size={rs(18)} color={themeColors.text} />
           </Pressable>
 
           <View style={styles.headerText}>
             <View style={styles.titleRow}>
-              <Text style={styles.sparkle}>✦</Text>
-              <Text style={styles.title}>{t("AI Features")}</Text>
+              <Text style={[styles.sparkle, { color: accentColor }]}>✦</Text>
+              <Text style={[styles.title, { color: themeColors.text, fontSize: scaleFont(20) }]}>{t("AI Features")}</Text>
             </View>
-            <Text style={styles.subtitle}>
+            <Text style={[styles.subtitle, { color: themeColors.textSecondary, fontSize: scaleFont(11) }]}>
               {t("Configure Groq API Key & AI settings", "Configure Groq API Key & cross-device AI synchronization")}
             </Text>
           </View>
         </View>
 
         {/* ── GROQ KEY CARD ── */}
-        <View style={styles.card}>
+        <View style={[styles.card, { backgroundColor: themeColors.card }]}>
           <View style={styles.cardTitleRow}>
-            <MaterialCommunityIcons name="key-variant" size={rs(17)} color="#ffad00" />
-            <Text style={styles.cardTitle}>{t("Groq API Key")}</Text>
+            <MaterialCommunityIcons name="key-variant" size={rs(17)} color={accentColor} />
+            <Text style={[styles.cardTitle, { color: themeColors.text, fontSize: scaleFont(15) }]}>{t("Groq API Key")}</Text>
           </View>
 
-          <Text style={styles.description}>
+          <Text style={[styles.description, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>
             Add your Groq API key below. It validates automatically, displays available models and
             usage metrics, and saves directly to Firestore so all your devices use it seamlessly.
           </Text>
 
           {/* Input */}
-          <View style={[styles.inputWrapper, status === "invalid" && styles.inputError]}>
+          <View style={[styles.inputWrapper, { backgroundColor: isDark ? "#202024" : "#F4F5F7" }, status === "invalid" && styles.inputError]}>
             <TextInput
               value={apiKey}
               onChangeText={(value) => {
@@ -243,17 +218,17 @@ export default function AISettingsScreen() {
                 setError("");
               }}
               placeholder="gsk_••••••••••••••••••••••••"
-              placeholderTextColor="#555"
+              placeholderTextColor={themeColors.textSecondary}
               autoCapitalize="none"
               autoCorrect={false}
               secureTextEntry={!showKey}
-              style={styles.input}
+              style={[styles.input, { color: themeColors.text }]}
             />
             <Pressable onPress={() => setShowKey((v) => !v)} style={styles.eyeButton} hitSlop={10}>
               <Ionicons
                 name={showKey ? "eye-off-outline" : "eye-outline"}
                 size={rs(17)}
-                color="#aaa"
+                color={themeColors.textSecondary}
               />
             </Pressable>
           </View>
@@ -267,16 +242,17 @@ export default function AISettingsScreen() {
               disabled={validating}
               style={({ pressed }) => [
                 styles.saveButton,
+                { backgroundColor: accentColor },
                 validating && styles.disabledButton,
                 pressed && styles.pressed,
               ]}
             >
               {validating ? (
-                <ActivityIndicator size="small" color="#00110d" />
+                <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <>
-                  <MaterialCommunityIcons name="creation" size={rs(15)} color="#00110d" />
-                  <Text style={styles.saveText}>{t("Save & Validate Key")}</Text>
+                  <MaterialCommunityIcons name="creation" size={rs(15)} color="#FFFFFF" />
+                  <Text style={[styles.saveText, { color: "#FFFFFF" }]}>{t("Save & Validate Key")}</Text>
                 </>
               )}
             </Pressable>
@@ -294,15 +270,15 @@ export default function AISettingsScreen() {
         </View>
 
         {/* ── STATUS CARD ── */}
-        <View style={styles.card}>
+        <View style={[styles.card, { backgroundColor: themeColors.card }]}>
           <View style={styles.cardTitleRow}>
-            <MaterialCommunityIcons name="flash" size={rs(17)} color="#777" />
-            <Text style={styles.cardTitle}>API Usage & Status</Text>
+            <MaterialCommunityIcons name="flash" size={rs(17)} color={themeColors.textSecondary} />
+            <Text style={[styles.cardTitle, { color: themeColors.text, fontSize: scaleFont(15) }]}>API Usage & Status</Text>
           </View>
 
           {/* Status pill */}
           <View style={styles.statusLine}>
-            <Text style={styles.statusLabel}>Key Status:</Text>
+            <Text style={[styles.statusLabel, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>Key Status:</Text>
             <View style={[styles.statusPill, statusPillStyle]}>
               <Text style={styles.statusPillText}>{statusText}</Text>
             </View>
@@ -310,30 +286,30 @@ export default function AISettingsScreen() {
 
           {/* Validated at */}
           {validatedAt ? (
-            <Text style={styles.validatedAt}>Last Validated: {validatedAt}</Text>
+            <Text style={[styles.validatedAt, { color: themeColors.textSecondary }]}>Last Validated: {validatedAt}</Text>
           ) : null}
 
           {/* Models */}
-          <Text style={styles.modelsTitle}>
+          <Text style={[styles.modelsTitle, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>
             Available Groq AI Models ({models.length || 0}):
           </Text>
 
           {models.length > 0 ? (
             <View style={styles.modelList}>
               {models.map((m) => (
-                <View key={m} style={styles.modelChip}>
+                <View key={m} style={[styles.modelChip, { backgroundColor: isDark ? "#202024" : "#F4F5F7" }]}>
                   <MaterialCommunityIcons
                     name="robot-outline"
                     size={rs(11)}
-                    color="#00e6b0"
+                    color={accentColor}
                     style={{ marginRight: 5 }}
                   />
-                  <Text style={styles.modelChipText}>{m}</Text>
+                  <Text style={[styles.modelChipText, { color: themeColors.text }]}>{m}</Text>
                 </View>
               ))}
             </View>
           ) : (
-            <Text style={styles.statusMessage}>
+            <Text style={[styles.statusMessage, { color: themeColors.textSecondary }]}>
               No models loaded. Click "Save & Validate Key" above to fetch your available Groq
               models.
             </Text>
@@ -341,15 +317,56 @@ export default function AISettingsScreen() {
         </View>
 
         {/* ── INFO CARD ── */}
-        <View style={styles.infoCard}>
-          <MaterialCommunityIcons name="information-outline" size={rs(15)} color="#00e6b0" />
-          <Text style={styles.infoText}>
+        <View style={[styles.infoCard, { backgroundColor: `${accentColor}12` }]}>
+          <MaterialCommunityIcons name="information-outline" size={rs(15)} color={accentColor} />
+          <Text style={[styles.infoText, { color: themeColors.textSecondary }]}>
             Your API key is stored securely in Firestore and synced across all your devices. Get
             your free key at{" "}
-            <Text style={styles.infoLink}>console.groq.com</Text>
+            <Text style={[styles.infoLink, { color: accentColor }]}>console.groq.com</Text>
           </Text>
         </View>
       </ScrollView>
+
+      {/* ── REMOVE API KEY CONFIRMATION & SUCCESS FLOW (Matching Image 1 & 2) ── */}
+      <SettingsActionModal
+        visible={showClearKeyModal}
+        onClose={() => setShowClearKeyModal(false)}
+        iconType="key"
+        title={t("Remove API Key")}
+        message={t(
+          "Are you sure you want to remove your Groq API Key from all devices? AI itinerary suggestions will be disabled."
+        )}
+        confirmLabel={t("Remove Key")}
+        cancelLabel={t("Cancel")}
+        confirmColor="#ff4444"
+        onConfirm={async () => {
+          if (!uid) return false;
+          try {
+            setApiKey("");
+            setStatus("idle");
+            setModels([]);
+            setValidatedAt(null);
+            setError("");
+
+            await updateDoc(doc(db, "users", uid), {
+              groqApiKey: "",
+              groqApiKeyStatus: "idle",
+              groqApiKeyValidatedAt: null,
+              groqModels: [],
+            });
+            return true;
+          } catch (e) {
+            console.error("Error clearing key:", e);
+            return false;
+          }
+        }}
+        successTitle={t("API Key Removed")}
+        successMessage={t(
+          "Your Groq API key has been safely removed from your BunkMates profile."
+        )}
+        successButtonLabel={t("Done")}
+        onDone={() => setShowClearKeyModal(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -381,9 +398,8 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 0,
+    backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 14,
@@ -396,10 +412,9 @@ const styles = StyleSheet.create({
 
   /* Card */
   card: {
-    backgroundColor: "#0e0e0e",
-    borderRadius: rs(16),
-    borderWidth: 1,
-    borderColor: "#1e1e1e",
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    borderRadius: 28,
+    borderWidth: 0,
     padding: rs(18),
     marginBottom: rs(14),
   },
@@ -410,16 +425,15 @@ const styles = StyleSheet.create({
   /* Input */
   inputWrapper: {
     height: rs(46),
-    borderWidth: 1.5,
-    borderColor: "#2a2a2a",
-    borderRadius: rs(12),
+    borderWidth: 0,
+    borderRadius: 20,
     flexDirection: "row",
     alignItems: "center",
     marginBottom: rs(6),
-    backgroundColor: "#111",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
   },
   inputError: {
-    borderColor: "#ff4444",
+    backgroundColor: "rgba(255, 68, 68, 0.1)",
   },
   input: {
     flex: 1,
@@ -449,20 +463,21 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     height: rs(40),
-    borderRadius: rs(10),
+    borderRadius: 24,
     backgroundColor: "#00d9a6",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: rs(18),
     gap: rs(6),
+    borderWidth: 0,
   },
   saveText: { color: "#00110d", fontSize: rs(12), fontWeight: "800" },
   clearButton: {
     height: rs(40),
-    borderRadius: rs(10),
-    borderWidth: 1,
-    borderColor: "#ff4444",
+    borderRadius: 24,
+    borderWidth: 0,
+    backgroundColor: "rgba(255, 68, 68, 0.15)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -480,6 +495,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: rs(10),
     paddingVertical: rs(4),
     borderRadius: rs(20),
+    borderWidth: 0,
   },
   statusWaiting: { backgroundColor: "#1e1e1e" },
   statusValid: { backgroundColor: "#073d2f" },
@@ -492,12 +508,11 @@ const styles = StyleSheet.create({
   statusMessage: { color: "#555", fontSize: rs(11), lineHeight: rs(16) },
   modelList: { gap: rs(6) },
   modelChip: {
-    backgroundColor: "#111",
-    borderWidth: 1,
-    borderColor: "#1e1e1e",
-    borderRadius: rs(8),
-    paddingHorizontal: rs(10),
-    paddingVertical: rs(7),
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 0,
+    borderRadius: 20,
+    paddingHorizontal: rs(12),
+    paddingVertical: rs(8),
     flexDirection: "row",
     alignItems: "center",
   },
@@ -507,11 +522,10 @@ const styles = StyleSheet.create({
   infoCard: {
     flexDirection: "row",
     alignItems: "flex-start",
-    backgroundColor: "rgba(0,230,176,0.05)",
-    borderRadius: rs(12),
-    borderWidth: 1,
-    borderColor: "rgba(0,230,176,0.15)",
-    padding: rs(14),
+    backgroundColor: "rgba(0,230,176,0.06)",
+    borderRadius: 28,
+    borderWidth: 0,
+    padding: rs(16),
     gap: rs(8),
     marginBottom: rs(20),
   },

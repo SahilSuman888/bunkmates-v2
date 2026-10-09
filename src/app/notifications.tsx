@@ -43,8 +43,8 @@ import {
 } from "firebase/firestore";
 
 import { onAuthStateChanged } from "firebase/auth";
-
 import { auth, db } from "../lib/firebase";
+import { useThemeToggle } from "../contexts/ThemeContext";
 
 /* ============================================================
    TYPES
@@ -336,6 +336,7 @@ function NotificationAvatar({
 
 export default function Notifications() {
   const router = useRouter();
+  const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
 
   const params =
     useLocalSearchParams<{
@@ -1096,7 +1097,7 @@ export default function Notifications() {
 
   return (
     <SafeAreaView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}
       edges={[
         "top",
         "left",
@@ -1104,8 +1105,8 @@ export default function Notifications() {
       ]}
     >
       <StatusBar
-        barStyle="light-content"
-        backgroundColor="#080808"
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={themeColors.background}
       />
 
       {/* ======================================================
@@ -1113,7 +1114,7 @@ export default function Notifications() {
       ====================================================== */}
 
       <View
-        style={styles.header}
+        style={[styles.header, { borderBottomWidth: 0 }]}
       >
         <Pressable
           onPress={handleBack}
@@ -1122,12 +1123,12 @@ export default function Notifications() {
           <Ionicons
             name="arrow-back"
             size={21}
-            color="#eeeeee"
+            color={themeColors.text}
           />
         </Pressable>
 
         <Text
-          style={[styles.headerTitle, { flex: 1 }]}
+          style={[styles.headerTitle, { flex: 1, color: themeColors.text, fontSize: scaleFont(18) }]}
         >
           Notifications
         </Text>
@@ -1141,7 +1142,7 @@ export default function Notifications() {
           <Ionicons
             name="options-outline"
             size={22}
-            color="#eeeeee"
+            color={themeColors.text}
           />
         </Pressable>
       </View>
@@ -1222,8 +1223,8 @@ export default function Notifications() {
       >
         {loading && notifications.length === 0 ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#ff9d18" />
-            <Text style={styles.loadingText}>Loading notifications...</Text>
+            <ActivityIndicator size="large" color={accentColor} />
+            <Text style={[styles.loadingText, { color: themeColors.textSecondary, fontSize: scaleFont(13) }]}>Loading notifications...</Text>
           </View>
         ) : filteredNotifications.length === 0 ? (
           <View
@@ -2489,7 +2490,7 @@ const styles = StyleSheet.create({
   },
 
   modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor:
       "rgba(0,0,0,0.45)",
   },

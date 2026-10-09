@@ -10,6 +10,8 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
+  where,
 } from "firebase/firestore";
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import {
@@ -41,6 +43,8 @@ import { useThemeToggle } from "../contexts/ThemeContext"; // **@** Added dynami
 import { useLanguage } from "../contexts/LanguageContext"; // **@** Dynamic language hook
 import { auth, db } from "../lib/firebase";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { SettingsActionModal } from "../components/ui/SettingsActionModal";
+import { SkeletonLoadingScreen } from "../components/ui/SkeletonLoadingScreen";
 
 type SettingsPage =
   | "main"
@@ -132,6 +136,12 @@ const SettingRowMemo = React.memo(function SettingRow({
   const finalIconColor = iconColor ?? defaultIconColor;
   const resolvedIconBg = iconBg ?? (colors?.iconBoxBg ?? (isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)"));
 
+  let scaleFont = (s: number) => s;
+  try {
+    const tCtx = useThemeToggle();
+    if (tCtx?.scaleFont) scaleFont = tCtx.scaleFont;
+  } catch {}
+
   return (
     <Pressable
       onPress={onPress}
@@ -164,7 +174,7 @@ const SettingRowMemo = React.memo(function SettingRow({
             <Text
               style={[
                 styles.modernRowTitle,
-                { color: textPrimary },
+                { color: textPrimary, fontSize: scaleFont(15) },
               ]}
               numberOfLines={1}
             >
@@ -184,7 +194,7 @@ const SettingRowMemo = React.memo(function SettingRow({
                 <Text
                   style={[
                     styles.modernCategoryBadgeText,
-                    { color: textSecondary },
+                    { color: textSecondary, fontSize: scaleFont(9.5) },
                   ]}
                 >
                   {category}
@@ -193,7 +203,7 @@ const SettingRowMemo = React.memo(function SettingRow({
             ) : null}
             {badge ? (
               <View style={styles.modernHotBadge}>
-                <Text style={styles.modernHotBadgeText}>{badge}</Text>
+                <Text style={[styles.modernHotBadgeText, { fontSize: scaleFont(10) }]}>{badge}</Text>
               </View>
             ) : null}
           </View>
@@ -201,7 +211,7 @@ const SettingRowMemo = React.memo(function SettingRow({
             <Text
               style={[
                 styles.modernRowSubtitle,
-                { color: textSecondary },
+                { color: textSecondary, fontSize: scaleFont(12.5) },
               ]}
               numberOfLines={2}
             >
@@ -215,7 +225,7 @@ const SettingRowMemo = React.memo(function SettingRow({
             <Text
               style={[
                 styles.modernRowRightText,
-                { color: textSecondary },
+                { color: textSecondary, fontSize: scaleFont(13.5) },
               ]}
             >
               {rightText}
@@ -235,7 +245,7 @@ const SettingRowMemo = React.memo(function SettingRow({
 export default function ProfileSettings() {
   const router = useRouter();
 
-  // **@** Ultra-smooth navigation helper to eliminate touch freezes & jitter
+  // **@** Snappy, instant navigation helper with minimal 200ms double-tap protection
   const isNavigatingRef = useRef(false);
   const smoothNavigate = useCallback(
     (route: string) => {
@@ -243,11 +253,8 @@ export default function ProfileSettings() {
       isNavigatingRef.current = true;
       setTimeout(() => {
         isNavigatingRef.current = false;
-      }, 550);
-
-      requestAnimationFrame(() => {
-        router.push(route as any);
-      });
+      }, 200);
+      router.push(route as any);
     },
     [router]
   );
@@ -276,7 +283,7 @@ export default function ProfileSettings() {
     }
   }, [tr]);
 
-  const { user, loading: authLoading } = useUser();
+  const { user, loading: authLoading, userData } = useUser();
 
   const [loading, setLoading] = useState(true);
 
@@ -298,6 +305,7 @@ export default function ProfileSettings() {
   const [tripCount, setTripCount] = useState(4);
   const [selectedLanguage, setSelectedLanguage] = useState("English (US)");
   const { language: activeLanguage, t: tr } = useLanguage();
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -343,12 +351,16 @@ export default function ProfileSettings() {
   let themeMode: "dark" | "light" | "system" = "system";
   let toggleThemeFn: () => void = () => {};
   let dynamicAccent = "#FF5A5F";
+  let dynamicThemeColors: any = null;
+  let dynamicFontScale = 1.0;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       themeMode = themeContext.mode;
       toggleThemeFn = themeContext.toggleTheme;
       if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
+      dynamicThemeColors = themeContext.themeColors;
+      dynamicFontScale = themeContext.fontScale || 1.0;
     }
   } catch (e) {
     // safe fallback
@@ -358,24 +370,24 @@ export default function ProfileSettings() {
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  // **@** Memoized design system tokens matching BUNKMATES_DESIGN_SYSTEM.md (Pure #000000 / #F1F1F1, zero borders)
+  // **@** Pure SOLID DYNAMIC COLORS (Zero glassmorphism in Settings, strictly solid dynamic cards)
   const colors = useMemo(() => ({
-    bg: isDark ? "#000000" : "#F1F1F1",
-    card: isDark ? "rgba(255, 255, 255, 0.06)" : "#FFFFFF",
+    bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+    card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
     cardBorder: "transparent",
-    divider: "transparent",
-    textPrimary: isDark ? "#FFFFFF" : "#11141A",
-    textSecondary: isDark ? "#8E95A2" : "#7E8590",
-    sectionHeader: isDark ? "#8E95A2" : "#7E8590",
+    divider: dynamicThemeColors?.divider ?? (isDark ? "#242428" : "#E6E7EB"),
+    textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+    textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+    sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
     coral: dynamicAccent,
     coralAccent: dynamicAccent,
-    coralBg: isDark ? hexToRgba(dynamicAccent, 0.16) : hexToRgba(dynamicAccent, 0.09),
-    greyishWhite: isDark ? "#E2E8F0" : "#4B5563", // **@** Greyish-white icon color as requested
-    iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.04)", // **@** Subtle neutral icon box
+    coralBg: hexToRgba(dynamicAccent, isDark ? 0.16 : 0.09),
+    greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
+    iconBoxBg: isDark ? "#222226" : "#F3F4F6", // Solid neutral container
     chevron: isDark ? "#555860" : "#B4B9C2",
     logoutBorder: "transparent",
     logoutBg: isDark ? "rgba(255, 90, 95, 0.10)" : "rgba(255, 90, 95, 0.06)",
-  }), [isDark, dynamicAccent]);
+  }), [isDark, dynamicAccent, dynamicThemeColors]);
 
   // **@** Track scroll position for header mask gradient reveal on slide/scroll
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -503,32 +515,17 @@ export default function ProfileSettings() {
     const timer = setTimeout(() => {
       const task = InteractionManager.runAfterInteractions(async () => {
         try {
-          const tripsSnap =
-            await getDocs(
-              collection(db, "trips")
-            );
-
-          let count = 0;
-
-          tripsSnap.forEach(
-            (tripDoc) => {
-              const trip =
-                tripDoc.data();
-
-              const belongsToUser =
-                trip.uid === user.uid ||
-                trip.userId === user.uid ||
-                trip.ownerId === user.uid ||
-                trip.createdBy === user.uid;
-
-              if (belongsToUser) {
-                count++;
-              }
-            }
-          );
-
-          if (count > 0) {
-            setTripCount(count);
+          // Fast targeted query for user's trips instead of scanning full collection
+          const q1 = query(collection(db, "trips"), where("userId", "==", user.uid));
+          const snap1 = await getDocs(q1);
+          if (!snap1.empty) {
+            setTripCount(snap1.size);
+            return;
+          }
+          const q2 = query(collection(db, "trips"), where("uid", "==", user.uid));
+          const snap2 = await getDocs(q2);
+          if (!snap2.empty) {
+            setTripCount(snap2.size);
           }
         } catch (tripError) {
           console.log(
@@ -691,12 +688,7 @@ export default function ProfileSettings() {
       return;
     }
 
-    if (currentPage === "appInfo") {
-      setCurrentPage("about");
-      return;
-    }
-
-    if (currentPage === "about") {
+    if (currentPage !== "main") {
       setCurrentPage("main");
       return;
     }
@@ -725,8 +717,10 @@ export default function ProfileSettings() {
       .replace(/\s+/g, "_");
 
   const backgroundImage =
-    profile.photoURL ||
-    "https://i.pravatar.cc/800?img=12";
+    profile?.photoURL ||
+    user?.photoURL ||
+    userData?.photoURL ||
+    "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&auto=format&fit=crop&q=80";
 
   // =========================================================
   // SETTING ROW (MODERN IOS / SCREENSHOT STYLE)
@@ -846,7 +840,6 @@ export default function ProfileSettings() {
       title: "Trip Preferences",
       subtitle: "Dietary rules, accommodation styles, travel pace",
       keywords: ["preferences", "diet", "food", "accommodation", "hotel", "travel pace", "style"],
-      badge: "Hot",
       icon: "compass-outline",
       onPress: () => {
         setIsSearching(false);
@@ -1033,7 +1026,7 @@ export default function ProfileSettings() {
       iconFamily: "material" as const,
       onPress: () => {
         setIsSearching(false);
-        setCurrentPage("licenses");
+        smoothNavigate("/licenses");
       },
     },
     {
@@ -1085,10 +1078,7 @@ export default function ProfileSettings() {
       icon: "log-out-outline",
       onPress: () => {
         setIsSearching(false);
-        Alert.alert("Log Out", "Are you sure you want to log out of BunkMates?", [
-          { text: "Cancel", style: "cancel" },
-          { text: "Log Out", style: "destructive", onPress: handleLogout },
-        ]);
+        setShowLogoutModal(true);
       },
     },
   ], [isDark, isDeveloper, themeMode, toggleThemeFn]);
@@ -1108,11 +1098,7 @@ export default function ProfileSettings() {
 
   // Loading check placed after all hooks to prevent hook count mismatch
   if (authLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="small" color="#ffffff" />
-      </View>
-    );
+    return <SkeletonLoadingScreen title="Settings" />;
   }
 
   const SettingItem = ({
@@ -2568,50 +2554,50 @@ export default function ProfileSettings() {
         ) : (
           <>
             {/* **@** User Profile Card with Avatar, Name, Email, and Edit Profile Pen Icon */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.modernProfileCard,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
-            pressed && styles.pressed,
-          ]}
-          onPress={() => smoothNavigate("/ProfileEdit")}
-          accessibilityRole="button"
-          accessibilityLabel="Edit Profile"
-        >
-          <Image
-            source={{ uri: profile.photoURL || backgroundImage }}
-            style={styles.modernProfileAvatar}
-          />
-          <View style={styles.modernProfileDetails}>
-            <Text
-              style={[
-                styles.modernProfileName,
-                { color: colors.textPrimary },
+            <Pressable
+              style={({ pressed }) => [
+                styles.modernProfileCard,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
               ]}
-              numberOfLines={1}
+              onPress={() => smoothNavigate("/ProfileEdit")}
+              accessibilityRole="button"
+              accessibilityLabel="Edit Profile"
             >
-              {profile.name || user?.displayName || "Sasha Miller"}
-            </Text>
-            <Text
-              style={[
-                styles.modernProfileEmail,
-                { color: colors.textSecondary },
-              ]}
-              numberOfLines={1}
-            >
-              {profile.email ||
-                user?.email ||
-                (profile.username
-                  ? `${profile.username.toLowerCase()}@bunkmates.com`
-                  : "sasha.explorer@bunkmates.com")}
-            </Text>
-          </View>
+              <Image
+                source={{ uri: profile.photoURL || backgroundImage }}
+                style={styles.modernProfileAvatar}
+              />
+              <View style={styles.modernProfileDetails}>
+                <Text
+                  style={[
+                    styles.modernProfileName,
+                    { color: colors.textPrimary, fontSize: Math.round(18 * dynamicFontScale) },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {profile.name || user?.displayName || "Sasha Miller"}
+                </Text>
+                <Text
+                  style={[
+                    styles.modernProfileEmail,
+                    { color: colors.textSecondary, fontSize: Math.round(13.5 * dynamicFontScale) },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {profile.email ||
+                    user?.email ||
+                    (profile.username
+                      ? `${profile.username.toLowerCase()}@bunkmates.com`
+                      : "sasha.explorer@bunkmates.com")}
+                </Text>
+              </View>
 
-          {/* **@** Edit Profile Pen Icon Button with greyish-white icon */}
-          <View style={[styles.modernProfileEditBtn, { backgroundColor: colors.iconBoxBg }]}>
-            <Feather name="edit-3" size={19} color={colors.greyishWhite} />
-          </View>
-        </Pressable>
+              {/* **@** Edit Profile Pen Icon Button with greyish-white icon */}
+              <View style={[styles.modernProfileEditBtn, { backgroundColor: colors.iconBoxBg }]}>
+                <Feather name="edit-3" size={19} color={colors.greyishWhite} />
+              </View>
+            </Pressable>
 
         {/* =====================================================
             1. ACCOUNT
@@ -2619,7 +2605,7 @@ export default function ProfileSettings() {
         <Text
           style={[
             styles.modernSectionHeading,
-            { color: colors.sectionHeader },
+            { color: colors.sectionHeader, fontSize: Math.round(12 * dynamicFontScale) },
           ]}
         >
           {tr("account_section", "ACCOUNT")}
@@ -2683,7 +2669,6 @@ export default function ProfileSettings() {
           <SettingRow
             icon="compass-outline"
             title={tr("trip_preferences", "Trip Preferences")}
-            badge="Hot"
             subtitle={tr("Dietary rules, accommodation styles, travel pace")}
             onPress={() => smoothNavigate("/trip-preference")}
           />
@@ -2814,7 +2799,7 @@ export default function ProfileSettings() {
             iconFamily="material"
             title={tr("Third-Party Licenses")}
             subtitle={tr("Open source software & dependencies")}
-            onPress={() => setCurrentPage("licenses")}
+            onPress={() => smoothNavigate("/licenses")}
           />
           {/* Preserved v2 feature: Invite Friend */}
           <SettingRow
@@ -2854,20 +2839,7 @@ export default function ProfileSettings() {
             },
             pressed && { opacity: 0.75 },
           ]}
-          onPress={() => {
-            Alert.alert(
-              tr("logout", "Log Out"),
-              tr("Are you sure you want to log out of BunkMates?"),
-              [
-                { text: tr("Cancel"), style: "cancel" },
-                {
-                  text: tr("logout", "Log Out"),
-                  style: "destructive",
-                  onPress: handleLogout,
-                },
-              ]
-            );
-          }}
+          onPress={() => setShowLogoutModal(true)}
         >
           <Ionicons name="log-out-outline" size={20} color={colors.greyishWhite} />
           <Text style={styles.modernLogoutText}>{tr("logout", "Log Out")}</Text>
@@ -2875,6 +2847,38 @@ export default function ProfileSettings() {
           </>
         )}
       </Animated.ScrollView>
+
+      {/* ── LOG OUT CONFIRMATION & SUCCESS FLOW (Matching Image 1 & 2) ── */}
+      <SettingsActionModal
+        visible={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        iconType="logout"
+        title={tr("logout", "Log Out")}
+        message={tr(
+          "Are you sure you want to log out of BunkMates? You can log back into your account anytime."
+        )}
+        confirmLabel={tr("logout", "Log Out")}
+        cancelLabel={tr("Cancel")}
+        confirmColor={colors.coral}
+        onConfirm={async () => {
+          try {
+            await auth.signOut();
+            return true;
+          } catch (e) {
+            console.log("Signout error:", e);
+            return false;
+          }
+        }}
+        successTitle={tr("Logged Out")}
+        successMessage={tr(
+          "You have been safely signed out of your BunkMates profile. We hope to see you on your next trip soon!"
+        )}
+        successButtonLabel={tr("Done")}
+        onDone={() => {
+          setShowLogoutModal(false);
+          router.replace("/(auth)/login" as any);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -2935,7 +2939,7 @@ function DevToolSandboxView({
   const colors = useMemo(
     () => ({
       card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
+      cardBorder: "transparent",
       textPrimary: isDark ? "#FFFFFF" : "#11141A",
       textSecondary: isDark ? "#8E95A2" : "#7E8590",
     }),
@@ -3478,7 +3482,7 @@ function DevToolSandboxView({
           <Text style={styles.sandboxSectionTitle}>Runtime Error Boundary Simulator</Text>
 
           {simulatedError ? (
-            <View style={{ padding: 14, backgroundColor: "rgba(255,71,87,0.12)", borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,71,87,0.3)" }}>
+            <View style={{ padding: 14, backgroundColor: "rgba(255,71,87,0.12)", borderRadius: 12, borderWidth: 0 }}>
               <Text style={{ color: "#ff4757", fontWeight: "800", fontSize: 14, marginBottom: 6 }}>
                 Runtime Error Caught by Boundary
               </Text>
@@ -3490,7 +3494,7 @@ function DevToolSandboxView({
               </Pressable>
             </View>
           ) : (
-            <Pressable onPress={() => setSimulatedError(true)} style={[styles.sandboxSecondaryBtn, { borderColor: "#ff4757" }]}>
+            <Pressable onPress={() => setSimulatedError(true)} style={[styles.sandboxSecondaryBtn, { borderWidth: 0, backgroundColor: "rgba(255, 71, 87, 0.12)" }]}>
               <Text style={[styles.sandboxSecondaryBtnText, { color: "#ff4757" }]}>💥 Trigger Simulated Exception</Text>
             </Pressable>
           )}
@@ -3790,8 +3794,7 @@ const styles = StyleSheet.create({
     height: rs(50),
     borderRadius: rs(25),
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "#111111",
+    borderWidth: 0,
     backgroundColor: "#111111",
   },
 
@@ -3854,8 +3857,7 @@ const styles = StyleSheet.create({
     height: Math.min(SCREEN_WIDTH - rs(105), rs(155)),
     borderRadius: rs(16),
     overflow: "hidden",
-    borderWidth: 1.5,
-    borderColor: "#d7d7d7",
+    borderWidth: 0,
     backgroundColor: "#050505",
     position: "relative",
   },
@@ -3891,32 +3893,32 @@ const styles = StyleSheet.create({
   cornerTL: {
     top: -1,
     left: -1,
-    borderTopWidth: 2,
-    borderLeftWidth: 2,
+    borderTopWidth: 0,
+    borderLeftWidth: 0,
     borderTopLeftRadius: rs(15),
   },
 
   cornerTR: {
     top: -1,
     right: -1,
-    borderTopWidth: 2,
-    borderRightWidth: 2,
+    borderTopWidth: 0,
+    borderRightWidth: 0,
     borderTopRightRadius: rs(15),
   },
 
   cornerBL: {
     bottom: -1,
     left: -1,
-    borderBottomWidth: 2,
-    borderLeftWidth: 2,
+    borderBottomWidth: 0,
+    borderLeftWidth: 0,
     borderBottomLeftRadius: rs(15),
   },
 
   cornerBR: {
     bottom: -1,
     right: -1,
-    borderBottomWidth: 2,
-    borderRightWidth: 2,
+    borderBottomWidth: 0,
+    borderRightWidth: 0,
     borderBottomRightRadius: rs(15),
   },
 
@@ -3976,8 +3978,7 @@ const styles = StyleSheet.create({
 
     marginBottom: 20,
 
-    borderWidth: 1,
-    borderColor: "#171717",
+    borderWidth: 0,
   },
 
   betaGlowOne: {
@@ -4053,8 +4054,7 @@ const styles = StyleSheet.create({
 
     backgroundColor: "#111111",
 
-    borderWidth: 1,
-    borderColor: "#252525",
+    borderWidth: 0,
 
     paddingHorizontal: 12,
 
@@ -4150,8 +4150,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 15,
 
-    borderWidth: 1,
-    borderColor: "#111",
+    borderWidth: 0,
 
     padding: 16,
   },
@@ -4179,8 +4178,7 @@ const styles = StyleSheet.create({
 
     borderRadius: 7,
 
-    borderWidth: 1,
-    borderColor: "#555",
+    borderWidth: 0,
 
     alignItems: "center",
     justifyContent: "center",
@@ -4448,8 +4446,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 9,
     backgroundColor: "rgba(0,255,200,0.10)",
-    borderWidth: 1,
-    borderColor: "rgba(0,255,200,0.18)",
+    borderWidth: 0,
   },
 
   developerMiniBadgeText: {
@@ -4494,8 +4491,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#111111",
-    borderWidth: 1,
-    borderColor: "#1d1d1d",
+    borderWidth: 0,
   },
 
   developerHeaderTitle: {
@@ -4511,8 +4507,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderRadius: 10,
     backgroundColor: "rgba(0,255,200,0.10)",
-    borderWidth: 1,
-    borderColor: "rgba(0,255,200,0.16)",
+    borderWidth: 0,
     marginBottom: 17,
   },
 
@@ -4532,12 +4527,11 @@ const styles = StyleSheet.create({
   },
 
   developerFeatureCard: {
-    borderRadius: 16,
+    borderRadius: 28,
     backgroundColor: "#0d0d0d",
     padding: 13,
     marginBottom: 24,
-    borderWidth: 1,
-    borderColor: "#171717",
+    borderWidth: 0,
   },
 
   developerSectionTitle: {
@@ -4603,11 +4597,10 @@ const styles = StyleSheet.create({
   devModalCard: {
     width: "100%",
     maxWidth: 400,
-    borderRadius: 20,
+    borderRadius: 28,
     padding: 22,
     backgroundColor: "#111111",
-    borderWidth: 1,
-    borderColor: "#252525",
+    borderWidth: 0,
   },
 
   devModalTitle: {
@@ -4630,9 +4623,8 @@ const styles = StyleSheet.create({
 
   devModalInput: {
     height: 50,
-    borderWidth: 1,
-    borderColor: "#333333",
-    borderRadius: 12,
+    borderWidth: 0,
+    borderRadius: 20,
     backgroundColor: "#090909",
     color: "#ffffff",
     paddingHorizontal: 14,
@@ -4684,8 +4676,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "rgba(0,230,176,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(0,230,176,0.3)",
+    borderWidth: 0,
     borderRadius: 12,
     padding: 12,
     marginBottom: 16,
@@ -4701,10 +4692,9 @@ const styles = StyleSheet.create({
 
   sandboxCard: {
     backgroundColor: "#0d0d0d",
-    borderRadius: 16,
+    borderRadius: 28,
     padding: 16,
-    borderWidth: 1,
-    borderColor: "#1a1a1a",
+    borderWidth: 0,
     marginBottom: 20,
   },
 
@@ -4721,13 +4711,11 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: "#161616",
     marginRight: 8,
-    borderWidth: 1,
-    borderColor: "#252525",
+    borderWidth: 0,
   },
 
   cityChipActive: {
     backgroundColor: "rgba(0,230,176,0.15)",
-    borderColor: "#00e6b0",
   },
 
   cityChipText: {
@@ -4787,8 +4775,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginTop: 16,
     paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#1e1e1e",
+    borderTopWidth: 0,
   },
 
   weatherMetricItem: {
@@ -4811,8 +4798,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    borderWidth: 2,
-    borderColor: "#00e6b0",
+    borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#161616",
@@ -4826,10 +4812,9 @@ const styles = StyleSheet.create({
 
   socialPostCard: {
     backgroundColor: "#121214",
-    borderRadius: 14,
+    borderRadius: 28,
     padding: 14,
-    borderWidth: 1,
-    borderColor: "#1e1e1e",
+    borderWidth: 0,
   },
 
   socialAvatar: {
@@ -4874,8 +4859,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#161616",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#252525",
+    borderWidth: 0,
   },
 
   sandboxInput: {
@@ -4885,8 +4869,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     color: "#fff",
     fontSize: 13,
-    borderWidth: 1,
-    borderColor: "#252525",
+    borderWidth: 0,
   },
 
   sandboxPrimaryBtn: {
@@ -4907,8 +4890,7 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 12,
     backgroundColor: "#141416",
-    borderWidth: 1,
-    borderColor: "#2a2a2a",
+    borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -4926,8 +4908,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#161616",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#00e6b0",
+    borderWidth: 0,
   },
 
   mapHeroBox: {
@@ -4942,8 +4923,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#1a1a1a",
+    borderBottomWidth: 0,
   },
 
   densityBadge: {
@@ -4960,17 +4940,15 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
     marginBottom: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: "#00e6b0",
+    borderLeftWidth: 0,
   },
 
   jsonCard: {
     backgroundColor: "#121214",
     padding: 12,
-    borderRadius: 10,
+    borderRadius: 28,
     marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "#1e1e1e",
+    borderWidth: 0,
   },
 
   // ==========================================================
@@ -5024,7 +5002,7 @@ const styles = StyleSheet.create({
     top: Platform.OS === "android" ? 64 : 58,
     left: 0,
     right: 0,
-    height: 28,
+    height: 36,
     zIndex: 10,
   },
 

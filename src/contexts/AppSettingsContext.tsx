@@ -14,10 +14,15 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import * as Haptics from "expo-haptics";
-import { Platform } from "react-native";
+import { Platform, AccessibilityInfo } from "react-native";
 import { auth, db } from "../lib/firebase";
-
-// -------------------------------------------------------------
+import {
+  NotificationCategory,
+  NotificationPreferences,
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  isQuietHoursActiveNow,
+  shouldDeliverNotification as checkNotificationDelivery,
+} from "../lib/NotificationService";
 // TYPES & DEFAULTS
 // -------------------------------------------------------------
 
@@ -90,6 +95,9 @@ export interface AccessibilityPreferences {
   colorBlindMode: string;
   reduceMotion: boolean;
   hapticFeedback: boolean;
+  boldText?: boolean;
+  reduceTransparency?: boolean;
+  audioCues?: boolean;
 }
 
 export interface PrivacyPreferences {
@@ -120,7 +128,17 @@ export interface AppSettingsContextType {
   updateCurrencyPreferences: (prefs: Partial<CurrencyPreferences>) => Promise<void>;
 
   // Weather
+  weatherPreferences: WeatherPreferences;
   tempUnit: TempUnit;
+  forecastHorizon: string;
+  severeAlerts: boolean;
+  rainNotifications: boolean;
+  uvAlerts: boolean;
+  widgetLayout: string;
+  showFeelsLike: boolean;
+  showWindSpeed: boolean;
+  refreshInterval: string;
+  highPollutionAlerts: boolean;
   formatTemperature: (
     tempInCelsius: number | string | undefined | null,
     sourceUnit?: "C" | "F"
@@ -129,6 +147,7 @@ export interface AppSettingsContextType {
     tempInCelsius: number | undefined | null,
     sourceUnit?: "C" | "F"
   ) => number | null;
+  formatWindSpeed: (speedMps: number | undefined | null) => string;
   updateWeatherPreferences: (prefs: Partial<WeatherPreferences>) => Promise<void>;
 
   // Locale & Formats
@@ -143,11 +162,20 @@ export interface AppSettingsContextType {
   updateLocalePreferences: (prefs: Partial<LocalePreferences>) => Promise<void>;
 
   // Accessibility & Haptics
-  hapticFeedback: boolean;
-  reduceMotion: boolean;
+  screenReaderCompat: boolean;
   highContrastMode: boolean;
+  largeTouchTargets: boolean;
+  colorBlindMode: string;
+  reduceMotion: boolean;
+  hapticFeedback: boolean;
+  boldText: boolean;
+  reduceTransparency: boolean;
+  audioCues: boolean;
+  isSystemScreenReaderActive: boolean;
   triggerHaptic: (type?: HapticType) => void;
+  announceAccessibility: (message: string) => void;
   updateAccessibilityPreferences: (prefs: Partial<AccessibilityPreferences>) => Promise<void>;
+  resetAccessibilityPreferences: () => Promise<void>;
 
   // Privacy & Data
   hidePastTrips: boolean;
@@ -159,6 +187,26 @@ export interface AppSettingsContextType {
   // Trip Preferences
   tripPreferences: TripPreferences;
   updateTripPreferences: (prefs: Partial<TripPreferences>) => Promise<void>;
+
+  // Notifications
+  notificationPreferences: NotificationPreferences;
+  allPushEnabled: boolean;
+  tripUpdates: boolean;
+  chatMessages: boolean;
+  reminders: boolean;
+  recommendations: boolean;
+  promotions: boolean;
+  doNotDisturb: boolean;
+  silenceFrom: string;
+  silenceUntil: string;
+  isQuietHoursActive: () => boolean;
+  shouldDeliverNotification: (
+    category: NotificationCategory,
+    isPriority?: boolean
+  ) => { deliver: boolean; reason?: string };
+  updateNotificationPreferences: (
+    prefs: Partial<NotificationPreferences>
+  ) => Promise<void>;
 }
 
 // -------------------------------------------------------------
@@ -172,7 +220,15 @@ const memoryCache = {
   dateFormat: "DD/MM/YYYY" as DateFormat,
   is24Hour: false,
   hapticFeedback: true,
+  reduceMotion: false,
+  highContrastMode: false,
+  largeTouchTargets: true,
+  colorBlindMode: "Off",
+  boldText: false,
+  reduceTransparency: false,
+  audioCues: false,
   hidePastTrips: false,
+  notificationPreferences: DEFAULT_NOTIFICATION_PREFERENCES,
 };
 
 export function triggerAppHaptic(type: HapticType = "selection") {
@@ -351,6 +407,15 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
 
   // Weather
   const [tempUnit, setTempUnit] = useState<TempUnit>("°C");
+  const [forecastHorizon, setForecastHorizon] = useState<string>("7 Days");
+  const [severeAlerts, setSevereAlerts] = useState<boolean>(true);
+  const [rainNotifications, setRainNotifications] = useState<boolean>(true);
+  const [uvAlerts, setUvAlerts] = useState<boolean>(false);
+  const [widgetLayout, setWidgetLayout] = useState<string>("Detailed Card");
+  const [showFeelsLike, setShowFeelsLike] = useState<boolean>(true);
+  const [showWindSpeed, setShowWindSpeed] = useState<boolean>(true);
+  const [refreshInterval, setRefreshInterval] = useState<string>("Every 1 Hour");
+  const [highPollutionAlerts, setHighPollutionAlerts] = useState<boolean>(true);
 
   // Locale & Formats
   const [dateFormat, setDateFormat] = useState<DateFormat>("DD/MM/YYYY");
@@ -358,9 +423,31 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
   const [firstDayOfWeek, setFirstDayOfWeek] = useState<FirstDayOfWeek>("Monday");
 
   // Accessibility & Haptics
-  const [hapticFeedback, setHapticFeedback] = useState<boolean>(true);
-  const [reduceMotion, setReduceMotion] = useState<boolean>(false);
+  const [screenReaderCompat, setScreenReaderCompat] = useState<boolean>(false);
   const [highContrastMode, setHighContrastMode] = useState<boolean>(false);
+  const [largeTouchTargets, setLargeTouchTargets] = useState<boolean>(true);
+  const [colorBlindMode, setColorBlindMode] = useState<string>("Off");
+  const [reduceMotion, setReduceMotion] = useState<boolean>(false);
+  const [hapticFeedback, setHapticFeedback] = useState<boolean>(true);
+  const [boldText, setBoldText] = useState<boolean>(false);
+  const [reduceTransparency, setReduceTransparency] = useState<boolean>(false);
+  const [audioCues, setAudioCues] = useState<boolean>(false);
+  const [isSystemScreenReaderActive, setIsSystemScreenReaderActive] = useState<boolean>(false);
+
+  // Detect OS System Screen Reader status dynamically
+  useEffect(() => {
+    AccessibilityInfo.isScreenReaderEnabled()
+      .then((enabled) => setIsSystemScreenReaderActive(enabled))
+      .catch(() => {});
+
+    const sub = AccessibilityInfo.addEventListener("screenReaderChanged", (enabled) => {
+      setIsSystemScreenReaderActive(enabled);
+    });
+
+    return () => {
+      sub?.remove();
+    };
+  }, []);
 
   // Privacy
   const [hidePastTrips, setHidePastTrips] = useState<boolean>(false);
@@ -378,6 +465,10 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
     activities: ["Museums", "Hiking & Nature", "Nightlife", "Street Food"],
   });
 
+  // Notifications
+  const [notificationPreferences, setNotificationPreferences] =
+    useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
+
   // Keep memory cache updated
   useEffect(() => {
     memoryCache.currency = currency;
@@ -387,7 +478,15 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
     memoryCache.dateFormat = dateFormat;
     memoryCache.is24Hour = is24Hour;
     memoryCache.hapticFeedback = hapticFeedback;
+    memoryCache.reduceMotion = reduceMotion;
+    memoryCache.highContrastMode = highContrastMode;
+    memoryCache.largeTouchTargets = largeTouchTargets;
+    memoryCache.colorBlindMode = colorBlindMode;
+    memoryCache.boldText = boldText;
+    memoryCache.reduceTransparency = reduceTransparency;
+    memoryCache.audioCues = audioCues;
     memoryCache.hidePastTrips = hidePastTrips;
+    memoryCache.notificationPreferences = notificationPreferences;
   }, [
     currency,
     showSymbol,
@@ -396,7 +495,15 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
     dateFormat,
     is24Hour,
     hapticFeedback,
+    reduceMotion,
+    highContrastMode,
+    largeTouchTargets,
+    colorBlindMode,
+    boldText,
+    reduceTransparency,
+    audioCues,
     hidePastTrips,
+    notificationPreferences,
   ]);
 
   // Auth observer
@@ -421,6 +528,7 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
           savedAct,
           savedAna,
           cachedTrip,
+          cachedNotif,
         ] = await Promise.all([
           AsyncStorage.getItem("@bunkmates_currency_preferences"),
           AsyncStorage.getItem("@bunkmates_weather_preferences"),
@@ -431,6 +539,7 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
           AsyncStorage.getItem("activity_status_enabled"),
           AsyncStorage.getItem("analytics_collection"),
           AsyncStorage.getItem("@bunkmates_trip_preferences"),
+          AsyncStorage.getItem("@bunkmates_notification_preferences"),
         ]);
 
         if (cachedCurr) {
@@ -444,6 +553,15 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
         if (cachedWeather) {
           const parsed = JSON.parse(cachedWeather);
           if (parsed.tempUnit) setTempUnit(parsed.tempUnit);
+          if (parsed.forecastHorizon) setForecastHorizon(parsed.forecastHorizon);
+          if (parsed.severeAlerts !== undefined) setSevereAlerts(parsed.severeAlerts);
+          if (parsed.rainNotifications !== undefined) setRainNotifications(parsed.rainNotifications);
+          if (parsed.uvAlerts !== undefined) setUvAlerts(parsed.uvAlerts);
+          if (parsed.widgetLayout) setWidgetLayout(parsed.widgetLayout);
+          if (parsed.showFeelsLike !== undefined) setShowFeelsLike(parsed.showFeelsLike);
+          if (parsed.showWindSpeed !== undefined) setShowWindSpeed(parsed.showWindSpeed);
+          if (parsed.refreshInterval) setRefreshInterval(parsed.refreshInterval);
+          if (parsed.highPollutionAlerts !== undefined) setHighPollutionAlerts(parsed.highPollutionAlerts);
         }
 
         if (cachedLocale) {
@@ -455,9 +573,32 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
 
         if (cachedAccess) {
           const parsed = JSON.parse(cachedAccess);
-          if (parsed.hapticFeedback !== undefined) setHapticFeedback(parsed.hapticFeedback);
-          if (parsed.reduceMotion !== undefined) setReduceMotion(parsed.reduceMotion);
-          if (parsed.highContrastMode !== undefined) setHighContrastMode(parsed.highContrastMode);
+          if (parsed.screenReaderCompat !== undefined) {
+            setScreenReaderCompat(parsed.screenReaderCompat);
+          }
+          if (parsed.highContrastMode !== undefined) {
+            setHighContrastMode(parsed.highContrastMode);
+            memoryCache.highContrastMode = parsed.highContrastMode;
+          }
+          if (parsed.largeTouchTargets !== undefined) {
+            setLargeTouchTargets(parsed.largeTouchTargets);
+            memoryCache.largeTouchTargets = parsed.largeTouchTargets;
+          }
+          if (parsed.colorBlindMode !== undefined) {
+            setColorBlindMode(parsed.colorBlindMode);
+            memoryCache.colorBlindMode = parsed.colorBlindMode;
+          }
+          if (parsed.reduceMotion !== undefined) {
+            setReduceMotion(parsed.reduceMotion);
+            memoryCache.reduceMotion = parsed.reduceMotion;
+          }
+          if (parsed.hapticFeedback !== undefined) {
+            setHapticFeedback(parsed.hapticFeedback);
+            memoryCache.hapticFeedback = parsed.hapticFeedback;
+          }
+          if (parsed.boldText !== undefined) setBoldText(parsed.boldText);
+          if (parsed.reduceTransparency !== undefined) setReduceTransparency(parsed.reduceTransparency);
+          if (parsed.audioCues !== undefined) setAudioCues(parsed.audioCues);
         }
 
         if (savedHide !== null) setHidePastTrips(savedHide === "true");
@@ -468,6 +609,15 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
         if (cachedTrip) {
           const parsed = JSON.parse(cachedTrip);
           setTripPreferences((prev) => ({ ...prev, ...parsed }));
+        }
+
+        if (cachedNotif) {
+          const parsedNotif = JSON.parse(cachedNotif);
+          setNotificationPreferences((prev) => {
+            const next = { ...prev, ...parsedNotif };
+            memoryCache.notificationPreferences = next;
+            return next;
+          });
         }
       } catch (e) {
         console.log("AppSettingsContext read AsyncStorage error:", e);
@@ -499,6 +649,15 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
         if (data.weatherPreferences) {
           const wp = data.weatherPreferences;
           if (wp.tempUnit) setTempUnit(wp.tempUnit);
+          if (wp.forecastHorizon) setForecastHorizon(wp.forecastHorizon);
+          if (wp.severeAlerts !== undefined) setSevereAlerts(wp.severeAlerts);
+          if (wp.rainNotifications !== undefined) setRainNotifications(wp.rainNotifications);
+          if (wp.uvAlerts !== undefined) setUvAlerts(wp.uvAlerts);
+          if (wp.widgetLayout) setWidgetLayout(wp.widgetLayout);
+          if (wp.showFeelsLike !== undefined) setShowFeelsLike(wp.showFeelsLike);
+          if (wp.showWindSpeed !== undefined) setShowWindSpeed(wp.showWindSpeed);
+          if (wp.refreshInterval) setRefreshInterval(wp.refreshInterval);
+          if (wp.highPollutionAlerts !== undefined) setHighPollutionAlerts(wp.highPollutionAlerts);
         }
 
         // Locale
@@ -512,9 +671,30 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
         // Accessibility
         if (data.accessibilityPreferences) {
           const ap = data.accessibilityPreferences;
-          if (ap.hapticFeedback !== undefined) setHapticFeedback(ap.hapticFeedback);
-          if (ap.reduceMotion !== undefined) setReduceMotion(ap.reduceMotion);
-          if (ap.highContrastMode !== undefined) setHighContrastMode(ap.highContrastMode);
+          if (ap.screenReaderCompat !== undefined) setScreenReaderCompat(ap.screenReaderCompat);
+          if (ap.highContrastMode !== undefined) {
+            setHighContrastMode(ap.highContrastMode);
+            memoryCache.highContrastMode = ap.highContrastMode;
+          }
+          if (ap.largeTouchTargets !== undefined) {
+            setLargeTouchTargets(ap.largeTouchTargets);
+            memoryCache.largeTouchTargets = ap.largeTouchTargets;
+          }
+          if (ap.colorBlindMode !== undefined) {
+            setColorBlindMode(ap.colorBlindMode);
+            memoryCache.colorBlindMode = ap.colorBlindMode;
+          }
+          if (ap.reduceMotion !== undefined) {
+            setReduceMotion(ap.reduceMotion);
+            memoryCache.reduceMotion = ap.reduceMotion;
+          }
+          if (ap.hapticFeedback !== undefined) {
+            setHapticFeedback(ap.hapticFeedback);
+            memoryCache.hapticFeedback = ap.hapticFeedback;
+          }
+          if (ap.boldText !== undefined) setBoldText(ap.boldText);
+          if (ap.reduceTransparency !== undefined) setReduceTransparency(ap.reduceTransparency);
+          if (ap.audioCues !== undefined) setAudioCues(ap.audioCues);
         }
 
         // Privacy
@@ -529,6 +709,16 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
         // Trip Preferences
         if (data.tripPreferences) {
           setTripPreferences((prev) => ({ ...prev, ...data.tripPreferences }));
+        }
+
+        // Notification Preferences
+        if (data.notificationPreferences || data.notifications) {
+          const notifData = data.notificationPreferences || data.notifications;
+          setNotificationPreferences((prev) => {
+            const next = { ...prev, ...notifData };
+            memoryCache.notificationPreferences = next;
+            return next;
+          });
         }
       },
       (err) => {
@@ -577,6 +767,15 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
   const updateWeatherPreferences = useCallback(
     async (prefs: Partial<WeatherPreferences>) => {
       if (prefs.tempUnit) setTempUnit(prefs.tempUnit);
+      if (prefs.forecastHorizon) setForecastHorizon(prefs.forecastHorizon);
+      if (prefs.severeAlerts !== undefined) setSevereAlerts(prefs.severeAlerts);
+      if (prefs.rainNotifications !== undefined) setRainNotifications(prefs.rainNotifications);
+      if (prefs.uvAlerts !== undefined) setUvAlerts(prefs.uvAlerts);
+      if (prefs.widgetLayout) setWidgetLayout(prefs.widgetLayout);
+      if (prefs.showFeelsLike !== undefined) setShowFeelsLike(prefs.showFeelsLike);
+      if (prefs.showWindSpeed !== undefined) setShowWindSpeed(prefs.showWindSpeed);
+      if (prefs.refreshInterval) setRefreshInterval(prefs.refreshInterval);
+      if (prefs.highPollutionAlerts !== undefined) setHighPollutionAlerts(prefs.highPollutionAlerts);
 
       try {
         const cached = await AsyncStorage.getItem("@bunkmates_weather_preferences");
@@ -638,11 +837,91 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
     [user]
   );
 
+  const announceAccessibility = useCallback((message: string) => {
+    if (!message) return;
+    try {
+      AccessibilityInfo.announceForAccessibility(message);
+    } catch (e) {
+      console.log("announceAccessibility error:", e);
+    }
+  }, []);
+
+  const resetAccessibilityPreferences = useCallback(async () => {
+    const defaultPrefs: AccessibilityPreferences = {
+      screenReaderCompat: false,
+      highContrastMode: false,
+      largeTouchTargets: true,
+      colorBlindMode: "Off",
+      reduceMotion: false,
+      hapticFeedback: true,
+      boldText: false,
+      reduceTransparency: false,
+      audioCues: false,
+    };
+    setScreenReaderCompat(false);
+    setHighContrastMode(false);
+    setLargeTouchTargets(true);
+    setColorBlindMode("Off");
+    setReduceMotion(false);
+    setHapticFeedback(true);
+    setBoldText(false);
+    setReduceTransparency(false);
+    setAudioCues(false);
+
+    memoryCache.highContrastMode = false;
+    memoryCache.largeTouchTargets = true;
+    memoryCache.colorBlindMode = "Off";
+    memoryCache.reduceMotion = false;
+    memoryCache.hapticFeedback = true;
+
+    try {
+      await AsyncStorage.setItem(
+        "@bunkmates_accessibility_preferences",
+        JSON.stringify(defaultPrefs)
+      );
+    } catch (e) {
+      console.log("resetAccessibilityPreferences AsyncStorage error:", e);
+    }
+
+    if (user) {
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        await updateDoc(userDocRef, {
+          accessibilityPreferences: defaultPrefs,
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.log("resetAccessibilityPreferences Firestore error:", e);
+      }
+    }
+  }, [user]);
+
   const updateAccessibilityPreferences = useCallback(
     async (prefs: Partial<AccessibilityPreferences>) => {
-      if (prefs.hapticFeedback !== undefined) setHapticFeedback(prefs.hapticFeedback);
-      if (prefs.reduceMotion !== undefined) setReduceMotion(prefs.reduceMotion);
-      if (prefs.highContrastMode !== undefined) setHighContrastMode(prefs.highContrastMode);
+      if (prefs.screenReaderCompat !== undefined) setScreenReaderCompat(prefs.screenReaderCompat);
+      if (prefs.highContrastMode !== undefined) {
+        setHighContrastMode(prefs.highContrastMode);
+        memoryCache.highContrastMode = prefs.highContrastMode;
+      }
+      if (prefs.largeTouchTargets !== undefined) {
+        setLargeTouchTargets(prefs.largeTouchTargets);
+        memoryCache.largeTouchTargets = prefs.largeTouchTargets;
+      }
+      if (prefs.colorBlindMode !== undefined) {
+        setColorBlindMode(prefs.colorBlindMode);
+        memoryCache.colorBlindMode = prefs.colorBlindMode;
+      }
+      if (prefs.reduceMotion !== undefined) {
+        setReduceMotion(prefs.reduceMotion);
+        memoryCache.reduceMotion = prefs.reduceMotion;
+      }
+      if (prefs.hapticFeedback !== undefined) {
+        setHapticFeedback(prefs.hapticFeedback);
+        memoryCache.hapticFeedback = prefs.hapticFeedback;
+      }
+      if (prefs.boldText !== undefined) setBoldText(prefs.boldText);
+      if (prefs.reduceTransparency !== undefined) setReduceTransparency(prefs.reduceTransparency);
+      if (prefs.audioCues !== undefined) setAudioCues(prefs.audioCues);
 
       try {
         const cached = await AsyncStorage.getItem("@bunkmates_accessibility_preferences");
@@ -736,6 +1015,57 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
     [user]
   );
 
+  const updateNotificationPreferences = useCallback(
+    async (prefs: Partial<NotificationPreferences>) => {
+      setNotificationPreferences((prev) => {
+        const next = { ...prev, ...prefs };
+        memoryCache.notificationPreferences = next;
+        return next;
+      });
+
+      try {
+        const cached = await AsyncStorage.getItem("@bunkmates_notification_preferences");
+        const existing = cached ? JSON.parse(cached) : {};
+        const updated = { ...existing, ...prefs };
+        await AsyncStorage.setItem(
+          "@bunkmates_notification_preferences",
+          JSON.stringify(updated)
+        );
+      } catch (e) {
+        console.log("updateNotificationPreferences AsyncStorage error:", e);
+      }
+
+      if (user) {
+        try {
+          const userDocRef = doc(db, "users", user.uid);
+          await updateDoc(userDocRef, {
+            notificationPreferences: prefs,
+            notifications: prefs,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (e) {
+          console.log("updateNotificationPreferences Firestore error:", e);
+        }
+      }
+    },
+    [user]
+  );
+
+  const isQuietHoursActive = useCallback(() => {
+    if (!notificationPreferences.doNotDisturb) return false;
+    return isQuietHoursActiveNow(
+      notificationPreferences.silenceFrom,
+      notificationPreferences.silenceUntil
+    );
+  }, [notificationPreferences]);
+
+  const shouldDeliverNotification = useCallback(
+    (category: NotificationCategory, isPriority = false) => {
+      return checkNotificationDelivery(notificationPreferences, category, isPriority);
+    },
+    [notificationPreferences]
+  );
+
   // Format helpers bound to state
   const formatCurrency = useCallback(
     (amount: number | string | undefined | null) => {
@@ -765,6 +1095,19 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
       if (tempUnit === "°F") return Math.round((c * 9) / 5 + 32);
       if (tempUnit === "K") return Math.round(c + 273.15);
       return Math.round(c);
+    },
+    [tempUnit]
+  );
+
+  const formatWindSpeed = useCallback(
+    (speedMps: number | undefined | null) => {
+      if (speedMps === undefined || speedMps === null) return "--";
+      if (tempUnit === "°F") {
+        const mph = Math.round(speedMps * 2.23694);
+        return `${mph} mph`;
+      }
+      const kmh = Math.round(speedMps * 3.6);
+      return `${kmh} km/h`;
     },
     [tempUnit]
   );
@@ -806,9 +1149,31 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
         updateCurrencyPreferences,
 
         // Weather
+        weatherPreferences: {
+          tempUnit,
+          forecastHorizon,
+          severeAlerts,
+          rainNotifications,
+          uvAlerts,
+          widgetLayout,
+          showFeelsLike,
+          showWindSpeed,
+          refreshInterval,
+          highPollutionAlerts,
+        },
         tempUnit,
+        forecastHorizon,
+        severeAlerts,
+        rainNotifications,
+        uvAlerts,
+        widgetLayout,
+        showFeelsLike,
+        showWindSpeed,
+        refreshInterval,
+        highPollutionAlerts,
         formatTemperature,
         convertTemperatureNumber,
+        formatWindSpeed,
         updateWeatherPreferences,
 
         // Locale & Formats
@@ -820,11 +1185,20 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
         updateLocalePreferences,
 
         // Accessibility & Haptics
-        hapticFeedback,
-        reduceMotion,
+        screenReaderCompat,
         highContrastMode,
+        largeTouchTargets,
+        colorBlindMode,
+        reduceMotion,
+        hapticFeedback,
+        boldText,
+        reduceTransparency,
+        audioCues,
+        isSystemScreenReaderActive,
         triggerHaptic,
+        announceAccessibility,
         updateAccessibilityPreferences,
+        resetAccessibilityPreferences,
 
         // Privacy
         hidePastTrips,
@@ -836,6 +1210,21 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
         // Trip Preferences
         tripPreferences,
         updateTripPreferences,
+
+        // Notifications
+        notificationPreferences,
+        allPushEnabled: notificationPreferences.allPushEnabled,
+        tripUpdates: notificationPreferences.tripUpdates,
+        chatMessages: notificationPreferences.chatMessages,
+        reminders: notificationPreferences.reminders,
+        recommendations: notificationPreferences.recommendations,
+        promotions: notificationPreferences.promotions,
+        doNotDisturb: notificationPreferences.doNotDisturb,
+        silenceFrom: notificationPreferences.silenceFrom,
+        silenceUntil: notificationPreferences.silenceUntil,
+        isQuietHoursActive,
+        shouldDeliverNotification,
+        updateNotificationPreferences,
       }}
     >
       {children}
@@ -856,8 +1245,30 @@ export function useAppSettings(): AppSettingsContextType {
       updateCurrencyPreferences: async () => {},
 
       tempUnit: memoryCache.tempUnit,
+      forecastHorizon: "5 Days",
+      severeAlerts: true,
+      rainNotifications: true,
+      uvAlerts: true,
+      widgetLayout: "Detailed Card",
+      showFeelsLike: true,
+      showWindSpeed: true,
+      refreshInterval: "Every 1 Hour",
+      highPollutionAlerts: true,
+      weatherPreferences: {
+        tempUnit: memoryCache.tempUnit,
+        forecastHorizon: "5 Days",
+        severeAlerts: true,
+        rainNotifications: true,
+        uvAlerts: true,
+        widgetLayout: "Detailed Card",
+        showFeelsLike: true,
+        showWindSpeed: true,
+        refreshInterval: "Every 1 Hour",
+        highPollutionAlerts: true,
+      },
       formatTemperature: (t, src) => formatTemperatureValue(t, undefined, src),
       convertTemperatureNumber: (t) => (t != null ? Math.round(t) : null),
+      formatWindSpeed: (speed) => (speed != null ? `${Math.round(speed * 3.6)} km/h` : "—"),
       updateWeatherPreferences: async () => {},
 
       dateFormat: memoryCache.dateFormat,
@@ -867,11 +1278,24 @@ export function useAppSettings(): AppSettingsContextType {
       formatTime: (d, s) => formatTimeValue(d, undefined, s),
       updateLocalePreferences: async () => {},
 
+      screenReaderCompat: false,
+      highContrastMode: memoryCache.highContrastMode,
+      largeTouchTargets: memoryCache.largeTouchTargets,
+      colorBlindMode: memoryCache.colorBlindMode,
+      reduceMotion: memoryCache.reduceMotion,
       hapticFeedback: memoryCache.hapticFeedback,
-      reduceMotion: false,
-      highContrastMode: false,
+      boldText: memoryCache.boldText,
+      reduceTransparency: memoryCache.reduceTransparency,
+      audioCues: memoryCache.audioCues,
+      isSystemScreenReaderActive: false,
       triggerHaptic: (type) => triggerAppHaptic(type),
+      announceAccessibility: (msg) => {
+        try {
+          AccessibilityInfo.announceForAccessibility(msg);
+        } catch {}
+      },
       updateAccessibilityPreferences: async () => {},
+      resetAccessibilityPreferences: async () => {},
 
       hidePastTrips: memoryCache.hidePastTrips,
       locationSharing: true,
@@ -888,6 +1312,28 @@ export function useAppSettings(): AppSettingsContextType {
         activities: ["Museums"],
       },
       updateTripPreferences: async () => {},
+
+      notificationPreferences: memoryCache.notificationPreferences,
+      allPushEnabled: memoryCache.notificationPreferences.allPushEnabled,
+      tripUpdates: memoryCache.notificationPreferences.tripUpdates,
+      chatMessages: memoryCache.notificationPreferences.chatMessages,
+      reminders: memoryCache.notificationPreferences.reminders,
+      recommendations: memoryCache.notificationPreferences.recommendations,
+      promotions: memoryCache.notificationPreferences.promotions,
+      doNotDisturb: memoryCache.notificationPreferences.doNotDisturb,
+      silenceFrom: memoryCache.notificationPreferences.silenceFrom,
+      silenceUntil: memoryCache.notificationPreferences.silenceUntil,
+      isQuietHoursActive: () => {
+        if (!memoryCache.notificationPreferences.doNotDisturb) return false;
+        return isQuietHoursActiveNow(
+          memoryCache.notificationPreferences.silenceFrom,
+          memoryCache.notificationPreferences.silenceUntil
+        );
+      },
+      shouldDeliverNotification: (cat, isPrio) => {
+        return checkNotificationDelivery(memoryCache.notificationPreferences, cat, isPrio);
+      },
+      updateNotificationPreferences: async () => {},
     };
   }
   return context;

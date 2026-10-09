@@ -2,12 +2,14 @@ import { View, Text, StyleSheet } from "react-native";
 import BottomSheet from "@gorhom/bottom-sheet";
 import { useMemo, useRef } from "react";
 import { BlurView } from "../ui/AppBlurView";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
 
 interface Props {
   weather: any;
 }
 
 export default function WeatherBottomSheet({ weather }: Props) {
+  const { formatTemperature } = useAppSettings();
   const sheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ["25%", "60%"], []);
 
@@ -27,7 +29,7 @@ export default function WeatherBottomSheet({ weather }: Props) {
             Condition: {weather.main}
           </Text>
           <Text style={styles.text}>
-            Temperature: {weather.temp}°C
+            Temperature: {formatTemperature(weather.temp, "C")}
           </Text>
           <Text style={styles.text}>
             Description: {weather.desc}

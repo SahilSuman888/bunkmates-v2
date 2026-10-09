@@ -4,20 +4,57 @@ import { router } from "expo-router";
 
 export default function NotificationsHandler() {
   useEffect(() => {
-    // Push notifications are intentionally disabled for now.
-    // OneSignal / remote push will be enabled later
-    // in a development/production build.
+    let responseSubscription: { remove: () => void } | null = null;
 
-    if (Platform.OS !== "android") {
-      return;
-    }
+    (async () => {
+      try {
+        const Notifications = await import("expo-notifications");
 
-    console.log(
-      "Push notifications disabled temporarily."
-    );
+        // Set foreground presentation options
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: true,
+            shouldShowBanner: true,
+            shouldShowList: true,
+          }),
+        });
 
-    return () => {};
+        // Configure default Android notification channel
+        if (Platform.OS === "android") {
+          await Notifications.setNotificationChannelAsync("default", {
+            name: "BunkMates Notifications",
+            importance: Notifications.AndroidImportance.HIGH,
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: "#FF5A5F",
+          });
+        }
+
+        // Listen for notification taps
+        responseSubscription = Notifications.addNotificationResponseReceivedListener(
+          (response) => {
+            try {
+              const data = response.notification.request.content.data;
+              if (data?.route) {
+                router.push(data.route as any);
+              }
+            } catch (err) {
+              console.warn("NotificationsHandler routing error:", err);
+            }
+          }
+        );
+      } catch (e) {
+        // Safe fallback if expo-notifications native layer is unavailable
+      }
+    })();
+
+    return () => {
+      if (responseSubscription) {
+        responseSubscription.remove();
+      }
+    };
   }, []);
 
   return null;
-}
+}

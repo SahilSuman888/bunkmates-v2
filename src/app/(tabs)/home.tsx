@@ -45,13 +45,19 @@ import NotificationBell from "../../components/NotificationBell";
 
 import * as Location from "expo-location";
 
-import { fetchCurrentWeather } from "../../lib/WeatherService";
+import {
+  fetchCurrentWeather,
+  fetchAirPollution,
+  parseRefreshIntervalMs,
+} from "../../lib/WeatherService";
 import WeatherDetailsSheet from "./Weather/WeatherDetailsSheet";
 import AQIDetailsSheet from "./Weather/AQIDetailsSheet";
 
 import placesData from "../data/data.json";
 import { useAppSettings } from "../../contexts/AppSettingsContext";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { SkeletonLoadingScreen } from "../../components/ui/SkeletonLoadingScreen";
 
 
 // ============================================================
@@ -86,7 +92,17 @@ export default function Home() {
     userData,
   } = useUser();
 
-  const { formatTemperature } = useAppSettings();
+  const {
+    formatTemperature,
+    formatWindSpeed,
+    widgetLayout,
+    showFeelsLike,
+    showWindSpeed,
+    severeAlerts,
+    rainNotifications,
+    highPollutionAlerts,
+    refreshInterval,
+  } = useAppSettings();
   const { t } = useLanguage();
 
   const getGreeting = () => {
@@ -145,6 +161,7 @@ export default function Home() {
   // STATES
   // ==========================================================
 
+  const { isDark, themeColors, accentColor, background, scaleFont } = useThemeToggle();
   const [loading, setLoading] = useState(true);
 
   const [weather, setWeather] =
@@ -154,6 +171,9 @@ export default function Home() {
     useState<number | null>(null);
 
   const [aqiData, setAqiData] =
+    useState<any>(null);
+
+  const [airPollution, setAirPollution] =
     useState<any>(null);
 
   const [showAqiDetails, setShowAqiDetails] =
@@ -501,17 +521,22 @@ export default function Home() {
 
           setLocationAvailable(true);
 
+          const cacheAge = parseRefreshIntervalMs(refreshInterval);
+
           // ----------------------------------------------------
           // WEATHER
           // ----------------------------------------------------
 
+          let weatherResult: any = null;
           try {
             const weatherData =
               await fetchCurrentWeather(
                 location.coords.latitude,
-                location.coords.longitude
+                location.coords.longitude,
+                cacheAge
               );
 
+            weatherResult = weatherData;
             if (mounted) {
               setWeather(
                 weatherData || null
@@ -530,39 +555,51 @@ export default function Home() {
 
 
           // ----------------------------------------------------
-          // AQI
+          // AQI & AIR POLLUTION
           // ----------------------------------------------------
 
           try {
-            const response =
-              await fetch(
-                "https://api.data.gov.in/resource/3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69?api-key=579b464db66ec23bdd0000011c04ccafb50742ba6a0a7d5e22aa498e&format=json&limit=1"
-              );
+            const pollution = await fetchAirPollution(
+              location.coords.latitude,
+              location.coords.longitude,
+              cacheAge
+            );
 
-            const json =
-              await response.json();
-
-            if (
-              mounted &&
-              json.records?.length
-            ) {
-              const rec = json.records[0];
-              setAqiData(rec);
-              const value = parseInt(
-                rec.avg_value
-              );
-
-              if (
-                !Number.isNaN(value)
-              ) {
-                setAqiValue(value);
-              }
+            if (mounted && pollution) {
+              setAirPollution(pollution);
+              setAqiValue(pollution.value);
+              setAqiData({
+                station: `${weatherResult?.name || "Local"} Environmental Station`,
+                city: weatherResult?.name || "Local Area",
+                state: weatherResult?.sys?.country || "",
+                value: pollution.value,
+                status: pollution.status,
+                color: pollution.color,
+                pollutants: pollution.pollutants,
+              });
             }
           } catch (error) {
             console.log(
-              "AQI fetch error:",
+              "Air pollution fetch error:",
               error
             );
+
+            // Fallback to secondary source if openweather fails
+            try {
+              const response =
+                await fetch(
+                  "https://api.data.gov.in/resource/3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69?api-key=579b464db66ec23bdd0000011c04ccafb50742ba6a0a7d5e22aa498e&format=json&limit=1"
+                );
+              const json = await response.json();
+              if (mounted && json.records?.length) {
+                const rec = json.records[0];
+                setAqiData(rec);
+                const value = parseInt(rec.avg_value);
+                if (!Number.isNaN(value)) {
+                  setAqiValue(value);
+                }
+              }
+            } catch {}
           }
         } catch (error) {
           console.log(
@@ -619,23 +656,8 @@ export default function Home() {
   // LOADING
   // ==========================================================
 
-  if (
-    authLoading ||
-    loading
-  ) {
-    return (
-      <View
-        style={[
-          styles.container,
-          styles.center,
-        ]}
-      >
-        <ActivityIndicator
-          size="large"
-          color="#ffffff"
-        />
-      </View>
-    );
+  if (authLoading || loading) {
+    return <SkeletonLoadingScreen title="BunkMates" showAvatarCard={true} itemCount={3} />;
   }
 
 
@@ -729,6 +751,21 @@ export default function Home() {
       return "weather-cloudy";
     };
 
+  const weatherMain = weather?.weather?.[0]?.main || "";
+  const isSevereWeather =
+    severeAlerts &&
+    (weatherMain === "Thunderstorm" ||
+      weatherMain === "Squall" ||
+      weatherMain === "Tornado" ||
+      Boolean(weather?.wind?.speed && weather.wind.speed > 15));
+
+  const isRainActive =
+    rainNotifications &&
+    (weatherMain === "Rain" || weatherMain === "Drizzle");
+
+  const isHighPollution =
+    highPollutionAlerts && aqiValue != null && aqiValue > 100;
+
 
   // ==========================================================
   // RENDER
@@ -736,11 +773,19 @@ export default function Home() {
 
   return (
     <SafeAreaView
-      style={styles.safeArea}
+      style={[
+        styles.safeArea,
+        {
+          backgroundColor:
+            background.mode === "solid"
+              ? themeColors.background
+              : "transparent",
+        },
+      ]}
     >
       <StatusBar
-        barStyle="light-content"
-        backgroundColor="#000000"
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={themeColors.background}
       />
 
       <View
@@ -748,7 +793,9 @@ export default function Home() {
           styles.container,
           {
             backgroundColor:
-              "#000000",
+              background.mode === "solid"
+                ? themeColors.background
+                : "transparent",
           },
         ]}
       >
@@ -785,7 +832,8 @@ export default function Home() {
                   styles.greeting,
                   {
                     fontSize:
-                      15 * scale,
+                      scaleFont(15 * scale),
+                    color: themeColors.textSecondary,
                   },
                 ]}
               >
@@ -797,7 +845,8 @@ export default function Home() {
                   styles.name,
                   {
                     fontSize:
-                      24 * scale,
+                      scaleFont(24 * scale),
+                    color: themeColors.text,
                   },
                 ]}
                 numberOfLines={1}
@@ -815,151 +864,203 @@ export default function Home() {
           ================================================== */}
 
           <View
-            style={[
-              styles.weatherAqiRow,
-              {
-                paddingHorizontal:
-                  horizontalPadding,
-                marginTop:
-                  58 * scale,
-              },
-            ]}
+            style={{
+              paddingHorizontal: horizontalPadding,
+              marginTop: 58 * scale,
+            }}
           >
+            {/* Live Weather Alerts Banner if active */}
+            {isSevereWeather && (
+              <View style={styles.homeAlertBannerSevere}>
+                <Feather name="alert-triangle" size={13} color="#ff4757" />
+                <Text style={styles.homeAlertBannerText}>
+                  Severe Weather Advisory: {weatherMain || "Storm"} detected
+                </Text>
+              </View>
+            )}
+            {isRainActive && !isSevereWeather && (
+              <View style={styles.homeAlertBannerRain}>
+                <Feather name="cloud-rain" size={13} color="#38bdf8" />
+                <Text style={styles.homeAlertBannerRainText}>
+                  Precipitation Notice: Active rainfall in your area
+                </Text>
+              </View>
+            )}
 
-            <Pressable
-              style={styles.weatherInfo}
-              onPress={() => {
-                if (weather) {
-                  setShowWeatherDetails(
-                    true
-                  );
-                }
-              }}
-            >
-
-              <MaterialCommunityIcons
-                name={
-                  getWeatherIcon() as any
-                }
-                size={
-                  40 * scale
-                }
-                color="#ffffff"
-              />
-
-              <View
-                style={{
-                  marginLeft:
-                    12 * scale,
-                  flexShrink: 1,
+            {widgetLayout === "Compact Tile" ? (
+              /* Compact Tile layout */
+              <Pressable
+                style={[
+                  styles.compactTileContainer,
+                  isHighPollution && styles.compactTilePollutionBorder,
+                ]}
+                onPress={() => {
+                  if (weather) setShowWeatherDetails(true);
                 }}
               >
+                <View style={{ flexDirection: "row", alignItems: "center", flex: 1, gap: 10 }}>
+                  <MaterialCommunityIcons
+                    name={getWeatherIcon() as any}
+                    size={32 * scale}
+                    color="#ffffff"
+                  />
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text style={[styles.compactTempText, { fontSize: 19 * scale }]}>
+                        {weatherTemperature}
+                      </Text>
+                      {locationAvailable && weather?.name ? (
+                        <Text style={[styles.compactCityText, { fontSize: 13 * scale }]} numberOfLines={1}>
+                          • {weatherLocation}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 }}>
+                      <Text style={[styles.compactDescText, { fontSize: 11.5 * scale }]} numberOfLines={1}>
+                        {weatherDescription || "Clear"}
+                      </Text>
+                      {showFeelsLike && weather?.main?.feels_like != null ? (
+                        <Text style={[styles.compactMetaText, { fontSize: 11 * scale }]}>
+                          Feels {formatTemperature(weather.main.feels_like, "C")}
+                        </Text>
+                      ) : null}
+                      {showWindSpeed && weather?.wind?.speed != null ? (
+                        <Text style={[styles.compactMetaText, { fontSize: 11 * scale }]}>
+                          💨 {formatWindSpeed(weather.wind.speed)}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                </View>
 
-                <Text
+                {/* Compact AQI badge */}
+                <Pressable
                   style={[
-                    styles.tempText,
+                    styles.compactAqiPill,
                     {
-                      fontSize:
-                        20 * scale,
+                      backgroundColor: aqiData?.color ? `${aqiData.color}22` : "rgba(255,255,255,0.08)",
+                      borderColor: aqiData?.color || "rgba(255,255,255,0.2)",
                     },
                   ]}
-                  numberOfLines={1}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setShowAqiDetails(true);
+                  }}
                 >
-                  {weatherTemperature}
-                  {"  "}
-                  {locationAvailable &&
-                  weather?.name
-                    ? "•"
-                    : ""}
-                  {"  "}
-                  {weatherLocation}
-                </Text>
+                  <Text style={[styles.compactAqiNum, { color: aqiData?.color || "#fff" }]}>
+                    {aqiValue ?? "—"}
+                  </Text>
+                  <Text style={[styles.compactAqiStatus, { color: aqiData?.color || "#999" }]}>
+                    {aqiValue == null ? "AQI" : aqiData?.status || (aqiValue <= 50 ? "Good" : aqiValue <= 100 ? "Mod" : "Poor")}
+                  </Text>
+                </Pressable>
+              </Pressable>
+            ) : (
+              /* Detailed Card layout (default) */
+              <View style={styles.weatherAqiRow}>
+                <Pressable
+                  style={styles.weatherInfo}
+                  onPress={() => {
+                    if (weather) setShowWeatherDetails(true);
+                  }}
+                >
+                  <MaterialCommunityIcons
+                    name={getWeatherIcon() as any}
+                    size={40 * scale}
+                    color="#ffffff"
+                  />
 
-                {weatherDescription ? (
+                  <View style={{ marginLeft: 12 * scale, flexShrink: 1 }}>
+                    <Text
+                      style={[styles.tempText, { fontSize: 20 * scale }]}
+                      numberOfLines={1}
+                    >
+                      {weatherTemperature}
+                      {"  "}
+                      {locationAvailable && weather?.name ? "•" : ""}
+                      {"  "}
+                      {weatherLocation}
+                    </Text>
+
+                    {weatherDescription ? (
+                      <Text
+                        style={[styles.subText, { fontSize: 13 * scale }]}
+                        numberOfLines={1}
+                      >
+                        {weatherDescription}
+                      </Text>
+                    ) : null}
+
+                    {(showFeelsLike || showWindSpeed) ? (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}>
+                        {showFeelsLike && weather?.main?.feels_like != null ? (
+                          <Text style={styles.metricSubText}>
+                            Feels {formatTemperature(weather.main.feels_like, "C")}
+                          </Text>
+                        ) : null}
+                        {showWindSpeed && weather?.wind?.speed != null ? (
+                          <Text style={styles.metricSubText}>
+                            💨 {formatWindSpeed(weather.wind.speed)}
+                          </Text>
+                        ) : null}
+                      </View>
+                    ) : null}
+                  </View>
+                </Pressable>
+
+                {/* AQI Badge */}
+                <Pressable
+                  style={[
+                    styles.aqiBadge,
+                    {
+                      width: Math.min(132 * scale, 145),
+                      height: Math.min(132 * scale, 145),
+                    },
+                    isHighPollution && {
+                      borderColor: "#f97316",
+                      borderWidth: 1.5,
+                      backgroundColor: "rgba(249, 115, 22, 0.12)",
+                    },
+                  ]}
+                  onPress={() => setShowAqiDetails(true)}
+                >
+                  <Feather
+                    name={isHighPollution ? "alert-triangle" : "info"}
+                    size={14 * scale}
+                    color={isHighPollution ? "#f97316" : "#999"}
+                    style={styles.infoIcon}
+                  />
+
                   <Text
                     style={[
-                      styles.subText,
-                      {
-                        fontSize:
-                          13 * scale,
-                      },
+                      styles.aqiNumber,
+                      { fontSize: 40 * scale },
+                      aqiData?.color ? { color: aqiData.color } : null,
                     ]}
-                    numberOfLines={1}
                   >
-                    {weatherDescription}
+                    {aqiValue ?? "—"}
                   </Text>
-                ) : null}
 
+                  <Text
+                    style={[
+                      styles.aqiLabel,
+                      { fontSize: 11 * scale },
+                      aqiData?.color ? { color: aqiData.color } : null,
+                    ]}
+                  >
+                    AQI •{" "}
+                    {aqiValue == null
+                      ? "Unavailable"
+                      : aqiData?.status ||
+                        (aqiValue <= 50
+                          ? "Good"
+                          : aqiValue <= 100
+                          ? "Moderate"
+                          : "Poor")}
+                  </Text>
+                </Pressable>
               </View>
-            </Pressable>
-
-
-            {/* AQI */}
-
-            <Pressable
-              style={[
-                styles.aqiBadge,
-                {
-                  width:
-                    Math.min(
-                      132 * scale,
-                      145
-                    ),
-                  height:
-                    Math.min(
-                      132 * scale,
-                      145
-                    ),
-                },
-              ]}
-              onPress={() => setShowAqiDetails(true)}
-            >
-
-              <Feather
-                name="info"
-                size={
-                  14 * scale
-                }
-                color="#999"
-                style={
-                  styles.infoIcon
-                }
-              />
-
-              <Text
-                style={[
-                  styles.aqiNumber,
-                  {
-                    fontSize:
-                      40 * scale,
-                  },
-                ]}
-              >
-                {aqiValue ??
-                  "—"}
-              </Text>
-
-              <Text
-                style={[
-                  styles.aqiLabel,
-                  {
-                    fontSize:
-                      11 * scale,
-                  },
-                ]}
-              >
-                AQI •{" "}
-                {aqiValue == null
-                  ? "Unavailable"
-                  : aqiValue <= 50
-                  ? "Good"
-                  : aqiValue <= 100
-                  ? "Moderate"
-                  : "Poor"}
-              </Text>
-
-            </Pressable>
-
+            )}
           </View>
 
 
@@ -1693,6 +1794,7 @@ export default function Home() {
         <WeatherDetailsSheet
           weather={weather}
           aqiValue={aqiValue}
+          airPollution={airPollution}
           visible={
             showWeatherDetails
           }
@@ -2136,6 +2238,111 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textTransform:
       "capitalize",
+  },
+
+  metricSubText: {
+    color: "#888888",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+
+  compactTileContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+
+  compactTilePollutionBorder: {
+    borderColor: "rgba(249, 115, 22, 0.4)",
+  },
+
+  compactTempText: {
+    color: "#ffffff",
+    fontWeight: "800",
+  },
+
+  compactCityText: {
+    color: "#cccccc",
+    fontWeight: "600",
+  },
+
+  compactDescText: {
+    color: "#999999",
+    textTransform: "capitalize",
+    fontWeight: "500",
+  },
+
+  compactMetaText: {
+    color: "#777777",
+    fontWeight: "500",
+  },
+
+  compactAqiPill: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    minWidth: 54,
+  },
+
+  compactAqiNum: {
+    fontSize: 16,
+    fontWeight: "900",
+  },
+
+  compactAqiStatus: {
+    fontSize: 9,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    marginTop: 1,
+  },
+
+  homeAlertBannerSevere: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255, 71, 87, 0.15)",
+    borderColor: "rgba(255, 71, 87, 0.35)",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginBottom: 10,
+  },
+
+  homeAlertBannerRain: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(56, 189, 248, 0.15)",
+    borderColor: "rgba(56, 189, 248, 0.35)",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginBottom: 10,
+  },
+
+  homeAlertBannerText: {
+    color: "#ff6b81",
+    fontSize: 11,
+    fontWeight: "700",
+    flex: 1,
+  },
+
+  homeAlertBannerRainText: {
+    color: "#7dd3fc",
+    fontSize: 11,
+    fontWeight: "700",
+    flex: 1,
   },
 
 

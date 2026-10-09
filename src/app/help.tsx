@@ -294,28 +294,28 @@ export default function HelpSupportScreen() {
     const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
 
     return {
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
+      bg: isDark ? "#000000" : "#F1F1F1",
+      card: isDark ? "#161618" : "#FFFFFF",
+      cardBorder: "transparent",
+      divider: "transparent",
       textPrimary: isDark ? "#FFFFFF" : "#11141A",
       textSecondary: isDark ? "#8E95A2" : "#7E8590",
       sectionHeader: isDark ? "#8E95A2" : "#7E8590",
       greyishWhite,
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#202024" : "#F4F5F7",
       chevron: isDark ? "#555860" : "#B4B9C2",
       activeText,
-      activeBorder,
-      activeRowBg: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.03)",
-      inputBg: isDark ? "rgba(255, 255, 255, 0.05)" : "#FFFFFF",
-      inputBorder: isDark ? "rgba(255, 255, 255, 0.1)" : "#E2E8F0",
+      activeBorder: "transparent",
+      activeRowBg: isDark ? "#202024" : "#F4F5F7",
+      inputBg: isDark ? "#202024" : "#FFFFFF",
+      inputBorder: "transparent",
       modalOverlay: "rgba(0, 0, 0, 0.65)",
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
-      chipBg: isDark ? "rgba(255, 255, 255, 0.08)" : "#EEF2F6",
-      btnPrimaryBg: isDark ? "#FFFFFF" : "#111827",
+      chipBg: isDark ? "#202024" : "#EEF2F6",
+      btnPrimaryBg: isDark ? "#FFFFFF" : "#000000",
       btnPrimaryText: isDark ? "#000000" : "#FFFFFF",
-      chatBubbleBot: isDark ? "rgba(255, 255, 255, 0.08)" : "#F1F5F9",
+      chatBubbleBot: isDark ? "#202024" : "#F1F5F9",
       chatBubbleUser: isDark ? "#2563EB" : "#1D4ED8",
       accentGreen: "#10B981",
       badgeBg: isDark ? "rgba(16, 185, 129, 0.15)" : "#D1FAE5",
@@ -591,7 +591,10 @@ export default function HelpSupportScreen() {
       {/* Header with Circular Back Button */}
       <View style={styles.header}>
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace("/ProfileSettings" as any);
+          }}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
             {
@@ -710,13 +713,7 @@ export default function HelpSupportScreen() {
                   return (
                     <View
                       key={art.id}
-                      style={[
-                        styles.articleInlineContainer,
-                        !isLast && {
-                          borderBottomColor: colors.divider,
-                          borderBottomWidth: StyleSheet.hairlineWidth,
-                        },
-                      ]}
+                      style={styles.articleInlineContainer}
                     >
                       <Pressable
                         onPress={() => setExpandedArticleId(isExpanded ? null : art.id)}
@@ -811,15 +808,7 @@ export default function HelpSupportScreen() {
                 <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
                   <Ionicons name={cat.icon} size={20} color={colors.greyishWhite} />
                 </View>
-                <View
-                  style={[
-                    styles.rowContent,
-                    !isLast && {
-                      borderBottomColor: colors.divider,
-                      borderBottomWidth: StyleSheet.hairlineWidth,
-                    },
-                  ]}
-                >
+                <View style={styles.rowContent}>
                   <View style={{ flex: 1, paddingRight: 8 }}>
                     <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{cat.title}</Text>
                     <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
@@ -846,12 +835,7 @@ export default function HelpSupportScreen() {
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="chatbox-outline" size={20} color={colors.greyishWhite} />
             </View>
-            <View
-              style={[
-                styles.rowContent,
-                { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth },
-              ]}
-            >
+            <View style={styles.rowContent}>
               <View style={styles.labelGroup}>
                 <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Contact Support")}</Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
@@ -874,12 +858,7 @@ export default function HelpSupportScreen() {
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="mail-outline" size={20} color={colors.greyishWhite} />
             </View>
-            <View
-              style={[
-                styles.rowContent,
-                { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth },
-              ]}
-            >
+            <View style={styles.rowContent}>
               <View style={styles.labelGroup}>
                 <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Email Support")}</Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
@@ -903,12 +882,7 @@ export default function HelpSupportScreen() {
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="shield-outline" size={20} color={colors.greyishWhite} />
             </View>
-            <View
-              style={[
-                styles.rowContent,
-                { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth },
-              ]}
-            >
+            <View style={styles.rowContent}>
               <View style={styles.labelGroup}>
                 <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Report a Bug")}</Text>
                 <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
@@ -957,10 +931,7 @@ export default function HelpSupportScreen() {
                 <Pressable
                   key={tk.id}
                   onPress={() => setTicketsModalVisible(true)}
-                  style={[
-                    styles.ticketRow,
-                    idx < 1 && { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth },
-                  ]}
+                  style={styles.ticketRow}
                 >
                   <View style={{ flex: 1, paddingRight: 10 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -1540,7 +1511,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1556,8 +1527,8 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     paddingHorizontal: 14,
     paddingVertical: Platform.OS === "ios" ? 12 : 8,
     marginTop: 4,
@@ -1588,8 +1559,8 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   cardGroup: {
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     marginBottom: 24,
   },
@@ -1683,7 +1654,7 @@ const styles = StyleSheet.create({
   articleInlineBody: {
     marginTop: 10,
     paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 0,
   },
   articleInlineAnswer: {
     fontSize: 13,
@@ -1727,8 +1698,8 @@ const styles = StyleSheet.create({
   },
   // Empty card
   emptyCard: {
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     alignItems: "center",
     padding: 24,
     marginBottom: 24,
@@ -1801,9 +1772,9 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   bottomSheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderTopWidth: 1,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 0,
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: Platform.OS === "ios" ? 40 : 28,
@@ -1836,8 +1807,8 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   faqCard: {
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     padding: 14,
     marginBottom: 10,
   },
@@ -1855,7 +1826,7 @@ const styles = StyleSheet.create({
   faqCardBody: {
     marginTop: 10,
     paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 0,
   },
   faqAnswer: {
     fontSize: 13,
@@ -1908,13 +1879,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 0,
     gap: 8,
   },
   chatTextInput: {
     flex: 1,
     borderRadius: 20,
-    borderWidth: 1,
+    borderWidth: 0,
     paddingHorizontal: 14,
     paddingVertical: 8,
     fontSize: 14,
@@ -1935,8 +1906,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   formInput: {
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 16,
+    borderWidth: 0,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 14,
@@ -1950,7 +1921,7 @@ const styles = StyleSheet.create({
   severityPill: {
     flex: 1,
     paddingVertical: 8,
-    borderRadius: 8,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1959,8 +1930,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   formTextarea: {
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 16,
+    borderWidth: 0,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 14,
@@ -1973,7 +1944,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 0,
     marginBottom: 14,
   },
   diagTitle: {
@@ -1985,7 +1956,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   submitBtn: {
-    borderRadius: 12,
+    borderRadius: 24,
     paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
@@ -2021,8 +1992,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   topicCard: {
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     padding: 12,
     marginBottom: 8,
   },
@@ -2050,8 +2021,8 @@ const styles = StyleSheet.create({
   },
   // Ticket full list
   ticketCardFull: {
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     padding: 14,
     marginBottom: 10,
   },

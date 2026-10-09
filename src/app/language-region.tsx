@@ -224,11 +224,13 @@ export default function LanguageRegionSettings() {
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
   let userAccent = "default";
+  let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       if (themeContext.accent) userAccent = themeContext.accent;
+      dynamicThemeColors = themeContext.themeColors;
     }
   } catch (e) {
     // fallback safe
@@ -238,7 +240,7 @@ export default function LanguageRegionSettings() {
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  // Dynamic colors derived from Settings page (zero red, greyish-white accents)
+  // Dynamic solid colors
   const colors = useMemo(() => {
     const hasCustomNonRedAccent =
       userAccent &&
@@ -256,31 +258,31 @@ export default function LanguageRegionSettings() {
     const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
 
     return {
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
-      textPrimary: isDark ? "#FFFFFF" : "#11141A",
-      textSecondary: isDark ? "#8E95A2" : "#7E8590",
-      sectionHeader: isDark ? "#8E95A2" : "#7E8590",
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      divider: "transparent",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       greyishWhite: greyishWhite,
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
       switchActive: isDark ? "#34C759" : "#10B981",
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
       activeText: activeText,
-      activeBorder: activeBorder,
-      activeRowBg: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.03)",
-      inputBg: isDark ? "rgba(255, 255, 255, 0.07)" : "#F2F4F7",
+      activeBorder: "transparent",
+      activeRowBg: isDark ? "#222226" : "rgba(0, 0, 0, 0.03)",
+      inputBg: isDark ? "#202024" : "#F2F4F7",
       modalOverlay: "rgba(0, 0, 0, 0.65)",
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
-      previewBg: isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.02)",
-      previewBorder: isDark ? "rgba(255, 255, 255, 0.07)" : "#E5E7EB",
-      chipBg: isDark ? "rgba(255, 255, 255, 0.08)" : "#EEF2F6",
-      weekdayActiveBg: isDark ? "rgba(255, 255, 255, 0.15)" : "#E5E7EB",
+      previewBg: isDark ? "#202024" : "#FFFFFF",
+      previewBorder: "transparent",
+      chipBg: isDark ? "#2A2A30" : "#EEF2F6",
+      weekdayActiveBg: isDark ? "#2C2C32" : "#E5E7EB",
     };
-  }, [isDark, userAccent]);
+  }, [isDark, userAccent, dynamicThemeColors]);
 
   // Auth observer
   useEffect(() => {
@@ -359,22 +361,16 @@ export default function LanguageRegionSettings() {
     };
 
     updateLocalePreferences(updated as any);
-    try {
-      await AsyncStorage.setItem("@bunkmates_locale_preferences", JSON.stringify(current));
-    } catch (e) {
-      console.log("AsyncStorage write error:", e);
-    }
+    AsyncStorage.setItem("@bunkmates_locale_preferences", JSON.stringify(current)).catch(() => {});
 
     if (user) {
-      try {
-        const userDocRef = doc(db, "users", user.uid);
-        await updateDoc(userDocRef, {
-          localePreferences: current,
-          updatedAt: new Date().toISOString(),
-        });
-      } catch (e) {
+      const userDocRef = doc(db, "users", user.uid);
+      updateDoc(userDocRef, {
+        localePreferences: current,
+        updatedAt: new Date().toISOString(),
+      }).catch((e) => {
         console.log("Firestore write error:", e);
-      }
+      });
     }
   };
 
@@ -527,7 +523,6 @@ export default function LanguageRegionSettings() {
             styles.modernHeaderBtn,
             {
               backgroundColor: colors.card,
-              borderColor: colors.cardBorder,
               opacity: pressed ? 0.7 : 1,
             },
           ]}
@@ -547,7 +542,7 @@ export default function LanguageRegionSettings() {
         showsVerticalScrollIndicator={false}
       >
         {/* Dynamic Live Locale & Formats Preview Card */}
-        <View style={[styles.previewCard, { backgroundColor: colors.previewBg, borderColor: colors.previewBorder }]}>
+        <View style={[styles.previewCard, { backgroundColor: colors.previewBg }]}>
           <View style={styles.previewTopRow}>
             <View style={styles.previewLabelRow}>
               <Ionicons name="sparkles" size={14} color={colors.textSecondary} style={{ marginRight: 6 }} />
@@ -606,7 +601,7 @@ export default function LanguageRegionSettings() {
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
           {t("locale_section", "LOCALE")}
         </Text>
-        <View style={[styles.cardGroup, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.cardGroup, { backgroundColor: colors.card }]}>
           {/* App Language */}
           <Pressable
             onPress={() => {
@@ -618,7 +613,7 @@ export default function LanguageRegionSettings() {
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="globe-outline" size={20} color={colors.greyishWhite} />
             </View>
-            <View style={[styles.rowContent, { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+            <View style={[styles.rowContent]}>
               <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
                 {t("app_language", "App Language")}
               </Text>
@@ -640,7 +635,7 @@ export default function LanguageRegionSettings() {
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Feather name="map" size={19} color={colors.greyishWhite} />
             </View>
-            <View style={[styles.rowContent, { borderBottomWidth: 0 }]}>
+            <View style={[styles.rowContent]}>
               <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
                 {t("region", "Region")}
               </Text>
@@ -658,7 +653,7 @@ export default function LanguageRegionSettings() {
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
           {t("system_formats_section", "SYSTEM FORMATS")}
         </Text>
-        <View style={[styles.cardGroup, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.cardGroup, { backgroundColor: colors.card }]}>
           {/* Date Format */}
           <Pressable
             onPress={() => setDateFormatModalVisible(true)}
@@ -667,7 +662,7 @@ export default function LanguageRegionSettings() {
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="calendar-outline" size={20} color={colors.greyishWhite} />
             </View>
-            <View style={[styles.rowContent, { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+            <View style={[styles.rowContent]}>
               <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
                 {t("date_format", "Date Format")}
               </Text>
@@ -683,7 +678,7 @@ export default function LanguageRegionSettings() {
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="time-outline" size={20} color={colors.greyishWhite} />
             </View>
-            <View style={[styles.rowContent, { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+            <View style={[styles.rowContent]}>
               <View style={styles.labelGroup}>
                 <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
                   {t("time_format_24", "Time Format (24-Hour)")}
@@ -709,7 +704,7 @@ export default function LanguageRegionSettings() {
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="calendar" size={20} color={colors.greyishWhite} />
             </View>
-            <View style={[styles.rowContent, { borderBottomWidth: 0 }]}>
+            <View style={[styles.rowContent]}>
               <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
                 {t("first_day_of_week", "First Day of Week")}
               </Text>
@@ -737,7 +732,7 @@ export default function LanguageRegionSettings() {
       >
         <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
           <Pressable style={styles.modalBackdrop} onPress={() => setLanguageModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.bottomSheet, { backgroundColor: colors.card }]}>
             <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
             <View style={styles.sheetHeader}>
               <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
@@ -816,7 +811,7 @@ export default function LanguageRegionSettings() {
       >
         <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
           <Pressable style={styles.modalBackdrop} onPress={() => setRegionModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.bottomSheet, { backgroundColor: colors.card }]}>
             <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
             <View style={styles.sheetHeader}>
               <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
@@ -895,7 +890,7 @@ export default function LanguageRegionSettings() {
       >
         <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
           <Pressable style={styles.modalBackdrop} onPress={() => setDateFormatModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.bottomSheet, { backgroundColor: colors.card }]}>
             <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
             <View style={styles.sheetHeader}>
               <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
@@ -956,7 +951,7 @@ export default function LanguageRegionSettings() {
       >
         <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
           <Pressable style={styles.modalBackdrop} onPress={() => setFirstDayModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.bottomSheet, { backgroundColor: colors.card }]}>
             <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
             <View style={styles.sheetHeader}>
               <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
@@ -1048,7 +1043,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1065,8 +1060,8 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   previewCard: {
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 16,
     marginTop: 6,
     marginBottom: 24,
@@ -1137,8 +1132,8 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   cardGroup: {
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     marginBottom: 24,
   },
@@ -1211,9 +1206,9 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   bottomSheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderTopWidth: 1,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 0,
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: Platform.OS === "ios" ? 40 : 28,
@@ -1242,7 +1237,7 @@ const styles = StyleSheet.create({
   searchBox: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 12,
+    borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 14,
@@ -1257,7 +1252,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 12,
     paddingHorizontal: 12,
-    borderRadius: 12,
+    borderRadius: 20,
     marginVertical: 2,
   },
   flagIcon: {

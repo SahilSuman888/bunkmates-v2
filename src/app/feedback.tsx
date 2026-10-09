@@ -176,26 +176,26 @@ export default function SendFeedbackScreen() {
     const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
 
     return {
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
+      bg: isDark ? "#000000" : "#F1F1F1",
+      card: isDark ? "#161618" : "#FFFFFF",
+      cardBorder: "transparent",
+      divider: "transparent",
       textPrimary: isDark ? "#FFFFFF" : "#11141A",
       textSecondary: isDark ? "#8E95A2" : "#7E8590",
       sectionHeader: isDark ? "#8E95A2" : "#7E8590",
       greyishWhite,
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#202024" : "#F4F5F7",
       chevron: isDark ? "#555860" : "#B4B9C2",
       activeText,
-      activeBorder,
-      activePillBg: isDark ? "rgba(255, 255, 255, 0.09)" : "rgba(0, 0, 0, 0.04)",
-      inputBg: isDark ? "#141418" : "#FFFFFF",
-      inputBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      btnPrimaryBg: isDark ? "#FFFFFF" : "#111827",
+      activeBorder: "transparent",
+      activePillBg: isDark ? "#202024" : "#F4F5F7",
+      inputBg: isDark ? "#202024" : "#FFFFFF",
+      inputBorder: "transparent",
+      btnPrimaryBg: isDark ? "#FFFFFF" : "#000000",
       btnPrimaryText: isDark ? "#000000" : "#FFFFFF",
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
-      uploadBoxBorder: isDark ? "rgba(255, 255, 255, 0.2)" : "#CBD5E1",
+      uploadBoxBorder: "transparent",
       badgeBg: isDark ? "rgba(16, 185, 129, 0.15)" : "#D1FAE5",
       badgeText: isDark ? "#34D399" : "#065F46",
     };
@@ -389,7 +389,10 @@ export default function SendFeedbackScreen() {
       {/* Header with Circular Back Button */}
       <View style={styles.header}>
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace("/ProfileSettings" as any);
+          }}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
             {
@@ -682,7 +685,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -707,8 +710,8 @@ const styles = StyleSheet.create({
   // Feedback Type Container & Pills matching Mockup
   typeContainer: {
     flexDirection: "row",
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 24,
+    borderWidth: 0,
     padding: 6,
     gap: 6,
     marginBottom: 20,
@@ -717,14 +720,14 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     paddingHorizontal: 6,
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     borderColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
   typePillSelected: {
-    borderWidth: 1.5,
+    borderWidth: 0,
   },
   typePillText: {
     fontSize: 13,
@@ -732,9 +735,9 @@ const styles = StyleSheet.create({
   },
   // Details Card
   detailsCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 14,
+    borderRadius: 28,
+    borderWidth: 0,
+    padding: 16,
     minHeight: 160,
     marginBottom: 20,
     justifyContent: "space-between",
@@ -756,8 +759,8 @@ const styles = StyleSheet.create({
   },
   // Attachment Card matching Mockup
   attachmentCard: {
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 16,
     marginBottom: 28,
   },
@@ -768,9 +771,9 @@ const styles = StyleSheet.create({
   uploadBox: {
     width: 66,
     height: 66,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderStyle: "dashed",
+    borderRadius: 20,
+    borderWidth: 0,
+    backgroundColor: "#202024",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 16,
@@ -806,9 +809,8 @@ const styles = StyleSheet.create({
   previewImage: {
     width: 66,
     height: 66,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.1)",
+    borderRadius: 16,
+    borderWidth: 0,
   },
   removeBadge: {
     position: "absolute",
@@ -820,8 +822,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#1F2937",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: "#FFFFFF",
+    borderWidth: 0,
   },
   changePhotoText: {
     fontSize: 12,
@@ -829,15 +830,16 @@ const styles = StyleSheet.create({
   },
   // Submit Button
   submitBtn: {
-    borderRadius: 14,
+    borderRadius: 24,
     paddingVertical: 16,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 0,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 0,
   },
   submitBtnText: {
     fontSize: 15,
@@ -879,9 +881,9 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   bottomSheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderTopWidth: 1,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 0,
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: Platform.OS === "ios" ? 40 : 28,
@@ -924,8 +926,8 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   historyCard: {
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     padding: 14,
     marginBottom: 10,
   },

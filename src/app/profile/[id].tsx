@@ -362,20 +362,19 @@ const styles = StyleSheet.create({
 
   // Private Account Card
   privateCard: {
-    backgroundColor: "#16161a",
+    backgroundColor: "#161618",
     borderRadius: 16,
     padding: 24,
     alignItems: "center",
     marginHorizontal: 16,
     marginVertical: 20,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 0,
   },
   privateIconCircle: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    backgroundColor: "#202024",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 14,

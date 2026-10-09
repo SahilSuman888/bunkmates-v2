@@ -50,10 +50,14 @@ export default function EditProfile() {
 
   // **@** Dynamic theme integration matching settings page
   let themeMode: "dark" | "light" | "system" = "system";
+  let dynamicThemeColors: any = null;
+  let dynamicAccent = "#FF5A5F";
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       themeMode = themeContext.mode;
+      dynamicThemeColors = themeContext.themeColors;
+      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
     }
   } catch (e) {
     // fallback to system
@@ -65,27 +69,27 @@ export default function EditProfile() {
 
   // **@** Curated color palette matching screenshot with dynamic dark/light support
   const colors = useMemo(() => ({
-    bg: isDark ? "#0A0A0C" : "#F4F6F9",
-    card: isDark ? "#141418" : "#FFFFFF",
-    cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-    inputBg: isDark ? "rgba(255, 255, 255, 0.04)" : "#F3F4F6",
-    inputBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "transparent",
-    textPrimary: isDark ? "#FFFFFF" : "#11141A",
-    textSecondary: isDark ? "#8E95A2" : "#7E8590",
-    sectionHeader: isDark ? "#8E95A2" : "#8E8E93",
-    greyishWhite: isDark ? "#E2E8F0" : "#4B5563", // **@** Greyish-white color matching icons
-    iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
-    saveBtnBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
-    saveBtnBorder: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
-    saveBtnText: isDark ? "#E2E8F0" : "#4B5563",
+    bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+    card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+    cardBorder: "transparent",
+    inputBg: isDark ? "#202024" : "#F3F4F6",
+    inputBorder: "transparent",
+    textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+    textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+    sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#8E8E93"),
+    greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
+    iconBoxBg: isDark ? "#222226" : "#F3F4F6",
+    saveBtnBg: dynamicAccent,
+    saveBtnBorder: "transparent",
+    saveBtnText: "#FFFFFF",
     cameraBadgeBg: isDark ? "#26282E" : "#E2E8F0",
     iconColor: isDark ? "#E2E8F0" : "#4B5563",
     warningBg: isDark ? "rgba(245, 158, 11, 0.09)" : "#FFF8ED",
-    warningBorder: isDark ? "rgba(245, 158, 11, 0.35)" : "#FED7AA",
+    warningBorder: "transparent",
     warningText: isDark ? "#FCD34D" : "#9A3412",
     warningIcon: isDark ? "#F59E0B" : "#EA580C",
     placeholder: isDark ? "#555860" : "#9CA3AF",
-  }), [isDark]);
+  }), [isDark, dynamicThemeColors, dynamicAccent]);
 
   // **@** Fetch profile from Firestore with backwards compatibility for split names
   useEffect(() => {
@@ -220,7 +224,7 @@ export default function EditProfile() {
   if (loading && !user) {
     return (
       <View style={[styles.loader, { backgroundColor: colors.bg }]}>
-        <ActivityIndicator size="large" color={colors.greyishWhite} />
+        <ActivityIndicator size="large" color={colors.saveBtnBg || colors.textPrimary} />
       </View>
     );
   }
@@ -507,7 +511,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 10,
@@ -520,9 +524,9 @@ const styles = StyleSheet.create({
   },
   savePill: {
     paddingHorizontal: 20,
-    paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1,
+    paddingVertical: 8,
+    borderRadius: 24,
+    borderWidth: 0,
     minWidth: 64,
     alignItems: "center",
     justifyContent: "center",
@@ -559,7 +563,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    borderWidth: 2.5,
+    borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
     elevation: 3,
@@ -584,15 +588,15 @@ const styles = StyleSheet.create({
 
   // **@** Form card container enclosing all fields
   formCard: {
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 16,
     marginBottom: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 6,
-    elevation: 1,
+    elevation: 0,
   },
   fieldGroup: {
     marginBottom: 18,
@@ -610,8 +614,8 @@ const styles = StyleSheet.create({
 
   // **@** Standard single-line text input
   textInput: {
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    borderWidth: 0,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14.5,
@@ -621,8 +625,8 @@ const styles = StyleSheet.create({
   inputWithIconWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    borderWidth: 0,
     paddingHorizontal: 14,
     minHeight: 46,
   },
@@ -637,8 +641,8 @@ const styles = StyleSheet.create({
 
   // **@** Multiline text area input for bio
   textAreaInput: {
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    borderWidth: 0,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14.5,
@@ -650,8 +654,8 @@ const styles = StyleSheet.create({
   warningBanner: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     padding: 14,
   },
   warningIcon: {

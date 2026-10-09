@@ -32,6 +32,7 @@ import {
   getPersistentDeviceId,
   recordDeviceSessionInFirestore,
 } from "../utils/sessionTracker";
+import { SettingsActionModal } from "../components/ui/SettingsActionModal";
 
 export default function AccountAndSecurity() {
   const router = useRouter();
@@ -71,6 +72,11 @@ export default function AccountAndSecurity() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
 
+  // Flow modals (Image 1 & Image 2 style confirmation & success screens)
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [sessionToTerminate, setSessionToTerminate] = useState<DeviceSession | null>(null);
+  const [deviceToRevoke, setDeviceToRevoke] = useState<TrustedDevice | null>(null);
+
   // Helper for dynamic alpha tints
   const hexToRgba = (hex: string, alpha: number) => {
     const cleanHex = hex.replace("#", "");
@@ -81,14 +87,16 @@ export default function AccountAndSecurity() {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   };
 
-  // **@** Dynamic theme integration matching ProfileSettings & ProfileEdit
+  // **@** Dynamic theme integration matching ProfileSettings
   let themeMode: "dark" | "light" | "system" = "system";
   let dynamicAccent = "#FF5A5F";
+  let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
+      dynamicThemeColors = themeContext.themeColors;
     }
   } catch (e) {}
 
@@ -98,32 +106,32 @@ export default function AccountAndSecurity() {
 
   const colors = useMemo(
     () => ({
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
-      textPrimary: isDark ? "#FFFFFF" : "#11141A",
-      textSecondary: isDark ? "#8E95A2" : "#7E8590",
-      sectionHeader: isDark ? "#8E95A2" : "#7E8590",
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      divider: "transparent",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       coral: dynamicAccent,
       coralAccent: dynamicAccent,
       coralBg: isDark ? hexToRgba(dynamicAccent, 0.16) : hexToRgba(dynamicAccent, 0.09),
       coralSquareBg: isDark ? hexToRgba(dynamicAccent, 0.14) : hexToRgba(dynamicAccent, 0.07),
       greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6", // Solid neutral container
       chevron: isDark ? "#555860" : "#B4B9C2",
       activeGreen: "#10B981",
       switchActive: dynamicAccent,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
       dangerCardBg: isDark ? "rgba(255, 90, 95, 0.08)" : "#FFF1F2",
-      dangerCardBorder: isDark ? "rgba(255, 90, 95, 0.22)" : "#FECDD3",
+      dangerCardBorder: "transparent",
       dangerIconBg: isDark ? "rgba(255, 90, 95, 0.2)" : "#FFE4E6",
       dangerText: "#FF5A5F",
       dangerSubtext: isDark ? "rgba(255, 120, 125, 0.85)" : "#E11D48",
       modalOverlay: "rgba(0,0,0,0.72)",
-      selectedPill: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      selectedPill: isDark ? "#2A2A30" : "#E5E7EB",
     }),
-    [isDark, dynamicAccent]
+    [isDark, dynamicAccent, dynamicThemeColors]
   );
 
   // **@** Setup current device & register dynamic session in Firestore
@@ -217,32 +225,27 @@ export default function AccountAndSecurity() {
     }
   };
 
-  const updatePrivacy = async (field: keyof typeof privacy, value: string) => {
+  const updatePrivacy = (field: keyof typeof privacy, value: string) => {
     setPrivacy((prev) => ({ ...prev, [field]: value as any }));
     if (!user) return;
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        [`privacy.${field}`]: value,
-        updatedAt: new Date(),
-      });
-    } catch (e) {
+    updateDoc(doc(db, "users", user.uid), {
+      [`privacy.${field}`]: value,
+      updatedAt: new Date(),
+    }).catch((e) => {
       console.log("Privacy update error:", e);
-      Alert.alert("Error", "Could not save privacy setting to Firestore.");
-    }
+    });
   };
 
-  const handleToggle2FA = async (val: boolean) => {
+  const handleToggle2FA = (val: boolean) => {
     setTwoFactorEnabled(val);
     if (!user) return;
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        "security.twoFactorEnabled": val,
-        updatedAt: new Date(),
-      });
-    } catch (e) {
+    updateDoc(doc(db, "users", user.uid), {
+      "security.twoFactorEnabled": val,
+      updatedAt: new Date(),
+    }).catch((e) => {
       setTwoFactorEnabled(!val);
       Alert.alert("Error", "Could not update Two-Factor Authentication state.");
-    }
+    });
   };
 
   const handleTrustDevice = async (
@@ -281,32 +284,15 @@ export default function AccountAndSecurity() {
   };
 
   const handleRevokeDevice = (deviceId: string, deviceName: string) => {
-    Alert.alert(
-      "Remove Trust",
-      `Remove "${deviceName}" from your trusted devices list?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: async () => {
-            const nextDevices = trustedDevices.filter(
-              (d) => d.id !== deviceId && d.name !== deviceName
-            );
-            setTrustedDevices(nextDevices);
-            if (user) {
-              try {
-                await updateDoc(doc(db, "users", user.uid), {
-                  "security.trustedDevices": nextDevices,
-                  updatedAt: new Date(),
-                });
-              } catch (e) {
-                console.log("Revoke error:", e);
-              }
-            }
-          },
-        },
-      ]
+    const found = trustedDevices.find((d) => d.id === deviceId);
+    setDeviceToRevoke(
+      found || {
+        id: deviceId,
+        name: deviceName,
+        deviceType: "phone",
+        approvedAt: "",
+        isCurrentDevice: false,
+      }
     );
   };
 
@@ -347,27 +333,17 @@ export default function AccountAndSecurity() {
       Alert.alert("Active Session", "This is your current device. Use Log Out in Settings to sign out.");
       return;
     }
-    Alert.alert("Log Out Session", `Terminate the session on "${sessionName}"?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Log Out",
-        style: "destructive",
-        onPress: async () => {
-          const nextLogins = loginActivity.filter((s) => s.id !== sessionId);
-          setLoginActivity(nextLogins);
-          if (user) {
-            try {
-              await updateDoc(doc(db, "users", user.uid), {
-                "security.loginActivity": nextLogins,
-                updatedAt: new Date(),
-              });
-            } catch (e) {
-              console.log("Terminate error:", e);
-            }
-          }
-        },
-      },
-    ]);
+    const found = loginActivity.find((s) => s.id === sessionId);
+    setSessionToTerminate(
+      found || {
+        id: sessionId,
+        deviceName: sessionName,
+        deviceType: "phone",
+        location: "Active Session",
+        lastActive: "Just now",
+        isActive: false,
+      }
+    );
   };
 
   const handleAddManualDevice = async () => {
@@ -402,35 +378,12 @@ export default function AccountAndSecurity() {
     }
   };
 
-  const handleChangePassword = async () => {
+  const handleChangePassword = () => {
     if (!user?.email) {
       Alert.alert("Error", "No email associated with this account.");
       return;
     }
-    Alert.alert(
-      "Change Password",
-      `Send a password reset link to ${user.email}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Send Email",
-          onPress: async () => {
-            try {
-              await sendPasswordResetEmail(auth, user.email!);
-              setResetEmailSent(true);
-              setPasswordLastUpdated("Just now");
-              await updateDoc(doc(db, "users", user.uid), {
-                "security.passwordLastUpdated": "Just now",
-                updatedAt: new Date(),
-              });
-              Alert.alert("Email Sent", `Check your inbox at ${user.email}.`);
-            } catch (err: any) {
-              Alert.alert("Error", err.message || "Failed to send reset email.");
-            }
-          },
-        },
-      ]
-    );
+    setShowPasswordModal(true);
   };
 
   const backupCodes = useMemo(
@@ -481,7 +434,7 @@ export default function AccountAndSecurity() {
   if (authLoading && !user) {
     return (
       <View style={[styles.loader, { backgroundColor: colors.bg }]}>
-        <ActivityIndicator size="large" color={colors.greyishWhite} />
+        <ActivityIndicator size="large" color={accentColor || colors.activeText} />
       </View>
     );
   }
@@ -948,41 +901,158 @@ export default function AccountAndSecurity() {
         </View>
       </Modal>
 
-      {/* ── DELETE ACCOUNT CONFIRMATION MODAL ── */}
-      <Modal transparent visible={showDeleteConfirm} animationType="fade" onRequestClose={() => setShowDeleteConfirm(false)}>
-        <View style={[styles.overlay, { backgroundColor: colors.modalOverlay }]}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={[styles.modalDangerIcon, { backgroundColor: colors.dangerIconBg }]}>
-              <MaterialCommunityIcons name="alert-octagon-outline" size={36} color={colors.dangerText} />
-            </View>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Delete Account?")}</Text>
-            <Text style={[styles.modalMsg, { color: colors.textSecondary }]}>
-              {t("Permanently wipe all past trip logs, chat messages, and account data. This action cannot be reversed.")}
-            </Text>
+      {/* ── 1. DELETE ACCOUNT CONFIRMATION & SUCCESS FLOW (Matching Image 1 & 2) ── */}
+      <SettingsActionModal
+        visible={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        iconType="warning"
+        title={t("Delete Account")}
+        message={t(
+          "Are you sure? This action is permanent. All your trip history, saved bunks, and peer ratings will be lost forever."
+        )}
+        confirmLabel={t("Delete Account")}
+        cancelLabel={t("Cancel")}
+        confirmColor={colors.coral}
+        onConfirm={async () => {
+          if (!auth.currentUser) return false;
+          try {
+            await deleteUser(auth.currentUser);
+            return true;
+          } catch (e: any) {
+            Alert.alert(
+              "Re-authentication Required",
+              e?.message || "Please sign out, log back in, and try again."
+            );
+            return false;
+          }
+        }}
+        successTitle={t("Account Deleted")}
+        successMessage={t(
+          "We are sad to see you go! Your BunkMates profile and all associated data have been permanently erased. Safe travels on your future journeys."
+        )}
+        successButtonLabel={t("Done")}
+        onDone={() => {
+          setShowDeleteConfirm(false);
+          router.replace("/(auth)/login" as any);
+        }}
+      />
 
-            <View style={styles.modalBtnRow}>
-              <Pressable
-                style={[styles.modalSecBtn, { borderColor: colors.cardBorder }]}
-                onPress={() => setShowDeleteConfirm(false)}
-                disabled={isDeleting}
-              >
-                <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Cancel")}</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalDangerBtn, { backgroundColor: colors.dangerText }]}
-                onPress={handleDeleteAccount}
-                disabled={isDeleting}
-              >
-                {isDeleting ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.modalDangerBtnText}>{t("Delete Forever")}</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/* ── 2. PASSWORD RESET FLOW ── */}
+      <SettingsActionModal
+        visible={showPasswordModal}
+        onClose={() => setShowPasswordModal(false)}
+        iconType="key"
+        title={t("Change Password")}
+        message={t(
+          `Send a password reset link to ${user?.email || "your registered email"}? You can update your password securely through the email link.`
+        )}
+        confirmLabel={t("Send Reset Link")}
+        cancelLabel={t("Cancel")}
+        confirmColor={colors.coral}
+        onConfirm={async () => {
+          if (!user?.email) {
+            Alert.alert("Error", "No email associated with this account.");
+            return false;
+          }
+          try {
+            await sendPasswordResetEmail(auth, user.email);
+            setResetEmailSent(true);
+            setPasswordLastUpdated("Just now");
+            if (user?.uid) {
+              await updateDoc(doc(db, "users", user.uid), {
+                "security.passwordLastUpdated": "Just now",
+                updatedAt: new Date(),
+              });
+            }
+            return true;
+          } catch (err: any) {
+            Alert.alert("Error", err.message || "Failed to send reset email.");
+            return false;
+          }
+        }}
+        successTitle={t("Password Reset Sent")}
+        successMessage={t(
+          `Check your inbox at ${user?.email || "your email"}. Follow the link in the email to set your new password.`
+        )}
+        successButtonLabel={t("Done")}
+        onDone={() => {
+          setShowPasswordModal(false);
+        }}
+      />
+
+      {/* ── 3. TERMINATE SESSION FLOW ── */}
+      <SettingsActionModal
+        visible={!!sessionToTerminate}
+        onClose={() => setSessionToTerminate(null)}
+        iconType="logout"
+        title={t("Log Out Session")}
+        message={t(
+          `Terminate the session on "${sessionToTerminate?.deviceName || "Device"}"? You will be signed out on that device immediately.`
+        )}
+        confirmLabel={t("Log Out Session")}
+        cancelLabel={t("Cancel")}
+        confirmColor={colors.coral}
+        onConfirm={async () => {
+          if (!sessionToTerminate) return;
+          const nextLogins = loginActivity.filter((s) => s.id !== sessionToTerminate.id);
+          setLoginActivity(nextLogins);
+          if (user) {
+            try {
+              await updateDoc(doc(db, "users", user.uid), {
+                "security.loginActivity": nextLogins,
+                updatedAt: new Date(),
+              });
+            } catch (e) {
+              console.log("Terminate error:", e);
+            }
+          }
+          return true;
+        }}
+        successTitle={t("Session Terminated")}
+        successMessage={t(
+          `The session on "${sessionToTerminate?.deviceName || "Device"}" has been logged out successfully.`
+        )}
+        successButtonLabel={t("Done")}
+        onDone={() => setSessionToTerminate(null)}
+      />
+
+      {/* ── 4. REVOKE TRUSTED DEVICE FLOW ── */}
+      <SettingsActionModal
+        visible={!!deviceToRevoke}
+        onClose={() => setDeviceToRevoke(null)}
+        iconType="device"
+        title={t("Remove Trusted Device")}
+        message={t(
+          `Remove "${deviceToRevoke?.name || "Device"}" from your trusted devices list?`
+        )}
+        confirmLabel={t("Remove Device")}
+        cancelLabel={t("Cancel")}
+        confirmColor={colors.coral}
+        onConfirm={async () => {
+          if (!deviceToRevoke) return;
+          const nextDevices = trustedDevices.filter(
+            (d) => d.id !== deviceToRevoke.id && d.name !== deviceToRevoke.name
+          );
+          setTrustedDevices(nextDevices);
+          if (user) {
+            try {
+              await updateDoc(doc(db, "users", user.uid), {
+                "security.trustedDevices": nextDevices,
+                updatedAt: new Date(),
+              });
+            } catch (e) {
+              console.log("Revoke error:", e);
+            }
+          }
+          return true;
+        }}
+        successTitle={t("Device Removed")}
+        successMessage={t(
+          `"${deviceToRevoke?.name || "Device"}" has been removed from your trusted devices.`
+        )}
+        successButtonLabel={t("Done")}
+        onDone={() => setDeviceToRevoke(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -1005,7 +1075,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 10,
@@ -1047,14 +1117,14 @@ const styles = StyleSheet.create({
 
   // Card container
   card: {
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
-    elevation: 1,
+    elevation: 0,
   },
 
   // Standard row
@@ -1083,7 +1153,7 @@ const styles = StyleSheet.create({
   rowMid: { flex: 1, marginRight: 10 },
   rowTitle: { fontSize: 15, fontWeight: "600", letterSpacing: -0.2 },
   rowSub: { fontSize: 12.5, marginTop: 2, lineHeight: 17 },
-  divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
+  divider: { height: 0, marginHorizontal: 16 },
 
   // Backup codes row inside 2FA card
   backupCodeRow: {
@@ -1186,7 +1256,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 22,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   trustNowText: { fontSize: 13.5, fontWeight: "600" },
 
@@ -1194,15 +1264,15 @@ const styles = StyleSheet.create({
   dangerCard: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 20,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     paddingVertical: 15,
     paddingHorizontal: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.03,
     shadowRadius: 5,
-    elevation: 1,
+    elevation: 0,
   },
   dangerCircleIcon: {
     width: 44,
@@ -1223,8 +1293,8 @@ const styles = StyleSheet.create({
   modalCard: {
     width: "100%",
     maxWidth: 380,
-    borderRadius: 26,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 24,
     alignItems: "center",
     shadowColor: "#000",
@@ -1265,8 +1335,8 @@ const styles = StyleSheet.create({
   modalInput: {
     width: "100%",
     height: 48,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     paddingHorizontal: 14,
     fontSize: 14.5,
     marginBottom: 14,
@@ -1274,8 +1344,8 @@ const styles = StyleSheet.create({
   typeChip: {
     flex: 1,
     height: 38,
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1288,8 +1358,8 @@ const styles = StyleSheet.create({
   modalSecBtn: {
     flex: 1,
     height: 46,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1297,7 +1367,8 @@ const styles = StyleSheet.create({
   modalPrimBtn: {
     flex: 1,
     height: 46,
-    borderRadius: 14,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1305,7 +1376,8 @@ const styles = StyleSheet.create({
   modalDangerBtn: {
     flex: 1,
     height: 46,
-    borderRadius: 14,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1319,8 +1391,8 @@ const styles = StyleSheet.create({
     width: "100%",
     paddingVertical: 13,
     paddingHorizontal: 16,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
   },
   selectorText: { fontSize: 14.5, fontWeight: "600" },
 
@@ -1330,8 +1402,8 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 8,
     padding: 14,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 20,
+    borderWidth: 0,
     justifyContent: "center",
     marginBottom: 20,
     width: "100%",
@@ -1342,8 +1414,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 0,
     letterSpacing: 0.5,
   },
 });

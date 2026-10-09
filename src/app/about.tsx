@@ -183,30 +183,30 @@ export default function AboutScreen() {
     const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
 
     return {
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
+      bg: isDark ? "#000000" : "#F1F1F1",
+      card: isDark ? "#161618" : "#FFFFFF",
+      cardBorder: "transparent",
+      divider: "transparent",
       textPrimary: isDark ? "#FFFFFF" : "#11141A",
       textSecondary: isDark ? "#8E95A2" : "#7E8590",
       sectionHeader: isDark ? "#8E95A2" : "#7E8590",
       greyishWhite,
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#202024" : "#F4F5F7",
       chevron: isDark ? "#555860" : "#B4B9C2",
       activeText,
-      activeBorder,
-      brandBoxBg: isDark ? "#FFFFFF" : "#111827",
+      activeBorder: "transparent",
+      brandBoxBg: isDark ? "#FFFFFF" : "#000000",
       brandBoxIcon: isDark ? "#000000" : "#FFFFFF",
-      socialBtnBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#F1F5F9",
-      socialBtnBorder: isDark ? "rgba(255, 255, 255, 0.1)" : "#E2E8F0",
+      socialBtnBg: isDark ? "#202024" : "#F4F5F7",
+      socialBtnBorder: "transparent",
       modalOverlay: "rgba(0, 0, 0, 0.65)",
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
-      chipBg: isDark ? "rgba(255, 255, 255, 0.08)" : "#EEF2F6",
+      chipBg: isDark ? "#202024" : "#EEF2F6",
       badgeBg: isDark ? "rgba(16, 185, 129, 0.15)" : "#D1FAE5",
       badgeText: isDark ? "#34D399" : "#065F46",
-      inputBg: isDark ? "rgba(255, 255, 255, 0.05)" : "#FFFFFF",
-      inputBorder: isDark ? "rgba(255, 255, 255, 0.1)" : "#E2E8F0",
+      inputBg: isDark ? "#202024" : "#FFFFFF",
+      inputBorder: "transparent",
     };
   }, [isDark, userAccent]);
 
@@ -272,7 +272,10 @@ export default function AboutScreen() {
       {/* Header with Circular Back Button */}
       <View style={styles.header}>
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace("/ProfileSettings" as any);
+          }}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
             {
@@ -581,7 +584,7 @@ export default function AboutScreen() {
                     setPrivacyModalVisible(false);
                     router.push("/privacy");
                   }}
-                  style={[styles.modalActionBtn, { flex: 1, backgroundColor: colors.socialBtnBg, borderWidth: 1, borderColor: colors.cardBorder }]}
+                  style={[styles.modalActionBtn, { flex: 1, backgroundColor: colors.socialBtnBg, borderWidth: 0 }]}
                 >
                   <Text style={[styles.modalActionBtnText, { color: colors.textPrimary }]}>
                     Full Privacy Settings
@@ -695,7 +698,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -744,8 +747,8 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   cardGroup: {
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     marginBottom: 24,
   },
@@ -780,8 +783,8 @@ const styles = StyleSheet.create({
   },
   // Social Media Card
   socialCard: {
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     paddingVertical: 18,
     paddingHorizontal: 20,
     flexDirection: "row",
@@ -794,7 +797,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    borderWidth: 1,
+    borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -841,9 +844,9 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   bottomSheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderTopWidth: 1,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 0,
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: Platform.OS === "ios" ? 40 : 28,
@@ -887,8 +890,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   modalActionBtn: {
-    borderRadius: 12,
-    paddingVertical: 13,
+    borderRadius: 24,
+    paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 18,
@@ -901,8 +904,8 @@ const styles = StyleSheet.create({
   searchBox: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     paddingHorizontal: 12,
     paddingVertical: Platform.OS === "ios" ? 10 : 6,
     marginBottom: 14,
@@ -913,8 +916,8 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   licenseCard: {
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     padding: 12,
     marginBottom: 10,
   },

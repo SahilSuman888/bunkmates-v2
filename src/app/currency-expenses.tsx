@@ -127,11 +127,13 @@ export default function CurrencyExpenses() {
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
   let userAccent = "default";
+  let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       if (themeContext.accent) userAccent = themeContext.accent;
+      dynamicThemeColors = themeContext.themeColors;
     }
   } catch (e) {
     // fallback
@@ -141,9 +143,8 @@ export default function CurrencyExpenses() {
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  // Dynamic colors derived from Settings page (zero red, greyish-white accents)
+  // Dynamic solid colors
   const colors = useMemo(() => {
-    // If user explicitly chose a custom accent that is not red/coral, respect it
     const hasCustomNonRedAccent =
       userAccent &&
       userAccent !== "default" &&
@@ -160,34 +161,30 @@ export default function CurrencyExpenses() {
     const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
 
     return {
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
-      textPrimary: isDark ? "#FFFFFF" : "#11141A",
-      textSecondary: isDark ? "#8E95A2" : "#7E8590",
-      sectionHeader: isDark ? "#8E95A2" : "#7E8590",
-      // Greyish-white icon color matching Settings page
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      divider: "transparent",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       greyishWhite: greyishWhite,
-      // Subtle neutral circular icon box matching Settings page modernIconBox
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
-      // Native switch colors (zero red)
       switchActive: isDark ? "#34C759" : "#10B981",
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
-      // Inset goal box
-      insetBg: isDark ? "rgba(255, 255, 255, 0.03)" : "#F8FAFC",
-      insetBorder: isDark ? "rgba(255, 255, 255, 0.07)" : "#E2E8F0",
-      btnBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
-      btnBorder: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
-      activeBorder: activeBorder,
+      insetBg: isDark ? "#202024" : "#F8FAFC",
+      insetBorder: "transparent",
+      btnBg: isDark ? "#2A2A30" : "#E5E7EB",
+      btnBorder: "transparent",
+      activeBorder: "transparent",
       activeText: activeText,
-      searchBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#F1F5F9",
+      searchBg: isDark ? "#202024" : "#F1F5F9",
       modalOverlay: "rgba(0, 0, 0, 0.65)",
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
     };
-  }, [isDark, userAccent]);
+  }, [isDark, userAccent, dynamicThemeColors]);
 
   // Auth observer
   useEffect(() => {
@@ -257,29 +254,24 @@ export default function CurrencyExpenses() {
     return () => unsubscribe();
   }, [authLoading, user]);
 
-  // Sync preference helper saving to both AsyncStorage and Firestore
-  const syncPreference = async (field: string, value: any) => {
+  // Sync preference helper saving to both AsyncStorage and Firestore in background
+  const syncPreference = (field: string, value: any) => {
     // 1. Local AppSettings & AsyncStorage cache
     updateCurrencyPreferences({ [field]: value });
-    try {
-      const current = await AsyncStorage.getItem("@bunkmates_currency_preferences");
+    AsyncStorage.getItem("@bunkmates_currency_preferences").then((current) => {
       const currentObj = current ? JSON.parse(current) : {};
       currentObj[field] = value;
-      await AsyncStorage.setItem("@bunkmates_currency_preferences", JSON.stringify(currentObj));
-    } catch (e) {
-      console.log("Failed to cache currency preference:", e);
-    }
+      AsyncStorage.setItem("@bunkmates_currency_preferences", JSON.stringify(currentObj)).catch(() => {});
+    }).catch(() => {});
 
-    // 2. Real-time Firestore sync
+    // 2. Real-time Firestore sync (non-blocking background)
     if (!user) return;
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        [`currencyPreferences.${field}`]: value,
-        updatedAt: new Date(),
-      });
-    } catch (e) {
+    updateDoc(doc(db, "users", user.uid), {
+      [`currencyPreferences.${field}`]: value,
+      updatedAt: new Date(),
+    }).catch((e) => {
       console.log(`Failed to update currencyPreferences.${field}:`, e);
-    }
+    });
   };
 
   // Handlers for toggles and selections
@@ -353,7 +345,7 @@ export default function CurrencyExpenses() {
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            { backgroundColor: colors.card },
             pressed && styles.pressed,
           ]}
           hitSlop={8}
@@ -373,7 +365,7 @@ export default function CurrencyExpenses() {
       >
         {/* ── 1. BASE CURRENCY ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("Base Currency", "BASE CURRENCY")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           <Pressable
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             onPress={() => {
@@ -389,9 +381,7 @@ export default function CurrencyExpenses() {
             </View>
 
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-                {baseCurrency.name}
-              </Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{baseCurrency.name}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
                 Default base for calculations
               </Text>
@@ -408,7 +398,7 @@ export default function CurrencyExpenses() {
 
         {/* ── 2. DISPLAY OPTIONS ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("CURRENCY DISPLAY", "DISPLAY OPTIONS")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Show Currency Symbol */}
           <View style={styles.row}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
@@ -454,7 +444,7 @@ export default function CurrencyExpenses() {
 
         {/* ── 3. EXPENSE SPLITTING ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("SPLIT BILLS DEFAULTS", "EXPENSE SPLITTING")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           <Text style={[styles.cardIntroText, { color: colors.textSecondary }]}>
             Your default choice when adding new group logs:
           </Text>
@@ -501,7 +491,7 @@ export default function CurrencyExpenses() {
 
         {/* ── 4. BUDGET TRACKING ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("BUDGET & SAVINGS", "BUDGET TRACKING")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Monthly Travel Savings Goal Toggle */}
           <View style={styles.row}>
             <View style={styles.rowMid}>
@@ -524,7 +514,7 @@ export default function CurrencyExpenses() {
             <View
               style={[
                 styles.goalInsetBox,
-                { backgroundColor: colors.insetBg, borderColor: colors.insetBorder },
+                { backgroundColor: colors.insetBg },
               ]}
             >
               <Text style={[styles.goalAmountText, { color: colors.textPrimary }]}>
@@ -538,7 +528,7 @@ export default function CurrencyExpenses() {
               <Pressable
                 style={({ pressed }) => [
                   styles.editGoalBtn,
-                  { backgroundColor: colors.btnBg, borderColor: colors.btnBorder },
+                  { backgroundColor: colors.btnBg },
                   pressed && styles.pressed,
                 ]}
                 onPress={() => {
@@ -577,7 +567,7 @@ export default function CurrencyExpenses() {
         onRequestClose={() => setCurrencyModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Select Base Currency")}</Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
               {t("All group logs, split calculations and savings will be computed in this currency.", "All group logs, split calculations and savings will be computed in this currency.")}
@@ -611,7 +601,6 @@ export default function CurrencyExpenses() {
                       styles.currencyItemRow,
                       {
                         backgroundColor: isSelected ? colors.insetBg : "transparent",
-                        borderColor: isSelected ? colors.activeBorder : colors.divider,
                       },
                       pressed && styles.pressed,
                     ]}
@@ -625,7 +614,7 @@ export default function CurrencyExpenses() {
                       </Text>
                     </View>
                     {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.activeBorder} />
+                      <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
                     )}
                   </Pressable>
                 );
@@ -635,7 +624,7 @@ export default function CurrencyExpenses() {
             <Pressable
               style={({ pressed }) => [
                 styles.modalCloseBtn,
-                { borderColor: colors.cardBorder, backgroundColor: colors.insetBg },
+                { backgroundColor: colors.insetBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setCurrencyModalVisible(false)}
@@ -654,7 +643,7 @@ export default function CurrencyExpenses() {
         onRequestClose={() => setSplitModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
               <Ionicons name="pie-chart-outline" size={22} color={colors.greyishWhite} />
             </View>
@@ -674,7 +663,6 @@ export default function CurrencyExpenses() {
                       styles.modalOptionItem,
                       {
                         backgroundColor: isSelected ? colors.insetBg : "transparent",
-                        borderColor: isSelected ? colors.activeBorder : colors.cardBorder,
                       },
                       pressed && styles.pressed,
                     ]}
@@ -695,7 +683,7 @@ export default function CurrencyExpenses() {
                       <Text style={[styles.modalOptionSub, { color: colors.textSecondary }]}>{t(sm.desc)}</Text>
                     </View>
                     {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.activeBorder} />
+                      <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
                     )}
                   </Pressable>
                 );
@@ -705,7 +693,7 @@ export default function CurrencyExpenses() {
             <Pressable
               style={({ pressed }) => [
                 styles.modalCloseBtn,
-                { borderColor: colors.cardBorder, backgroundColor: colors.insetBg },
+                { backgroundColor: colors.insetBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setSplitModalVisible(false)}
@@ -724,7 +712,7 @@ export default function CurrencyExpenses() {
         onRequestClose={() => setGoalModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
               <Ionicons name="wallet-outline" size={22} color={colors.greyishWhite} />
             </View>
@@ -745,7 +733,6 @@ export default function CurrencyExpenses() {
                       styles.presetChip,
                       {
                         backgroundColor: isSelected ? colors.insetBg : "transparent",
-                        borderColor: isSelected ? colors.activeBorder : colors.cardBorder,
                       },
                       pressed && styles.pressed,
                     ]}
@@ -768,7 +755,7 @@ export default function CurrencyExpenses() {
             </View>
 
             {/* Numeric input */}
-            <View style={[styles.goalInputWrap, { backgroundColor: colors.searchBg, borderColor: colors.cardBorder }]}>
+            <View style={[styles.goalInputWrap, { backgroundColor: colors.searchBg }]}>
               <Text style={[styles.goalInputPrefix, { color: colors.textPrimary }]}>{baseCurrency.symbol}</Text>
               <TextInput
                 value={customGoalInput}
@@ -786,7 +773,6 @@ export default function CurrencyExpenses() {
               <Pressable
                 style={({ pressed }) => [
                   styles.modalSecondaryBtn,
-                  { borderColor: colors.cardBorder },
                   pressed && styles.pressed,
                 ]}
                 onPress={() => setGoalModalVisible(false)}
@@ -802,7 +788,7 @@ export default function CurrencyExpenses() {
                 ]}
                 onPress={handleSaveGoal}
               >
-                <Text style={[styles.modalPrimaryBtnText, { color: isDark ? "#0A0A0C" : "#FFFFFF" }]}>
+                <Text style={[styles.modalPrimaryBtnText, { color: isDark ? "#000000" : "#FFFFFF" }]}>
                   {t("Save Goal")}
                 </Text>
               </Pressable>
@@ -841,7 +827,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -862,17 +848,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
   },
 
-  // Card matching modernCardGroup in Settings
+  // Card matching modernCardGroup in Settings (28px radius, zero border)
   card: {
     marginHorizontal: 20,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 5,
-    elevation: 1,
+    elevation: 0,
   },
   cardIntroText: {
     fontSize: 13,
@@ -937,7 +923,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   divider: {
-    height: StyleSheet.hairlineWidth,
+    height: 0,
     marginHorizontal: 16,
   },
 
@@ -946,8 +932,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 16,
     marginTop: 6,
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 24,
+    borderWidth: 0,
     paddingHorizontal: 16,
     paddingVertical: 14,
     flexDirection: "row",
@@ -962,8 +948,8 @@ const styles = StyleSheet.create({
   editGoalBtn: {
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 22,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1007,15 +993,15 @@ const styles = StyleSheet.create({
   modalCard: {
     width: "100%",
     maxWidth: 390,
-    borderRadius: 24,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 22,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
-    elevation: 8,
+    elevation: 0,
   },
   modalTitle: {
     fontSize: 18,
@@ -1035,7 +1021,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     height: 42,
-    borderRadius: 12,
+    borderRadius: 20,
     paddingHorizontal: 12,
     marginBottom: 12,
     gap: 8,
@@ -1055,8 +1041,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 11,
     paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 18,
+    borderWidth: 0,
     marginBottom: 6,
   },
   currencyFlagEmoji: {
@@ -1083,8 +1069,8 @@ const styles = StyleSheet.create({
     width: "100%",
     paddingVertical: 12,
     paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1107,8 +1093,8 @@ const styles = StyleSheet.create({
   presetChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
   },
   presetChipText: {
     fontSize: 12.5,
@@ -1118,8 +1104,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     height: 52,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 22,
+    borderWidth: 0,
     paddingHorizontal: 14,
     marginBottom: 20,
     gap: 6,
@@ -1146,15 +1132,15 @@ const styles = StyleSheet.create({
   modalSecondaryBtn: {
     flex: 1,
     height: 44,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
   modalPrimaryBtn: {
     flex: 1,
     height: 44,
-    borderRadius: 14,
+    borderRadius: 24,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1165,8 +1151,8 @@ const styles = StyleSheet.create({
   modalCloseBtn: {
     width: "100%",
     height: 44,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },

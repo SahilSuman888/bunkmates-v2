@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { BlurView } from "../../../components/ui/AppBlurView";
 import { Feather } from "@expo/vector-icons";
+import { useAppSettings } from "../../../contexts/AppSettingsContext";
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -257,23 +258,53 @@ export default function AQIDetailsSheet({
     })
   ).current;
 
+  const { highPollutionAlerts } = useAppSettings();
   const currentAqi = Number(
-    aqiValue ?? aqiData?.maxAqi ?? aqiData?.aqi ?? 17
+    aqiValue ?? aqiData?.value ?? aqiData?.maxAqi ?? aqiData?.aqi ?? 17
   );
   const aqiInfo = getAqiInfo(currentAqi);
+  const isHighPollution = highPollutionAlerts && currentAqi > 100;
   const stationName = aqiData?.station || "Adarsh Nagar, Jaipur - RSPCB";
   const cityName = aqiData?.city || "Jaipur";
   const stateName = aqiData?.state || "Rajasthan";
-  const lastUpdated = formatUpdatedTime(aqiData?.last_update);
+  const lastUpdated = formatUpdatedTime(aqiData?.last_update || aqiData?.lastUpdated);
 
-  const pollutants = aqiData?.pollutants || {
-    ozone: { value: 17, unit: "ppb" },
-    "pm2.5": { value: 18, unit: "µg/m³" },
-    pm10: { value: 42, unit: "µg/m³" },
-    no2: { value: 12, unit: "ppb" },
-    so2: { value: 5, unit: "ppb" },
-    co: { value: 0.4, unit: "ppm" },
-  };
+  const rawPollutants = aqiData?.pollutants;
+  const pollutants = rawPollutants
+    ? {
+        ozone: {
+          value: rawPollutants.OZONE ?? rawPollutants.ozone?.value ?? 17,
+          unit: "ppb",
+        },
+        "pm2.5": {
+          value: rawPollutants.PM25 ?? rawPollutants["pm2.5"]?.value ?? 18,
+          unit: "µg/m³",
+        },
+        pm10: {
+          value: rawPollutants.PM10 ?? rawPollutants.pm10?.value ?? 42,
+          unit: "µg/m³",
+        },
+        no2: {
+          value: rawPollutants.NO2 ?? rawPollutants.no2?.value ?? 12,
+          unit: "ppb",
+        },
+        so2: {
+          value: rawPollutants.SO2 ?? rawPollutants.so2?.value ?? 5,
+          unit: "ppb",
+        },
+        co: {
+          value: rawPollutants.CO ?? rawPollutants.co?.value ?? 0.4,
+          unit: "ppm",
+        },
+      }
+    : {
+        ozone: { value: 17, unit: "ppb" },
+        "pm2.5": { value: 18, unit: "µg/m³" },
+        pm10: { value: 42, unit: "µg/m³" },
+        no2: { value: 12, unit: "ppb" },
+        so2: { value: 5, unit: "ppb" },
+        co: { value: 0.4, unit: "ppm" },
+      };
 
   if (!mounted) return null;
 
@@ -289,12 +320,12 @@ export default function AQIDetailsSheet({
         {/* BACKDROP */}
         <Animated.View
           style={[
-            StyleSheet.absoluteFillObject,
+            StyleSheet.absoluteFill,
             { opacity: backdropOpacity },
           ]}
         >
           <Pressable style={styles.backdropPress} onPress={() => closeSheet()}>
-            <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFillObject} />
+            <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
             <View style={styles.darkOverlay} />
           </Pressable>
         </Animated.View>
@@ -309,7 +340,7 @@ export default function AQIDetailsSheet({
             },
           ]}
         >
-          <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFillObject} />
+          <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
           <View pointerEvents="none" style={styles.glassBackground} />
 
           {/* DRAG HANDLE */}
@@ -330,6 +361,16 @@ export default function AQIDetailsSheet({
                 Station: {stationName}
               </Text>
             </View>
+
+            {/* High Pollution Alert Banner */}
+            {isHighPollution && (
+              <View style={styles.highPollutionAlertBox}>
+                <Feather name="alert-triangle" size={16} color="#f97316" />
+                <Text style={styles.highPollutionAlertText}>
+                  High Pollution Warning: AQI {currentAqi} exceeds healthy thresholds. Reduce outdoor exertion and consider an air-filtering mask.
+                </Text>
+              </View>
+            )}
 
             {/* MAIN AQI HERO */}
             <View style={styles.aqiBlock}>
@@ -405,7 +446,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   darkOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(3,6,18,0.60)",
   },
   sheet: {
@@ -421,7 +462,7 @@ const styles = StyleSheet.create({
     elevation: 24,
   },
   glassBackground: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(37,40,53,0.35)",
     borderRadius: 24,
   },
@@ -565,5 +606,25 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 14,
     marginBottom: 4,
+  },
+  highPollutionAlertBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(249, 115, 22, 0.15)",
+    borderColor: "rgba(249, 115, 22, 0.4)",
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  highPollutionAlertText: {
+    color: "#fdba74",
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
+    flex: 1,
   },
 });

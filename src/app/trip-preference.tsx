@@ -122,11 +122,13 @@ export default function TripPreferences() {
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
   let userAccent = "default";
+  let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       if (themeContext.accent) userAccent = themeContext.accent;
+      dynamicThemeColors = themeContext.themeColors;
     }
   } catch (e) {
     // fallback safe
@@ -136,9 +138,8 @@ export default function TripPreferences() {
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  // Dynamic colors derived from the old settings page (zero red, greyish-white accents)
+  // Dynamic solid colors
   const colors = useMemo(() => {
-    // If user explicitly chose a custom accent from General Settings that is not red/coral, respect it
     const hasCustomNonRedAccent =
       userAccent &&
       userAccent !== "default" &&
@@ -158,28 +159,26 @@ export default function TripPreferences() {
       : (isDark ? "rgba(226, 232, 240, 0.14)" : "rgba(17, 20, 26, 0.08)");
 
     return {
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
-      textPrimary: isDark ? "#FFFFFF" : "#11141A",
-      textSecondary: isDark ? "#8E95A2" : "#7E8590",
-      sectionHeader: isDark ? "#8E95A2" : "#7E8590",
-      // Greyish-white icon color matching Settings page
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      divider: "transparent",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       greyishWhite: greyishWhite,
-      // Subtle neutral circular icon box matching Settings page modernIconBox
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
-      segmentBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#F2F4F7",
-      segmentActiveBg: isDark ? "#24242A" : "#FFFFFF",
+      segmentBg: isDark ? "#202024" : "#E8EAEE",
+      segmentActiveBg: isDark ? "#2C2C32" : "#FFFFFF",
       segmentActiveText: activeText,
-      // Selected Chip Colors (greyish-white / dark contrast, zero red)
-      chipSelectedBg: activeChipBg,
-      chipSelectedBorder: activeBorder,
-      chipSelectedText: activeText,
+      // Selected Chip Colors (zero border, clean contrast)
+      chipSelectedBg: userAccent || (isDark ? "#2C2C32" : "#000000"),
+      chipSelectedBorder: "transparent",
+      chipSelectedText: "#FFFFFF",
       // Unselected Chip Colors
-      chipUnselectedBg: isDark ? "rgba(255, 255, 255, 0.03)" : "#FFFFFF",
-      chipUnselectedBorder: isDark ? "rgba(255, 255, 255, 0.09)" : "#EBECEF",
+      chipUnselectedBg: isDark ? "#202024" : "#F4F5F7",
+      chipUnselectedBorder: "transparent",
       chipUnselectedText: isDark ? "#94A3B8" : "#64748B",
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
@@ -240,29 +239,23 @@ export default function TripPreferences() {
     return () => unsubscribe();
   }, [authLoading, user]);
 
-  // Sync preference helper saving to both AsyncStorage and Firestore
-  const syncPreference = async (field: string, value: any) => {
+  // Sync preference helper saving to both AsyncStorage and Firestore in background
+  const syncPreference = (field: string, value: any) => {
     updateTripPreferences({ [field]: value });
-    // 1. Cache locally in AsyncStorage
-    try {
-      const current = await AsyncStorage.getItem("@bunkmates_trip_preferences");
+    AsyncStorage.getItem("@bunkmates_trip_preferences").then((current) => {
       const currentObj = current ? JSON.parse(current) : {};
       currentObj[field] = value;
-      await AsyncStorage.setItem("@bunkmates_trip_preferences", JSON.stringify(currentObj));
-    } catch (e) {
-      console.log("Failed to cache preference in AsyncStorage:", e);
-    }
+      AsyncStorage.setItem("@bunkmates_trip_preferences", JSON.stringify(currentObj)).catch(() => {});
+    }).catch(() => {});
 
-    // 2. Sync to Firestore in real-time
+    // Sync to Firestore in background
     if (!user) return;
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        [`tripPreferences.${field}`]: value,
-        updatedAt: new Date(),
-      });
-    } catch (e) {
+    updateDoc(doc(db, "users", user.uid), {
+      [`tripPreferences.${field}`]: value,
+      updatedAt: new Date(),
+    }).catch((e) => {
       console.log(`Failed to update tripPreferences.${field}:`, e);
-    }
+    });
   };
 
   // Toggle multi-select chips: Accommodations
@@ -332,7 +325,7 @@ export default function TripPreferences() {
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            { backgroundColor: colors.card },
             pressed && styles.pressed,
           ]}
           hitSlop={8}
@@ -352,7 +345,7 @@ export default function TripPreferences() {
       >
         {/* ── 1. PREFERRED TRAVEL STYLE ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("TRAVEL STYLE", "PREFERRED TRAVEL STYLE")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
+        <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
           <Text style={[styles.descText, { color: colors.textSecondary }]}>
             {t("What's your typical budget and pace for exploring new spots?", "What's your typical budget and pace for exploring new spots?")}
           </Text>
@@ -391,7 +384,7 @@ export default function TripPreferences() {
 
         {/* ── 2. PREFERRED ACCOMMODATIONS ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("Accommodation Preference", "PREFERRED ACCOMMODATIONS")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
+        <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
           <Text style={[styles.descText, { color: colors.textSecondary }]}>
             {t("Select your favorite types of stays (multi-select):", "Select your favorite types of stays (multi-select):")}
           </Text>
@@ -406,7 +399,6 @@ export default function TripPreferences() {
                     styles.chipPill,
                     {
                       backgroundColor: isSelected ? colors.chipSelectedBg : colors.chipUnselectedBg,
-                      borderColor: isSelected ? colors.chipSelectedBorder : colors.chipUnselectedBorder,
                     },
                     pressed && styles.pressed,
                   ]}
@@ -431,7 +423,7 @@ export default function TripPreferences() {
 
         {/* ── 3. DEFAULT TRIP SETTINGS ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DEFAULT TRIP SETTINGS", "DEFAULT TRIP SETTINGS")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Default Trip Duration */}
           <Pressable
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
@@ -471,7 +463,7 @@ export default function TripPreferences() {
 
         {/* ── 4. DIETARY PREFERENCES ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DIET & LIFESTYLE", "DIETARY PREFERENCES")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
+        <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
           <Text style={[styles.descText, { color: colors.textSecondary }]}>
             We'll filter group diners and recipe guides based on these:
           </Text>
@@ -486,7 +478,6 @@ export default function TripPreferences() {
                     styles.chipPill,
                     {
                       backgroundColor: isSelected ? colors.chipSelectedBg : colors.chipUnselectedBg,
-                      borderColor: isSelected ? colors.chipSelectedBorder : colors.chipUnselectedBorder,
                     },
                     pressed && styles.pressed,
                   ]}
@@ -511,7 +502,7 @@ export default function TripPreferences() {
 
         {/* ── 5. ACTIVITY INTERESTS ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("ACTIVITY INTERESTS")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
+        <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
           <Text style={[styles.descText, { color: colors.textSecondary }]}>
             {t("Help us match you with perfect sightseeing plans:", "Help us match you with perfect sightseeing plans:")}
           </Text>
@@ -526,7 +517,6 @@ export default function TripPreferences() {
                     styles.chipPill,
                     {
                       backgroundColor: isSelected ? colors.chipSelectedBg : colors.chipUnselectedBg,
-                      borderColor: isSelected ? colors.chipSelectedBorder : colors.chipUnselectedBorder,
                     },
                     pressed && styles.pressed,
                   ]}
@@ -572,7 +562,7 @@ export default function TripPreferences() {
         onRequestClose={() => setActiveModal(null)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
               <Ionicons
                 name={activeModal === "duration" ? "time-outline" : "people-outline"}
@@ -600,7 +590,6 @@ export default function TripPreferences() {
                       styles.modalOptionItem,
                       {
                         backgroundColor: isSelected ? colors.chipSelectedBg : colors.segmentBg,
-                        borderColor: isSelected ? colors.chipSelectedBorder : colors.cardBorder,
                       },
                       pressed && styles.pressed,
                     ]}
@@ -620,7 +609,7 @@ export default function TripPreferences() {
                       {t(opt)}
                     </Text>
                     {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.chipSelectedBorder} />
+                      <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
                     )}
                   </Pressable>
                 );
@@ -630,7 +619,7 @@ export default function TripPreferences() {
             <Pressable
               style={({ pressed }) => [
                 styles.modalCloseBtn,
-                { borderColor: colors.cardBorder, backgroundColor: colors.segmentBg },
+                { backgroundColor: colors.segmentBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setActiveModal(null)}
@@ -671,7 +660,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -692,17 +681,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
   },
 
-  // Card matching modernCardGroup in Settings
+  // Card matching modernCardGroup in Settings (28px radius, zero border)
   card: {
     marginHorizontal: 20,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 5,
-    elevation: 1,
+    elevation: 0,
   },
 
   // Description text
@@ -751,8 +740,8 @@ const styles = StyleSheet.create({
   chipPill: {
     paddingHorizontal: 16,
     paddingVertical: 9,
-    borderRadius: 20,
-    borderWidth: 1.2,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -789,7 +778,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   divider: {
-    height: StyleSheet.hairlineWidth,
+    height: 0,
     marginHorizontal: 16,
   },
 
@@ -827,15 +816,15 @@ const styles = StyleSheet.create({
   modalCard: {
     width: "100%",
     maxWidth: 380,
-    borderRadius: 22,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 24,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
-    elevation: 8,
+    elevation: 0,
   },
   modalTitle: {
     fontSize: 18,
@@ -859,8 +848,8 @@ const styles = StyleSheet.create({
     width: "100%",
     paddingVertical: 13,
     paddingHorizontal: 16,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -871,8 +860,8 @@ const styles = StyleSheet.create({
   modalCloseBtn: {
     width: "100%",
     height: 44,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },

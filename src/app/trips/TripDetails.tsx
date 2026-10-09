@@ -40,6 +40,9 @@ import LinkDrawer from "../../components/trip_components/LinkDrawer";
 import SettingsDrawer from "../../components/trip_components/SettingsDrawer";
 
 import { useGroqAI } from "../../hooks/useGroqAI";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { SkeletonLoadingScreen } from "../../components/ui/SkeletonLoadingScreen";
 
 const { width } = Dimensions.get("window");
 const UNSPLASH_KEY = "MGCA3bsEUNBsSG6XbcqnJXckFB4dDyN5ZPKVBrD0FeQ";
@@ -59,6 +62,8 @@ export default function TripDetails() {
   const router = useRouter();
   const user = auth.currentUser;
   const uid = user?.uid || null;
+  const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
+  const { formatTemperature } = useAppSettings();
 
   /* ─── DATA STATE ─── */
   const [trip, setTrip] = useState<any>(null);
@@ -525,16 +530,12 @@ Return strictly raw JSON format without reasoning or explanation:
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(trip?.from || "")}&destination=${encodeURIComponent(trip?.to || "")}`;
 
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#00e6b0" />
-      </View>
-    );
+    return <SkeletonLoadingScreen title={trip?.title || "Trip Details"} showAvatarCard={false} itemCount={4} />;
   }
 
   return (
-    <View style={styles.root}>
-      <StatusBar barStyle="light-content" />
+    <View style={[styles.root, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       {/* ── HERO IMAGE ── */}
       <View style={styles.heroContainer}>
@@ -579,7 +580,7 @@ Return strictly raw JSON format without reasoning or explanation:
           {weather && (
             <View style={styles.weatherChip}>
               <Text style={styles.weatherTemp}>
-                {weather.temp > 32 ? "🔥" : weather.temp < 10 ? "❄️" : "☀️"} {Math.round(weather.temp)}°C
+                {weather.temp > 32 ? "🔥" : weather.temp < 10 ? "❄️" : "☀️"} {formatTemperature(weather.temp, "C")}
               </Text>
               <Text style={styles.weatherDesc}>{weather.description}</Text>
               <Text style={styles.weatherLoc}>IN {trip?.location?.toUpperCase()}</Text>

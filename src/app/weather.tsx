@@ -97,11 +97,13 @@ export default function WeatherSettings() {
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
   let userAccent = "default";
+  let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       if (themeContext.accent) userAccent = themeContext.accent;
+      dynamicThemeColors = themeContext.themeColors;
     }
   } catch (e) {
     // fallback safe
@@ -111,7 +113,7 @@ export default function WeatherSettings() {
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  // Dynamic colors derived from Settings page (zero red, greyish-white accents)
+  // Dynamic solid colors
   const colors = useMemo(() => {
     const hasCustomNonRedAccent =
       userAccent &&
@@ -129,31 +131,31 @@ export default function WeatherSettings() {
     const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
 
     return {
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
-      textPrimary: isDark ? "#FFFFFF" : "#11141A",
-      textSecondary: isDark ? "#8E95A2" : "#7E8590",
-      sectionHeader: isDark ? "#8E95A2" : "#7E8590",
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      divider: "transparent",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       greyishWhite: greyishWhite,
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
-      segmentBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#F2F4F7",
-      segmentActiveBg: isDark ? "#24242A" : "#FFFFFF",
+      segmentBg: isDark ? "#202024" : "#E8EAEE",
+      segmentActiveBg: isDark ? "#2C2C32" : "#FFFFFF",
       switchActive: isDark ? "#34C759" : "#10B981",
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
       activeText: activeText,
-      activeBorder: activeBorder,
-      insetBg: isDark ? "rgba(255, 255, 255, 0.04)" : "#F8FAFC",
+      activeBorder: "transparent",
+      insetBg: isDark ? "#202024" : "#F8FAFC",
       badgeBg: isDark ? "rgba(16, 185, 129, 0.12)" : "rgba(16, 185, 129, 0.08)",
-      badgeBorder: isDark ? "rgba(16, 185, 129, 0.35)" : "rgba(16, 185, 129, 0.30)",
+      badgeBorder: "transparent",
       badgeText: "#10B981",
       modalOverlay: "rgba(0, 0, 0, 0.65)",
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
     };
-  }, [isDark, userAccent]);
+  }, [isDark, userAccent, dynamicThemeColors]);
 
   // Auth observer
   useEffect(() => {
@@ -216,30 +218,25 @@ export default function WeatherSettings() {
     return () => unsubscribe();
   }, [authLoading, user]);
 
-  // Sync preference helper saving to both AsyncStorage and Firestore
-  const syncPreference = async (field: string, value: any) => {
+  // Sync preference helper saving to both AsyncStorage and Firestore in background
+  const syncPreference = (field: string, value: any) => {
     updateWeatherPreferences({ [field]: value });
-    try {
-      const current = await AsyncStorage.getItem("@bunkmates_weather_preferences");
+    AsyncStorage.getItem("@bunkmates_weather_preferences").then((current) => {
       const currentObj = current ? JSON.parse(current) : {};
       currentObj[field] = value;
-      await AsyncStorage.setItem(
+      AsyncStorage.setItem(
         "@bunkmates_weather_preferences",
         JSON.stringify(currentObj)
-      );
-    } catch (e) {
-      console.log("Failed to cache weather preferences:", e);
-    }
+      ).catch(() => {});
+    }).catch(() => {});
 
     if (!user) return;
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        [`weatherPreferences.${field}`]: value,
-        updatedAt: new Date(),
-      });
-    } catch (e) {
+    updateDoc(doc(db, "users", user.uid), {
+      [`weatherPreferences.${field}`]: value,
+      updatedAt: new Date(),
+    }).catch((e) => {
       console.log(`Failed to update weatherPreferences.${field}:`, e);
-    }
+    });
   };
 
   const handleSelectTempUnit = (unit: TempUnit) => {
@@ -289,7 +286,7 @@ export default function WeatherSettings() {
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            { backgroundColor: colors.card },
             pressed && styles.pressed,
           ]}
           hitSlop={8}
@@ -309,7 +306,7 @@ export default function WeatherSettings() {
       >
         {/* ── 1. PREFERENCES ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("WEATHER UNITS", "PREFERENCES")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Temperature Units */}
           <Pressable
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
@@ -435,7 +432,7 @@ export default function WeatherSettings() {
 
         {/* ── 2. DISPLAY WIDGET ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DISPLAY WIDGET")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           <Pressable
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             onPress={() => setWidgetModalVisible(true)}
@@ -457,7 +454,7 @@ export default function WeatherSettings() {
 
         {/* ── 3. AIR QUALITY & AQI (ALREADY AVAILABLE IN THE APP) ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("AIR QUALITY & POLLUTION")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Link to existing AQI Detail Screen */}
           <Pressable
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
@@ -474,7 +471,7 @@ export default function WeatherSettings() {
                 <View
                   style={[
                     styles.aqiBadge,
-                    { backgroundColor: colors.badgeBg, borderColor: colors.badgeBorder },
+                    { backgroundColor: colors.badgeBg },
                   ]}
                 >
                   <Text style={[styles.aqiBadgeText, { color: colors.badgeText }]}>{t("AQI 70 • Moderate")}</Text>
@@ -533,7 +530,7 @@ export default function WeatherSettings() {
         onRequestClose={() => setTempModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
               <Ionicons name="thermometer-outline" size={22} color={colors.greyishWhite} />
             </View>
@@ -552,8 +549,7 @@ export default function WeatherSettings() {
                     style={({ pressed }) => [
                       styles.modalOptionItem,
                       {
-                        backgroundColor: isSelected ? colors.insetBg : "transparent",
-                        borderColor: isSelected ? colors.activeBorder : colors.cardBorder,
+                        backgroundColor: isSelected ? (isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.06)") : colors.insetBg,
                       },
                       pressed && styles.pressed,
                     ]}
@@ -576,7 +572,7 @@ export default function WeatherSettings() {
                       </Text>
                     </View>
                     {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.activeBorder} />
+                      <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
                     )}
                   </Pressable>
                 );
@@ -586,7 +582,7 @@ export default function WeatherSettings() {
             <Pressable
               style={({ pressed }) => [
                 styles.modalCloseBtn,
-                { borderColor: colors.cardBorder, backgroundColor: colors.insetBg },
+                { backgroundColor: colors.insetBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setTempModalVisible(false)}
@@ -605,7 +601,7 @@ export default function WeatherSettings() {
         onRequestClose={() => setWidgetModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
               <Ionicons name="apps-outline" size={22} color={colors.greyishWhite} />
             </View>
@@ -652,7 +648,7 @@ export default function WeatherSettings() {
               </View>
 
               {/* Toggles */}
-              <View style={[styles.widgetToggleRow, { borderColor: colors.divider }]}>
+              <View style={styles.widgetToggleRow}>
                 <Text style={[styles.widgetToggleLabel, { color: colors.textPrimary }]}>
                   {t("Show Feels-Like Temp & Humidity")}
                 </Text>
@@ -667,7 +663,7 @@ export default function WeatherSettings() {
                 />
               </View>
 
-              <View style={[styles.widgetToggleRow, { borderColor: colors.divider }]}>
+              <View style={styles.widgetToggleRow}>
                 <Text style={[styles.widgetToggleLabel, { color: colors.textPrimary }]}>
                   {t("Show Wind Speed & Direction")}
                 </Text>
@@ -686,7 +682,7 @@ export default function WeatherSettings() {
             <Pressable
               style={({ pressed }) => [
                 styles.modalCloseBtn,
-                { borderColor: colors.cardBorder, backgroundColor: colors.insetBg },
+                { backgroundColor: colors.insetBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setWidgetModalVisible(false)}
@@ -727,7 +723,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -751,14 +747,14 @@ const styles = StyleSheet.create({
   // Card matching modernCardGroup in Settings
   card: {
     marginHorizontal: 20,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 5,
-    elevation: 1,
+    elevation: 0,
   },
 
   // Segment Block inside Card
@@ -834,8 +830,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   divider: {
-    height: StyleSheet.hairlineWidth,
-    marginHorizontal: 16,
+    height: 0,
   },
 
   // AQI Badge
@@ -848,7 +843,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   aqiBadgeText: {
     fontSize: 11,
@@ -889,15 +884,15 @@ const styles = StyleSheet.create({
   modalCard: {
     width: "100%",
     maxWidth: 390,
-    borderRadius: 24,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 22,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
-    elevation: 8,
+    elevation: 0,
   },
   modalTitle: {
     fontSize: 18,
@@ -921,8 +916,8 @@ const styles = StyleSheet.create({
     width: "100%",
     paddingVertical: 12,
     paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -949,7 +944,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopWidth: 0,
   },
   widgetToggleLabel: {
     fontSize: 13,
@@ -958,9 +953,9 @@ const styles = StyleSheet.create({
   },
   modalCloseBtn: {
     width: "100%",
-    height: 44,
-    borderRadius: 14,
-    borderWidth: 1,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },

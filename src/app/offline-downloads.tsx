@@ -21,9 +21,9 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
-import { useThemeToggle } from "../contexts/ThemeContext";
 import { useLanguage } from "../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../theme/theme";
+import { SettingsActionModal } from "../components/ui/SettingsActionModal";
 
 export interface DownloadedMap {
   id: string;
@@ -105,6 +105,7 @@ export default function OfflineDownloads() {
   // Temporary cache in MB (36.2 MB initially in screenshot)
   const [tempCacheMB, setTempCacheMB] = useState<number>(36.2);
   const [clearingCache, setClearingCache] = useState(false);
+  const [showClearCacheModal, setShowClearCacheModal] = useState(false);
 
   // Modals state
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
@@ -136,11 +137,13 @@ export default function OfflineDownloads() {
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
   let userAccent = "default";
+  let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       if (themeContext.accent) userAccent = themeContext.accent;
+      dynamicThemeColors = themeContext.themeColors;
     }
   } catch (e) {
     // fallback safe
@@ -150,7 +153,7 @@ export default function OfflineDownloads() {
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  // Dynamic colors derived from Settings page (zero red, greyish-white accents)
+  // Dynamic solid colors
   const colors = useMemo(() => {
     const hasCustomNonRedAccent =
       userAccent &&
@@ -169,31 +172,31 @@ export default function OfflineDownloads() {
     const progressFill = customAccent || (isDark ? "#E2E8F0" : "#11141A");
 
     return {
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
-      textPrimary: isDark ? "#FFFFFF" : "#11141A",
-      textSecondary: isDark ? "#8E95A2" : "#7E8590",
-      sectionHeader: isDark ? "#8E95A2" : "#7E8590",
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      divider: "transparent",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       greyishWhite: greyishWhite,
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
       activeText: activeText,
-      activeBorder: activeBorder,
+      activeBorder: "transparent",
       progressFill: progressFill,
-      progressTrack: isDark ? "rgba(255, 255, 255, 0.08)" : "#E2E8F0",
-      btnBg: isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.03)",
+      progressTrack: isDark ? "#222226" : "#E2E8F0",
+      btnBg: isDark ? "#2A2A30" : "#E5E7EB",
       trashIcon: isDark ? "#94A3B8" : "#64748B",
-      trashBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#F1F5F9",
+      trashBg: isDark ? "#202024" : "#F1F5F9",
       badgeBg: isDark ? "rgba(245, 158, 11, 0.12)" : "rgba(245, 158, 11, 0.09)",
-      badgeBorder: isDark ? "rgba(245, 158, 11, 0.35)" : "rgba(245, 158, 11, 0.28)",
+      badgeBorder: "transparent",
       badgeText: "#F59E0B",
       modalOverlay: "rgba(0, 0, 0, 0.65)",
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
     };
-  }, [isDark, userAccent]);
+  }, [isDark, userAccent, dynamicThemeColors]);
 
   // Auth observer
   useEffect(() => {
@@ -255,29 +258,23 @@ export default function OfflineDownloads() {
     return () => unsubscribe();
   }, [authLoading, user]);
 
-  // Sync state helper saving to both AsyncStorage and Firestore
-  const syncOfflineSettings = async (nextMaps: DownloadedMap[], nextTempCache: number) => {
-    try {
-      const payload = {
-        maps: nextMaps,
-        trips,
-        tempCacheMB: nextTempCache,
-      };
-      await AsyncStorage.setItem("@bunkmates_offline_settings", JSON.stringify(payload));
-    } catch (e) {
-      console.log("Failed to cache offline settings:", e);
-    }
+  // Sync state helper saving to both AsyncStorage and Firestore in background
+  const syncOfflineSettings = (nextMaps: DownloadedMap[], nextTempCache: number) => {
+    const payload = {
+      maps: nextMaps,
+      trips,
+      tempCacheMB: nextTempCache,
+    };
+    AsyncStorage.setItem("@bunkmates_offline_settings", JSON.stringify(payload)).catch(() => {});
 
     if (!user) return;
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        "offlineSettings.maps": nextMaps,
-        "offlineSettings.tempCacheMB": nextTempCache,
-        updatedAt: new Date(),
-      });
-    } catch (e) {
+    updateDoc(doc(db, "users", user.uid), {
+      "offlineSettings.maps": nextMaps,
+      "offlineSettings.tempCacheMB": nextTempCache,
+      updatedAt: new Date(),
+    }).catch((e) => {
       console.log("Failed to update offlineSettings in Firestore:", e);
-    }
+    });
   };
 
   // Delete downloaded map handler
@@ -344,28 +341,7 @@ export default function OfflineDownloads() {
       triggerToast("Temporary cache is already empty");
       return;
     }
-
-    Alert.alert(
-      "Clear Temporary Cache",
-      `This will free up ${tempCacheMB.toFixed(1)} MB of temporary search histories and asset previews. Your downloaded maps and saved trips won't be deleted.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear Now",
-          style: "default",
-          onPress: () => {
-            setClearingCache(true);
-            setTimeout(() => {
-              const freed = tempCacheMB;
-              setTempCacheMB(0);
-              syncOfflineSettings(maps, 0);
-              setClearingCache(false);
-              triggerToast(`Temporary cache cleared (${freed.toFixed(1)} MB freed)`);
-            }, 500);
-          },
-        },
-      ]
-    );
+    setShowClearCacheModal(true);
   };
 
   return (
@@ -378,7 +354,7 @@ export default function OfflineDownloads() {
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            { backgroundColor: colors.card },
             pressed && styles.pressed,
           ]}
           hitSlop={8}
@@ -398,7 +374,7 @@ export default function OfflineDownloads() {
       >
         {/* ── 1. DEVICE STORAGE ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DEVICE STORAGE")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 18 }]}>
+        <View style={[styles.card, { backgroundColor: colors.card, padding: 18 }]}>
           <View style={styles.storageTopRow}>
             <Text style={[styles.storageTitle, { color: colors.textPrimary }]}>{t("BunkMates Storage Used")}</Text>
             <Text style={[styles.storageUsedText, { color: colors.textPrimary }]}>
@@ -426,7 +402,7 @@ export default function OfflineDownloads() {
 
         {/* ── 2. DOWNLOADED MAPS ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DOWNLOADED MAPS")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           {maps.length === 0 ? (
             <View style={styles.emptyMapWrap}>
               <Ionicons name="map-outline" size={28} color={colors.textSecondary} />
@@ -471,7 +447,6 @@ export default function OfflineDownloads() {
             styles.downloadActionBtn,
             {
               backgroundColor: colors.card,
-              borderColor: colors.cardBorder,
             },
             pressed && styles.pressed,
           ]}
@@ -487,7 +462,7 @@ export default function OfflineDownloads() {
 
         {/* ── 3. OFFLINE TRIPS CACHE ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("OFFLINE SAVED TRIPS", "OFFLINE TRIPS CACHE")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           {trips.map((t, idx) => (
             <React.Fragment key={t.id}>
               <Pressable
@@ -508,7 +483,7 @@ export default function OfflineDownloads() {
                       <View
                         style={[
                           styles.cachedBadge,
-                          { backgroundColor: colors.badgeBg, borderColor: colors.badgeBorder },
+                          { backgroundColor: colors.badgeBg },
                         ]}
                       >
                         <Text style={[styles.cachedBadgeText, { color: colors.badgeText }]}>{t.badge}</Text>
@@ -529,7 +504,7 @@ export default function OfflineDownloads() {
         <View
           style={[
             styles.card,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 18, marginTop: 22 },
+            { backgroundColor: colors.card, padding: 18, marginTop: 22 },
           ]}
         >
           <Text style={[styles.tempCacheTitle, { color: colors.textPrimary }]}>Temporary Cache</Text>
@@ -540,7 +515,7 @@ export default function OfflineDownloads() {
           <Pressable
             style={({ pressed }) => [
               styles.clearCacheBtn,
-              { backgroundColor: colors.btnBg, borderColor: colors.cardBorder },
+              { backgroundColor: colors.btnBg },
               pressed && styles.pressed,
             ]}
             onPress={handleClearCache}
@@ -603,7 +578,7 @@ export default function OfflineDownloads() {
                     key={item.id}
                     style={[
                       styles.downloadItemRow,
-                      { borderColor: colors.divider, backgroundColor: colors.btnBg },
+                      { backgroundColor: colors.btnBg },
                     ]}
                   >
                     <View style={{ flex: 1, paddingRight: 10 }}>
@@ -637,7 +612,7 @@ export default function OfflineDownloads() {
                         <Text
                           style={[
                             styles.downloadPillBtnText,
-                            { color: isDark ? "#0A0A0C" : "#FFFFFF" },
+                            { color: isDark ? "#000000" : "#FFFFFF" },
                           ]}
                         >
                           Download
@@ -652,7 +627,7 @@ export default function OfflineDownloads() {
             <Pressable
               style={({ pressed }) => [
                 styles.modalCloseBtn,
-                { borderColor: colors.cardBorder, backgroundColor: colors.btnBg },
+                { backgroundColor: colors.btnBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setDownloadModalVisible(false)}
@@ -671,7 +646,7 @@ export default function OfflineDownloads() {
         onRequestClose={() => setSelectedTripDetails(null)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
               <Ionicons name="briefcase-outline" size={22} color={colors.greyishWhite} />
             </View>
@@ -685,7 +660,7 @@ export default function OfflineDownloads() {
 
             {/* Trip Specs List */}
             <View style={styles.tripSpecsColumn}>
-              <View style={[styles.tripSpecRow, { borderColor: colors.divider }]}>
+              <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
                 <Ionicons name="checkbox-outline" size={17} color={colors.greyishWhite} />
                 <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Packing Checklist</Text>
                 <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
@@ -693,7 +668,7 @@ export default function OfflineDownloads() {
                 </Text>
               </View>
 
-              <View style={[styles.tripSpecRow, { borderColor: colors.divider }]}>
+              <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
                 <Ionicons name="calendar-outline" size={17} color={colors.greyishWhite} />
                 <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Full Itinerary</Text>
                 <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
@@ -701,7 +676,7 @@ export default function OfflineDownloads() {
                 </Text>
               </View>
 
-              <View style={[styles.tripSpecRow, { borderColor: colors.divider }]}>
+              <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
                 <Ionicons name="people-outline" size={17} color={colors.greyishWhite} />
                 <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Bunkmates Contact Cards</Text>
                 <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
@@ -709,7 +684,7 @@ export default function OfflineDownloads() {
                 </Text>
               </View>
 
-              <View style={[styles.tripSpecRow, { borderColor: colors.divider }]}>
+              <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
                 <Ionicons name="map-outline" size={17} color={colors.greyishWhite} />
                 <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Offline Area Map Tiles</Text>
                 <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
@@ -721,7 +696,7 @@ export default function OfflineDownloads() {
             <Pressable
               style={({ pressed }) => [
                 styles.modalCloseBtn,
-                { borderColor: colors.cardBorder, backgroundColor: colors.btnBg },
+                { backgroundColor: colors.btnBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setSelectedTripDetails(null)}
@@ -731,6 +706,31 @@ export default function OfflineDownloads() {
           </View>
         </View>
       </Modal>
+
+      {/* ── CLEAR TEMPORARY CACHE CONFIRMATION & SUCCESS FLOW (Matching Image 1 & 2) ── */}
+      <SettingsActionModal
+        visible={showClearCacheModal}
+        onClose={() => setShowClearCacheModal(false)}
+        iconType="trash"
+        title={t("Clear Temporary Cache")}
+        message={t(
+          `This will free up ${tempCacheMB.toFixed(1)} MB of temporary search histories and asset previews. Your downloaded maps and saved trips won't be deleted.`
+        )}
+        confirmLabel={t("Clear Cache")}
+        cancelLabel={t("Cancel")}
+        confirmColor={colors.coral}
+        onConfirm={async () => {
+          setTempCacheMB(0);
+          syncOfflineSettings(maps, 0);
+          return true;
+        }}
+        successTitle={t("Cache Cleared")}
+        successMessage={t(
+          "Temporary cache has been cleared and storage space has been freed on your device."
+        )}
+        successButtonLabel={t("Done")}
+        onDone={() => setShowClearCacheModal(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -762,7 +762,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -783,17 +783,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
   },
 
-  // Card matching modernCardGroup in Settings
+  // Card matching modernCardGroup in Settings (28px radius, zero border)
   card: {
     marginHorizontal: 20,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 5,
-    elevation: 1,
+    elevation: 0,
   },
 
   // Device Storage Section
@@ -874,7 +874,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   divider: {
-    height: StyleSheet.hairlineWidth,
+    height: 0,
     marginHorizontal: 16,
   },
 
@@ -882,8 +882,8 @@ const styles = StyleSheet.create({
   downloadActionBtn: {
     marginHorizontal: 20,
     marginTop: 12,
-    borderRadius: 18,
-    borderWidth: 1,
+    borderRadius: 26,
+    borderWidth: 0,
     paddingVertical: 14,
     flexDirection: "row",
     justifyContent: "center",
@@ -893,7 +893,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 4,
-    elevation: 1,
+    elevation: 0,
   },
   downloadActionBtnText: {
     fontSize: 14.5,
@@ -910,7 +910,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 12,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   cachedBadgeText: {
     fontSize: 11,
@@ -930,8 +930,8 @@ const styles = StyleSheet.create({
   },
   clearCacheBtn: {
     width: "100%",
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 26,
+    borderWidth: 0,
     paddingVertical: 12,
     justifyContent: "center",
     alignItems: "center",
@@ -975,15 +975,15 @@ const styles = StyleSheet.create({
   modalCard: {
     width: "100%",
     maxWidth: 390,
-    borderRadius: 24,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 22,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
-    elevation: 8,
+    elevation: 0,
   },
   modalTitle: {
     fontSize: 18,
@@ -1008,8 +1008,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 11,
     paddingHorizontal: 13,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 18,
+    borderWidth: 0,
     marginBottom: 8,
   },
   downloadItemName: {
@@ -1023,7 +1023,7 @@ const styles = StyleSheet.create({
   downloadPillBtn: {
     paddingHorizontal: 14,
     paddingVertical: 7,
-    borderRadius: 12,
+    borderRadius: 22,
   },
   downloadPillBtnText: {
     fontSize: 12.5,
@@ -1063,8 +1063,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 10,
     paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 18,
+    borderWidth: 0,
     gap: 10,
   },
   tripSpecLabel: {
@@ -1078,8 +1078,8 @@ const styles = StyleSheet.create({
   modalCloseBtn: {
     width: "100%",
     height: 44,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },

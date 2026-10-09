@@ -32,6 +32,7 @@ import { MotiView } from "moti";
 import { BarChart, PieChart } from "react-native-chart-kit";
 import { useAppSettings } from "../contexts/AppSettingsContext";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useThemeToggle } from "../contexts/ThemeContext";
 
 const { width } = Dimensions.get("window");
 
@@ -59,6 +60,8 @@ const CATEGORIES = [
 export default function BudgetScreen() {
   const { currency, formatCurrency, formatDate } = useAppSettings();
   const { t } = useLanguage();
+  const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
+  const isAtmosphere = background.mode !== "solid";
   const [authInitialized, setAuthInitialized] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -202,41 +205,41 @@ export default function BudgetScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={[styles.container, styles.centerContent]}>
-          <ActivityIndicator size="large" color="#00f721" />
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: isAtmosphere ? "transparent" : themeColors.background }]}>
+        <View style={[styles.container, styles.centerContent, { backgroundColor: "transparent" }]}>
+          <ActivityIndicator size="large" color={accentColor} />
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: isAtmosphere ? "transparent" : themeColors.background }]}>
+      <View style={[styles.container, { backgroundColor: "transparent" }]}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { borderBottomWidth: 0 }]}>
           <View>
-            <Text style={styles.headerSub}>{t("Track your spending")}</Text>
-            <Text style={styles.headerTitle}>{t("Budget")}</Text>
+            <Text style={[styles.headerSub, { color: themeColors.textSecondary, fontSize: scaleFont(13) }]}>{t("Track your spending")}</Text>
+            <Text style={[styles.headerTitle, { color: themeColors.text, fontSize: scaleFont(28) }]}>{t("Budget")}</Text>
           </View>
           <Pressable
             onPress={() => setShowModal(true)}
-            style={styles.addButton}
+            style={[styles.addButton, { backgroundColor: accentColor }]}
           >
             <MaterialCommunityIcons name="plus" size={20} color="#fff" />
           </Pressable>
         </View>
 
         {/* Stats Card */}
-        <View style={styles.statsCard}>
+        <View style={[styles.statsCard, { backgroundColor: themeColors.card, borderWidth: 0 }]}>
           <View style={styles.statItem}>
-            <Text style={styles.statLabel}>{t("Total Spent")}</Text>
-            <Text style={styles.statAmount}>{formatCurrency(totalExpense)}</Text>
+            <Text style={[styles.statLabel, { color: themeColors.textSecondary, fontSize: scaleFont(11) }]}>{t("Total Spent")}</Text>
+            <Text style={[styles.statAmount, { color: accentColor, fontSize: scaleFont(18) }]}>{formatCurrency(totalExpense)}</Text>
           </View>
-          <View style={styles.statDivider} />
+          <View style={[styles.statDivider, { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" }]} />
           <View style={styles.statItem}>
-            <Text style={styles.statLabel}>{t("Transactions")}</Text>
-            <Text style={styles.statAmount}>{filteredExpenses.length}</Text>
+            <Text style={[styles.statLabel, { color: themeColors.textSecondary, fontSize: scaleFont(11) }]}>{t("Transactions")}</Text>
+            <Text style={[styles.statAmount, { color: themeColors.text, fontSize: scaleFont(18) }]}>{filteredExpenses.length}</Text>
           </View>
         </View>
 
@@ -246,18 +249,18 @@ export default function BudgetScreen() {
             onPress={() => setViewMode("list")}
             style={[
               styles.toggleButton,
-              viewMode === "list" && styles.toggleButtonActive,
+              { backgroundColor: viewMode === "list" ? accentColor : (isDark ? "#202024" : "#F4F5F7"), borderWidth: 0 },
             ]}
           >
             <MaterialCommunityIcons
               name="format-list-bulleted"
               size={18}
-              color={viewMode === "list" ? "#fff" : "#888"}
+              color={viewMode === "list" ? "#fff" : themeColors.textSecondary}
             />
             <Text
               style={[
                 styles.toggleText,
-                viewMode === "list" && styles.toggleTextActive,
+                { color: viewMode === "list" ? "#fff" : themeColors.textSecondary, fontSize: scaleFont(12) },
               ]}
             >
               {t("List")}
@@ -268,18 +271,18 @@ export default function BudgetScreen() {
             onPress={() => setViewMode("chart")}
             style={[
               styles.toggleButton,
-              viewMode === "chart" && styles.toggleButtonActive,
+              { backgroundColor: viewMode === "chart" ? accentColor : (isDark ? "#202024" : "#F4F5F7"), borderWidth: 0 },
             ]}
           >
             <MaterialCommunityIcons
               name="chart-pie"
               size={18}
-              color={viewMode === "chart" ? "#fff" : "#888"}
+              color={viewMode === "chart" ? "#fff" : themeColors.textSecondary}
             />
             <Text
               style={[
                 styles.toggleText,
-                viewMode === "chart" && styles.toggleTextActive,
+                { color: viewMode === "chart" ? "#fff" : themeColors.textSecondary, fontSize: scaleFont(12) },
               ]}
             >
               {t("Chart")}
@@ -294,25 +297,34 @@ export default function BudgetScreen() {
           style={styles.categoryScroll}
           contentContainerStyle={styles.categoryContent}
         >
-          {["All", ...CATEGORIES.map((c) => c.name)].map((cat) => (
-            <Pressable
-              key={cat}
-              onPress={() => setFilterCategory(cat)}
-              style={[
-                styles.categoryChip,
-                filterCategory === cat && styles.categoryChipActive,
-              ]}
-            >
-              <Text
+          {["All", ...CATEGORIES.map((c) => c.name)].map((cat) => {
+            const isActive = filterCategory === cat;
+            return (
+              <Pressable
+                key={cat}
+                onPress={() => setFilterCategory(cat)}
                 style={[
-                  styles.categoryChipText,
-                  filterCategory === cat && styles.categoryChipTextActive,
+                  styles.categoryChip,
+                  {
+                    backgroundColor: isActive ? accentColor : (isDark ? "#202024" : "#F4F5F7"),
+                    borderWidth: 0,
+                  },
                 ]}
               >
-                {t(cat)}
-              </Text>
-            </Pressable>
-          ))}
+                <Text
+                  style={[
+                    styles.categoryChipText,
+                    {
+                      color: isActive ? "#fff" : themeColors.textSecondary,
+                      fontSize: scaleFont(12),
+                    },
+                  ]}
+                >
+                  {t(cat)}
+                </Text>
+              </Pressable>
+            );
+          })}
         </ScrollView>
 
         {/* Content View */}
@@ -333,6 +345,9 @@ export default function BudgetScreen() {
                     category={category!}
                     index={index}
                     onDelete={() => deleteExpense(expense.id)}
+                    themeColors={themeColors}
+                    accentColor={accentColor}
+                    scaleFont={scaleFont}
                   />
                 );
               })
@@ -341,10 +356,10 @@ export default function BudgetScreen() {
                 <MaterialCommunityIcons
                   name="wallet-outline"
                   size={48}
-                  color="rgba(255,255,255,0.2)"
+                  color={themeColors.textSecondary}
                 />
-                <Text style={styles.emptyText}>{t("No expenses yet")}</Text>
-                <Text style={styles.emptySubtext}>{t("Add your first expense")}</Text>
+                <Text style={[styles.emptyText, { color: themeColors.text, fontSize: scaleFont(16) }]}>{t("No expenses yet")}</Text>
+                <Text style={[styles.emptySubtext, { color: themeColors.textSecondary, fontSize: scaleFont(13) }]}>{t("Add your first expense")}</Text>
               </View>
             )}
             <View style={{ height: 20 }} />
@@ -362,11 +377,11 @@ export default function BudgetScreen() {
               width={width - 32}
               height={300}
               chartConfig={{
-                backgroundColor: "#0c0c0c",
-                backgroundGradientFrom: "#0c0c0c",
-                backgroundGradientTo: "#0c0c0c",
-                color: () => "#00f721",
-                labelColor: () => "#fff",
+                backgroundColor: themeColors.card,
+                backgroundGradientFrom: themeColors.card,
+                backgroundGradientTo: themeColors.card,
+                color: () => accentColor,
+                labelColor: () => themeColors.text,
               }}
               accessor="population"
               backgroundColor="transparent"
@@ -379,9 +394,9 @@ export default function BudgetScreen() {
             <MaterialCommunityIcons
               name="chart-pie-outline"
               size={48}
-              color="rgba(255,255,255,0.2)"
+              color={themeColors.textSecondary}
             />
-            <Text style={styles.emptyText}>{t("No data to display")}</Text>
+            <Text style={[styles.emptyText, { color: themeColors.text, fontSize: scaleFont(16) }]}>{t("No data to display")}</Text>
           </View>
         )}
 
@@ -392,18 +407,18 @@ export default function BudgetScreen() {
           transparent={true}
           onRequestClose={() => setShowModal(false)}
         >
-          <SafeAreaView style={styles.modalSafeArea}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
+          <SafeAreaView style={[styles.modalSafeArea, { backgroundColor: isAtmosphere ? "rgba(0,0,0,0.6)" : "rgba(0,0,0,0.5)" }]}>
+            <View style={[styles.modalContainer, { backgroundColor: themeColors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
+              <View style={[styles.modalHeader, { borderBottomWidth: 0 }]}>
                 <Pressable onPress={() => setShowModal(false)}>
-                  <MaterialCommunityIcons name="close" size={24} color="#fff" />
+                  <MaterialCommunityIcons name="close" size={24} color={themeColors.text} />
                 </Pressable>
-                <Text style={styles.modalTitle}>{t("Add Expense")}</Text>
+                <Text style={[styles.modalTitle, { color: themeColors.text, fontSize: scaleFont(18) }]}>{t("Add Expense")}</Text>
                 <Pressable onPress={addExpense}>
                   <MaterialCommunityIcons
                     name="check"
                     size={24}
-                    color="#00f721"
+                    color={accentColor}
                   />
                 </Pressable>
               </View>
@@ -414,61 +429,61 @@ export default function BudgetScreen() {
               >
                 {/* Description */}
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, { backgroundColor: isDark ? "#202024" : "#F4F5F7", color: themeColors.text, borderRadius: 12, paddingHorizontal: 14, borderWidth: 0 }]}
                   placeholder={t("What did you spend on?")}
-                  placeholderTextColor="#666"
+                  placeholderTextColor={themeColors.textSecondary}
                   value={description}
                   onChangeText={setDescription}
                 />
 
                 {/* Amount */}
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, { backgroundColor: isDark ? "#202024" : "#F4F5F7", color: themeColors.text, borderRadius: 12, paddingHorizontal: 14, borderWidth: 0 }]}
                   placeholder={`${t("Amount")} (${currency.symbol})`}
-                  placeholderTextColor="#666"
+                  placeholderTextColor={themeColors.textSecondary}
                   value={amount}
                   onChangeText={setAmount}
                   keyboardType="decimal-pad"
                 />
 
                 {/* Category Selection */}
-                <Text style={styles.sectionLabel}>{t("Category")}</Text>
+                <Text style={[styles.sectionLabel, { color: themeColors.textSecondary, fontSize: scaleFont(13) }]}>{t("Category")}</Text>
                 <View style={styles.categoryGrid}>
-                  {CATEGORIES.map((cat) => (
-                    <Pressable
-                      key={cat.name}
-                      onPress={() => setSelectedCategory(cat.name)}
-                      style={[
-                        styles.categoryOption,
-                        {
-                          borderColor:
-                            selectedCategory === cat.name
-                              ? cat.color
-                              : "rgba(255,255,255,0.1)",
-                          borderWidth: 2,
-                        },
-                      ]}
-                    >
-                      <MaterialCommunityIcons
-                        name={cat.icon as any}
-                        size={24}
-                        color={
-                          selectedCategory === cat.name ? cat.color : "#888"
-                        }
-                      />
-                      <Text
+                  {CATEGORIES.map((cat) => {
+                    const isCatActive = selectedCategory === cat.name;
+                    return (
+                      <Pressable
+                        key={cat.name}
+                        onPress={() => setSelectedCategory(cat.name)}
                         style={[
-                          styles.categoryOptionText,
+                          styles.categoryOption,
                           {
-                            color:
-                              selectedCategory === cat.name ? cat.color : "#888",
+                            backgroundColor: isCatActive ? `${accentColor}18` : (isDark ? "#202024" : "#F4F5F7"),
+                            borderWidth: 0,
                           },
                         ]}
                       >
-                        {t(cat.name)}
-                      </Text>
-                    </Pressable>
-                  ))}
+                        <MaterialCommunityIcons
+                          name={cat.icon as any}
+                          size={24}
+                          color={
+                            isCatActive ? accentColor : themeColors.textSecondary
+                          }
+                        />
+                        <Text
+                          style={[
+                            styles.categoryOptionText,
+                            {
+                              color: isCatActive ? accentColor : themeColors.textSecondary,
+                              fontSize: scaleFont(10),
+                            },
+                          ]}
+                        >
+                          {t(cat.name)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
               </ScrollView>
             </View>
@@ -488,11 +503,17 @@ function ExpenseCard({
   category,
   index,
   onDelete,
+  themeColors,
+  accentColor,
+  scaleFont,
 }: {
   expense: Expense;
   category: any;
   index: number;
   onDelete: () => void;
+  themeColors: any;
+  accentColor: string;
+  scaleFont: (size: number) => number;
 }) {
   const { formatCurrency, formatDate } = useAppSettings();
   return (
@@ -502,34 +523,34 @@ function ExpenseCard({
       transition={{ delay: index * 30 }}
       style={styles.expenseCardWrapper}
     >
-      <View style={[styles.expenseCard, { borderLeftColor: category.color }]}>
+      <View style={[styles.expenseCard, { backgroundColor: themeColors.card, borderLeftColor: category?.color || accentColor, borderLeftWidth: 3, borderWidth: 0 }]}>
         <View
           style={[
             styles.expenseIcon,
-            { backgroundColor: `${category.color}20` },
+            { backgroundColor: `${category?.color || accentColor}20` },
           ]}
         >
           <MaterialCommunityIcons
-            name={category.icon}
+            name={category?.icon || "currency-usd"}
             size={20}
-            color={category.color}
+            color={category?.color || accentColor}
           />
         </View>
 
         <View style={styles.expenseContent}>
-          <Text style={styles.expenseDescription}>{expense.description}</Text>
-          <Text style={styles.expenseCategory}>{expense.category}</Text>
+          <Text style={[styles.expenseDescription, { color: themeColors.text, fontSize: scaleFont(14) }]}>{expense.description}</Text>
+          <Text style={[styles.expenseCategory, { color: themeColors.textSecondary, fontSize: scaleFont(11) }]}>{expense.category}</Text>
         </View>
 
         <View style={styles.expenseRight}>
-          <Text style={styles.expenseAmount}>{formatCurrency(expense.amount)}</Text>
-          <Text style={styles.expenseDate}>
+          <Text style={[styles.expenseAmount, { color: accentColor, fontSize: scaleFont(14) }]}>{formatCurrency(expense.amount)}</Text>
+          <Text style={[styles.expenseDate, { color: themeColors.textSecondary, fontSize: scaleFont(10) }]}>
             {formatDate(expense.date)}
           </Text>
         </View>
 
         <Pressable onPress={onDelete} style={styles.deleteButton}>
-          <MaterialCommunityIcons name="close" size={16} color="#888" />
+          <MaterialCommunityIcons name="close" size={16} color={themeColors.textSecondary} />
         </Pressable>
       </View>
     </MotiView>

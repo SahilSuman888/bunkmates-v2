@@ -33,6 +33,7 @@ import CreateTripSheet from "../../components/trips/CreateTripSheet";
 import ConfirmDeleteDialog from "../../components/trip_components/ConfirmDeleteDialog";
 import { useAppSettings } from "../../contexts/AppSettingsContext";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 
 const { width } = Dimensions.get("window");
 
@@ -76,6 +77,7 @@ export default function TripsScreen() {
   const [loading, setLoading] = useState(true);
 
   // Search & Filter State
+  const { isDark, themeColors, accentColor, background, scaleFont } = useThemeToggle();
   const [searchQuery, setSearchQuery] = useState("");
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [filterPlace, setFilterPlace] = useState("");
@@ -300,43 +302,52 @@ export default function TripsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={themeColors.background}
+      />
 
-      <View style={styles.container}>
-        {/* HEADER matching image screenshot */}
+      <View style={[styles.container, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
+        {/* HEADER */}
         <View style={styles.header}>
-          <Text style={styles.title}>{t("where_next", "Where next?")}</Text>
+          <Text style={[styles.title, { color: themeColors.text, fontSize: scaleFont(28) }]}>
+            {t("where_next", "Where next?")}
+          </Text>
           <NotificationBell />
         </View>
 
-        {/* SEARCH BAR & FILTER BUTTON matching image screenshot */}
+        {/* SEARCH BAR & FILTER BUTTON */}
         <View style={styles.searchRow}>
-          <View style={styles.searchBar}>
-            <Feather name="search" size={17} color="#888888" />
+          <View style={[styles.searchBar, { backgroundColor: themeColors.card, borderWidth: 0 }]}>
+            <Feather name="search" size={17} color={themeColors.textSecondary} />
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholder={t("search_trips", "Search trips by name or destination...")}
-              placeholderTextColor="#666666"
-              style={styles.searchInput}
+              placeholderTextColor={themeColors.textSecondary}
+              style={[styles.searchInput, { color: themeColors.text, fontSize: scaleFont(13) }]}
             />
             {searchQuery ? (
               <Pressable onPress={() => setSearchQuery("")}>
-                <Ionicons name="close-circle" size={16} color="#888" />
+                <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
               </Pressable>
             ) : null}
           </View>
 
           <Pressable
             onPress={() => setFilterModalOpen(true)}
-            style={[styles.filterBtn, (filterPlace || filterStartDate) && styles.filterBtnActive]}
+            style={[
+              styles.filterBtn,
+              { backgroundColor: themeColors.card, borderWidth: 0 },
+              (filterPlace || filterStartDate) && { backgroundColor: accentColor },
+            ]}
           >
-            <Ionicons name="options-outline" size={20} color="#ffffff" />
+            <Ionicons name="options-outline" size={20} color={isDark ? "#ffffff" : "#11141A"} />
           </Pressable>
         </View>
 
-        {/* HORIZONTAL CALENDAR DATE PILLS matching image screenshot */}
+        {/* HORIZONTAL CALENDAR DATE PILLS */}
         <View style={styles.calendarContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.calendarScroll}>
             {datePills.map((item, idx) => {
@@ -345,12 +356,16 @@ export default function TripsScreen() {
                 <Pressable
                   key={idx}
                   onPress={() => setSelectedDateIdx(idx)}
-                  style={[styles.datePill, isSelected && styles.datePillActive]}
+                  style={[
+                    styles.datePill,
+                    { backgroundColor: themeColors.card, borderWidth: 0 },
+                    isSelected && { backgroundColor: accentColor },
+                  ]}
                 >
-                  <Text style={[styles.dateDayText, isSelected && styles.dateTextActive]}>
+                  <Text style={[styles.dateDayText, { color: themeColors.textSecondary }, isSelected && { color: "#ffffff" }]}>
                     {item.day}
                   </Text>
-                  <Text style={[styles.dateNumText, isSelected && styles.dateTextActive]}>
+                  <Text style={[styles.dateNumText, { color: themeColors.text }, isSelected && { color: "#ffffff" }]}>
                     {item.date}
                   </Text>
                 </Pressable>
@@ -362,7 +377,7 @@ export default function TripsScreen() {
         {/* TRIPS LIST */}
         {loading ? (
           <View style={styles.loadingBox}>
-            <ActivityIndicator size="large" color="#00e6b0" />
+            <ActivityIndicator size="large" color={accentColor} />
           </View>
         ) : (
           <ScrollView
@@ -479,9 +494,9 @@ export default function TripsScreen() {
           </ScrollView>
         )}
 
-        {/* FLOATING SEGMENTED TAB BAR & CREATE BUTTON matching image screenshot */}
+        {/* FLOATING SEGMENTED TAB BAR & CREATE BUTTON */}
         <View style={styles.floatingBarContainer}>
-          <View style={styles.pillBar}>
+          <View style={[styles.pillBar, { backgroundColor: isDark ? "rgba(22, 22, 24, 0.88)" : "rgba(255, 255, 255, 0.92)", borderWidth: 0 }]}>
             {(["All", "Upcoming", "Ongoing", "Past"] as const).map((tab) => {
               const isTabActive = activeTab === tab;
               const tabLabels: Record<string, string> = {
@@ -494,9 +509,9 @@ export default function TripsScreen() {
                 <Pressable
                   key={tab}
                   onPress={() => setActiveTab(tab)}
-                  style={[styles.tabPill, isTabActive && styles.tabPillActive]}
+                  style={[styles.tabPill, isTabActive && [styles.tabPillActive, { backgroundColor: accentColor }]]}
                 >
-                  <Text style={[styles.tabPillText, isTabActive && styles.tabPillTextActive]}>
+                  <Text style={[styles.tabPillText, isTabActive ? { color: "#ffffff", fontWeight: "900" } : { color: themeColors.textSecondary }]}>
                     {tabLabels[tab] || tab}
                   </Text>
                 </Pressable>
@@ -504,7 +519,7 @@ export default function TripsScreen() {
             })}
           </View>
 
-          <Pressable onPress={() => setCreateSheetOpen(true)} style={styles.floatingCreateBtn}>
+          <Pressable onPress={() => setCreateSheetOpen(true)} style={[styles.floatingCreateBtn, { backgroundColor: accentColor, borderWidth: 0 }]}>
             <Feather name="edit-3" size={18} color="#ffffff" />
           </Pressable>
         </View>

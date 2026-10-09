@@ -12,6 +12,8 @@ import {
   Platform,
   Animated,
   Dimensions,
+  FlatList,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -23,6 +25,8 @@ import { useUserGroups } from "../../hooks/useUserGroups";
 import { useFriendRequests } from "../../hooks/useFriendRequests";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useChatSettings } from "../../contexts/ChatSettingsContext";
 import NotificationBell from "../../components/NotificationBell";
 import UserProfileModal from "../../components/UserProfileModal";
 import AddFriendModal from "../../components/chat/AddFriendModal";
@@ -41,10 +45,21 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 export default function ChatsScreen() {
   const router = useRouter();
+  const { isDark, themeColors, accentColor, background, scaleFont } = useThemeToggle();
   const { user, loading: authLoading } = useUser();
   const { startCall } = useCall();
   const { t } = useLanguage();
 
+  const {
+    archivedChatIds,
+    isChatArchived,
+    toggleArchiveChat,
+    keepArchived,
+    clearedAt,
+    deletedAt,
+  } = useChatSettings();
+
+  const [showArchivedView, setShowArchivedView] = useState(false);
   const [activeTab, setActiveTab] = useState<"chats" | "calls">("chats");
   const [callHistory, setCallHistory] = useState<any[]>([]);
   const [callHistoryLoading, setCallHistoryLoading] = useState(false);
@@ -203,37 +218,81 @@ export default function ChatsScreen() {
     });
   }, [callHistory, searchText, user?.uid]);
 
-  const combinedList = useMemo(() => {
-    const normalizedChats = (filteredChats || []).map((c: any) => ({
-      id: c.id,
-      type: "chat",
-      title: c.name || c.displayName || "BunkMate Traveler",
-      subtitle: c.lastMessage || "No messages yet",
-      avatar: c.avatar || c.photoURL || "https://i.pravatar.cc/150?img=11",
-      timestamp: c.lastTimestamp || c.updatedAt || 0,
-      unreadCount: c.unreadCount || 0,
-      badge: null,
-      rawItem: c,
-    }));
+  const getMillis = (ts: any) => {
+    if (!ts) return 0;
+    if (ts.toMillis) return ts.toMillis();
+    if (ts.seconds) return ts.seconds * 1000;
+    if (typeof ts === "number") return ts;
+    return 0;
+  };
 
-    const normalizedGroups = (filteredGroups || []).map((g: any) => ({
-      id: g.id,
-      type: "group",
-      title: g.name || "Trip Group Chat",
-      subtitle: g.lastMessage || "No messages yet",
-      avatar: g.iconURL || "https://i.pravatar.cc/150?img=32",
-      timestamp: g.lastTimestamp || g.updatedAt || 0,
-      unreadCount: g.unreadCounts?.current || 0,
-      badge: g.name?.includes("Dev") ? "🧪 Dev Beta" : null,
-      rawItem: g,
-    }));
+  const combinedList = useMemo(() => {
+    const normalizedChats = (filteredChats || [])
+      .filter((c: any) => {
+        if (deletedAt) {
+          const ts = getMillis(c.lastTimestamp || c.updatedAt);
+          if (ts > 0 && ts <= deletedAt) return false;
+        }
+        return true;
+      })
+      .map((c: any) => {
+        const ts = getMillis(c.lastTimestamp || c.updatedAt);
+        const isCleared = clearedAt && ts > 0 && ts <= clearedAt;
+        return {
+          id: c.id,
+          type: "chat",
+          title: c.name || c.displayName || "BunkMate Traveler",
+          subtitle: isCleared ? "Chat cleared" : c.lastMessage || "No messages yet",
+          avatar: c.avatar || c.photoURL || "https://i.pravatar.cc/150?img=11",
+          timestamp: c.lastTimestamp || c.updatedAt || 0,
+          unreadCount: c.unreadCount || 0,
+          badge: null,
+          rawItem: c,
+          isArchived: isChatArchived(c.id),
+        };
+      });
+
+    const normalizedGroups = (filteredGroups || [])
+      .filter((g: any) => {
+        if (deletedAt) {
+          const ts = getMillis(g.lastTimestamp || g.updatedAt);
+          if (ts > 0 && ts <= deletedAt) return false;
+        }
+        return true;
+      })
+      .map((g: any) => {
+        const ts = getMillis(g.lastTimestamp || g.updatedAt);
+        const isCleared = clearedAt && ts > 0 && ts <= clearedAt;
+        return {
+          id: g.id,
+          type: "group",
+          title: g.name || "Trip Group Chat",
+          subtitle: isCleared ? "Chat cleared" : g.lastMessage || "No messages yet",
+          avatar: g.iconURL || "https://i.pravatar.cc/150?img=32",
+          timestamp: g.lastTimestamp || g.updatedAt || 0,
+          unreadCount: g.unreadCounts?.current || 0,
+          badge: g.name?.includes("Dev") ? "🧪 Dev Beta" : null,
+          rawItem: g,
+          isArchived: isChatArchived(g.id),
+        };
+      });
 
     return [...normalizedChats, ...normalizedGroups].sort(
       (a, b) =>
         (b.timestamp?.seconds || b.timestamp || 0) -
         (a.timestamp?.seconds || a.timestamp || 0)
     );
-  }, [filteredChats, filteredGroups]);
+  }, [filteredChats, filteredGroups, deletedAt, clearedAt, archivedChatIds]);
+
+  const activeChatsList = useMemo(() => {
+    return combinedList.filter((item) => !item.isArchived);
+  }, [combinedList]);
+
+  const archivedChatsList = useMemo(() => {
+    return combinedList.filter((item) => item.isArchived);
+  }, [combinedList]);
+
+  const displayChatsList = showArchivedView ? archivedChatsList : activeChatsList;
 
   const handleAvatarPress = (uid: string, e?: any) => {
     if (e) e.stopPropagation();
@@ -275,24 +334,29 @@ export default function ChatsScreen() {
   });
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <StatusBar barStyle="light-content" backgroundColor="#0a0e14" />
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]} edges={["top", "left", "right"]}>
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={themeColors.background}
+      />
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#00e6b0" />
+          <ActivityIndicator size="large" color={accentColor} />
         </View>
       ) : (
-        <View style={styles.container}>
+        <View style={[styles.container, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
           {/* HEADER */}
           <View style={styles.header}>
             <View>
-              <Text style={styles.headerTitle}>
+              <Text style={[styles.headerTitle, { color: themeColors.text, fontSize: scaleFont(28) }]}>
                 {activeTab === "chats" ? t("messages", "Messages") : t("call_history", "Call History")}
               </Text>
-              <Text style={styles.headerSubtitle}>
+              <Text style={[styles.headerSubtitle, { color: themeColors.textSecondary, fontSize: scaleFont(12.5) }]}>
                 {activeTab === "chats"
-                  ? `${combinedList.length} ${t("conversations", "conversations")}`
+                  ? showArchivedView
+                    ? `${archivedChatsList.length} archived ${t("conversations", "conversations")}`
+                    : `${activeChatsList.length} ${t("conversations", "conversations")}`
                   : `${callHistory.length} ${t("total_calls", "total calls recorded")}`}
               </Text>
             </View>
@@ -300,16 +364,16 @@ export default function ChatsScreen() {
           </View>
 
           {/* SEARCH BAR */}
-          <View style={styles.searchContainer}>
-            <Feather name="search" size={18} color="#7f8c9b" />
+          <View style={[styles.searchContainer, { backgroundColor: themeColors.card, borderWidth: 0 }]}>
+            <Feather name="search" size={18} color={themeColors.textSecondary} />
             <TextInput
-              style={styles.searchInput}
+              style={[styles.searchInput, { color: themeColors.text, fontSize: scaleFont(14) }]}
               placeholder={
                 activeTab === "chats"
                   ? t("search_messages", "Search travelers & groups...")
                   : t("search_calls", "Search calls by name or handle...")
               }
-              placeholderTextColor="#7f8c9b"
+              placeholderTextColor={themeColors.textSecondary}
               value={searchText}
               onChangeText={setSearchText}
             />
@@ -320,86 +384,155 @@ export default function ChatsScreen() {
                   setSearchText("");
                 }}
               >
-                <Ionicons name="close-circle" size={18} color="#7f8c9b" />
+                <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
               </Pressable>
             ) : null}
           </View>
 
           {/* ---------------------------------------------------- */}
-          {/* TAB 1: CHATS LIST                                   */}
+          {/* TAB 1: CHATS LIST (VIRTUALIZED FLATLIST FOR ZERO LAG) */}
           {/* ---------------------------------------------------- */}
           {activeTab === "chats" ? (
-            <ScrollView
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {combinedList.length > 0 ? (
-                combinedList.map((item: any) => (
-                  <Pressable
-                    key={`${item.type}-${item.id}`}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      item.type === "chat"
-                        ? router.push(`/chat/${item.id}` as any)
-                        : router.push(
-                            `/(tabs)/group-chatroom/${item.id}` as any
-                          );
-                    }}
-                    style={({ pressed }) => [
-                      styles.card,
-                      pressed && styles.cardPressed,
-                    ]}
-                  >
-                    <Pressable
-                      onPress={(e) =>
-                        item.type === "chat"
-                          ? handleAvatarPress(item.rawItem?.uid || item.id, e)
-                          : null
-                      }
-                      style={styles.avatarWrap}
-                    >
-                      <Image
-                        source={{ uri: item.avatar }}
-                        style={styles.avatar}
+            <View style={{ flex: 1 }}>
+              {/* ARCHIVED CHATS ROW / BANNER */}
+              {archivedChatsList.length > 0 && (
+                <Pressable
+                  style={[
+                    styles.archivedRow,
+                    {
+                      backgroundColor: showArchivedView
+                        ? isDark
+                          ? "rgba(56, 189, 248, 0.15)"
+                          : "#e0f2fe"
+                        : themeColors.card,
+                    },
+                  ]}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setShowArchivedView(!showArchivedView);
+                  }}
+                >
+                  <View style={styles.archivedRowLeft}>
+                    <View style={[styles.archivedIconBox, { backgroundColor: isDark ? "#1E293B" : "#F1F5F9" }]}>
+                      <Ionicons
+                        name="archive-outline"
+                        size={18}
+                        color={accentColor || "#10B981"}
                       />
-                    </Pressable>
+                    </View>
+                    <Text style={[styles.archivedRowText, { color: themeColors.text }]}>
+                      {showArchivedView ? "← Back to Active Chats" : "Archived Chats"}
+                    </Text>
+                  </View>
+                  <View style={styles.archivedBadge}>
+                    <Text style={styles.archivedBadgeText}>{archivedChatsList.length}</Text>
+                  </View>
+                </Pressable>
+              )}
 
-                    <View style={styles.cardMiddle}>
-                      <View style={styles.titleRow}>
-                        <Text style={styles.cardTitle} numberOfLines={1}>
-                          {item.title}
+              {displayChatsList.length > 0 ? (
+                <FlatList
+                  data={displayChatsList}
+                  keyExtractor={(item: any) => `${item.type}-${item.id}`}
+                  contentContainerStyle={styles.scrollContent}
+                  showsVerticalScrollIndicator={false}
+                  initialNumToRender={14}
+                  maxToRenderPerBatch={10}
+                  windowSize={7}
+                  removeClippedSubviews={Platform.OS === "android"}
+                  renderItem={({ item }: { item: any }) => (
+                    <Pressable
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        item.type === "chat"
+                          ? router.push(`/chat/${item.id}` as any)
+                          : router.push(
+                              `/(tabs)/group-chatroom/${item.id}` as any
+                            );
+                      }}
+                      onLongPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        const isArchived = item.isArchived;
+                        Alert.alert(
+                          item.title,
+                          isArchived ? "Unarchive this conversation?" : "Archive this conversation?",
+                          [
+                            {
+                              text: isArchived ? "Unarchive" : "Archive",
+                              onPress: () => toggleArchiveChat(item.id),
+                            },
+                            { text: "Cancel", style: "cancel" },
+                          ]
+                        );
+                      }}
+                      style={({ pressed }) => [
+                        styles.card,
+                        pressed && styles.cardPressed,
+                      ]}
+                    >
+                      <Pressable
+                        onPress={(e) =>
+                          item.type === "chat"
+                            ? handleAvatarPress(item.rawItem?.uid || item.id, e)
+                            : null
+                        }
+                        style={styles.avatarWrap}
+                      >
+                        <Image
+                          source={{ uri: item.avatar }}
+                          style={styles.avatar}
+                        />
+                      </Pressable>
+
+                      <View style={styles.cardMiddle}>
+                        <View style={styles.titleRow}>
+                          <Text style={styles.cardTitle} numberOfLines={1}>
+                            {item.title}
+                          </Text>
+                          {item.badge && (
+                            <View style={styles.groupBadge}>
+                              <Text style={styles.groupBadgeText}>
+                                {item.badge}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={styles.cardSub} numberOfLines={1}>
+                          {item.subtitle}
                         </Text>
-                        {item.badge && (
-                          <View style={styles.groupBadge}>
-                            <Text style={styles.groupBadgeText}>
-                              {item.badge}
+                      </View>
+
+                      <View style={styles.cardRight}>
+                        <Text style={styles.tsText}>
+                          {formatTime(item.timestamp)}
+                        </Text>
+                        {item.unreadCount > 0 ? (
+                          <View style={styles.unreadDotBadge}>
+                            <Text style={styles.unreadBadgeText}>
+                              {item.unreadCount}
                             </Text>
                           </View>
-                        )}
+                        ) : null}
                       </View>
-                      <Text style={styles.cardSub} numberOfLines={1}>
-                        {item.subtitle}
-                      </Text>
-                    </View>
-
-                    <View style={styles.cardRight}>
-                      <Text style={styles.tsText}>
-                        {formatTime(item.timestamp)}
-                      </Text>
-                      {item.unreadCount > 0 ? (
-                        <View style={styles.unreadDotBadge}>
-                          <Text style={styles.unreadBadgeText}>
-                            {item.unreadCount}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  </Pressable>
-                ))
+                    </Pressable>
+                  )}
+                />
               ) : (
-                <Empty text={t("no_conversations", "No conversations found")} icon="chatbubbles-outline" />
+                <ScrollView
+                  contentContainerStyle={styles.scrollContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <Empty
+                    text={
+                      showArchivedView
+                        ? "No archived conversations"
+                        : t("no_conversations", "No conversations found")
+                    }
+                    icon={showArchivedView ? "archive-outline" : "chatbubbles-outline"}
+                  />
+                </ScrollView>
               )}
-            </ScrollView>
+            </View>
           ) : (
             /* ---------------------------------------------------- */
             /* TAB 2: CALL HISTORY LIST (FROM ROOT `calls` DB)      */
@@ -410,8 +543,8 @@ export default function ChatsScreen() {
             >
               {callHistoryLoading ? (
                 <View style={{ marginTop: 50, alignItems: "center" }}>
-                  <ActivityIndicator size="small" color="#00e6b0" />
-                  <Text style={styles.loadingText}>Fetching database calls...</Text>
+                  <ActivityIndicator size="small" color={accentColor} />
+                  <Text style={[styles.loadingText, { color: themeColors.textSecondary }]}>Fetching database calls...</Text>
                 </View>
               ) : filteredCallHistory.length > 0 ? (
                 filteredCallHistory.map((call: any) => {
@@ -581,7 +714,7 @@ export default function ChatsScreen() {
           {/* ============================================================ */}
           <View style={styles.bottomDockContainer} pointerEvents="box-none">
             {/* SEGMENTED TAB PILL (Messages vs Calls) */}
-            <View style={styles.floatingTabSwitcher}>
+            <View style={[styles.floatingTabSwitcher, { backgroundColor: isDark ? "rgba(18, 24, 32, 0.95)" : "rgba(255, 255, 255, 0.95)", borderWidth: 0 }]}>
               {/* Sliding Active Pill Background */}
               <Animated.View
                 style={[
@@ -589,6 +722,7 @@ export default function ChatsScreen() {
                   {
                     width: sliderWidth,
                     left: sliderLeft,
+                    backgroundColor: accentColor,
                   },
                 ]}
               />
@@ -604,13 +738,13 @@ export default function ChatsScreen() {
                       : "chatbubble-ellipses-outline"
                   }
                   size={17}
-                  color={activeTab === "chats" ? "#00140f" : "#8b949e"}
+                  color={activeTab === "chats" ? "#ffffff" : isDark ? "#8b949e" : "#6B7280"}
                   style={{ marginRight: 6 }}
                 />
                 <Text
                   style={[
                     styles.tabBtnText,
-                    activeTab === "chats" && styles.tabBtnTextActive,
+                    activeTab === "chats" ? { color: "#ffffff", fontWeight: "900" } : { color: themeColors.textSecondary },
                   ]}
                 >
                   {t("messages", "Messages")}
@@ -624,13 +758,13 @@ export default function ChatsScreen() {
                 <Ionicons
                   name={activeTab === "calls" ? "call" : "call-outline"}
                   size={17}
-                  color={activeTab === "calls" ? "#00140f" : "#8b949e"}
+                  color={activeTab === "calls" ? "#ffffff" : isDark ? "#8b949e" : "#6B7280"}
                   style={{ marginRight: 6 }}
                 />
                 <Text
                   style={[
                     styles.tabBtnText,
-                    activeTab === "calls" && styles.tabBtnTextActive,
+                    activeTab === "calls" ? { color: "#ffffff", fontWeight: "900" } : { color: themeColors.textSecondary },
                   ]}
                 >
                   {t("calls", "Calls")}
@@ -657,13 +791,13 @@ export default function ChatsScreen() {
 
             {/* NEW CHAT / USER FAB (+) */}
             <Pressable
-              style={styles.fabBtn}
+              style={[styles.fabBtn, { backgroundColor: accentColor }]}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 setAddFriendModalVisible(true);
               }}
             >
-              <Feather name="plus" size={24} color="#00140f" />
+              <Feather name="plus" size={24} color="#ffffff" />
             </Pressable>
           </View>
 
@@ -1085,5 +1219,42 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.45,
     shadowRadius: 12,
+  },
+  archivedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 14,
+  },
+  archivedRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  archivedIconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archivedRowText: {
+    fontSize: 14.5,
+    fontWeight: "600",
+  },
+  archivedBadge: {
+    backgroundColor: "rgba(56, 189, 248, 0.2)",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  archivedBadgeText: {
+    color: "#38BDF8",
+    fontSize: 12,
+    fontWeight: "700",
   },
 });

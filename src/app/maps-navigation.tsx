@@ -83,11 +83,13 @@ export default function MapsNavigation() {
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
   let userAccent = "default";
+  let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       if (themeContext.accent) userAccent = themeContext.accent;
+      dynamicThemeColors = themeContext.themeColors;
     }
   } catch (e) {
     // fallback safe
@@ -97,7 +99,7 @@ export default function MapsNavigation() {
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  // Dynamic colors derived from Settings page (zero red, greyish-white accents)
+  // Dynamic solid colors
   const colors = useMemo(() => {
     const hasCustomNonRedAccent =
       userAccent &&
@@ -115,28 +117,28 @@ export default function MapsNavigation() {
     const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
 
     return {
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
-      textPrimary: isDark ? "#FFFFFF" : "#11141A",
-      textSecondary: isDark ? "#8E95A2" : "#7E8590",
-      sectionHeader: isDark ? "#8E95A2" : "#7E8590",
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      divider: "transparent",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       greyishWhite: greyishWhite,
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
-      segmentBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#F2F4F7",
-      segmentActiveBg: isDark ? "#24242A" : "#FFFFFF",
+      segmentBg: isDark ? "#202024" : "#E8EAEE",
+      segmentActiveBg: isDark ? "#2C2C32" : "#FFFFFF",
       switchActive: isDark ? "#34C759" : "#10B981",
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
       activeText: activeText,
-      activeBorder: activeBorder,
-      insetBg: isDark ? "rgba(255, 255, 255, 0.04)" : "#F8FAFC",
+      activeBorder: "transparent",
+      insetBg: isDark ? "#202024" : "#F8FAFC",
       modalOverlay: "rgba(0, 0, 0, 0.65)",
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
     };
-  }, [isDark, userAccent]);
+  }, [isDark, userAccent, dynamicThemeColors]);
 
   // Auth observer
   useEffect(() => {
@@ -191,29 +193,24 @@ export default function MapsNavigation() {
     return () => unsubscribe();
   }, [authLoading, user]);
 
-  // Sync preference helper saving to both AsyncStorage and Firestore
-  const syncPreference = async (field: string, value: any) => {
-    try {
-      const current = await AsyncStorage.getItem("@bunkmates_maps_navigation_preferences");
+  // Sync preference helper saving to both AsyncStorage and Firestore in background
+  const syncPreference = (field: string, value: any) => {
+    AsyncStorage.getItem("@bunkmates_maps_navigation_preferences").then((current) => {
       const currentObj = current ? JSON.parse(current) : {};
       currentObj[field] = value;
-      await AsyncStorage.setItem(
+      AsyncStorage.setItem(
         "@bunkmates_maps_navigation_preferences",
         JSON.stringify(currentObj)
-      );
-    } catch (e) {
-      console.log("Failed to cache maps preferences:", e);
-    }
+      ).catch(() => {});
+    }).catch(() => {});
 
     if (!user) return;
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        [`mapsPreferences.${field}`]: value,
-        updatedAt: new Date(),
-      });
-    } catch (e) {
+    updateDoc(doc(db, "users", user.uid), {
+      [`mapsPreferences.${field}`]: value,
+      updatedAt: new Date(),
+    }).catch((e) => {
       console.log(`Failed to update mapsPreferences.${field}:`, e);
-    }
+    });
   };
 
   const handleSelectMapProvider = (provider: MapProvider) => {
@@ -263,7 +260,7 @@ export default function MapsNavigation() {
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            { backgroundColor: colors.card },
             pressed && styles.pressed,
           ]}
           hitSlop={8}
@@ -283,7 +280,7 @@ export default function MapsNavigation() {
       >
         {/* ── 1. NAVIGATION PREFERENCES ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("NAVIGATION PROVIDER", "NAVIGATION PREFERENCES")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Default Map Provider */}
           <View style={styles.segmentBlock}>
             <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>{t("Preferred Map App", "Default Map Provider")}</Text>
@@ -387,7 +384,7 @@ export default function MapsNavigation() {
 
         {/* ── 2. MAP STYLE ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("MAP DISPLAY & UNITS", "MAP STYLE")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Style Profile */}
           <View style={styles.segmentBlock}>
             <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>{t("Map Style", "Style Profile")}</Text>
@@ -468,7 +465,7 @@ export default function MapsNavigation() {
         onRequestClose={() => setDistanceModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
               <Ionicons name="arrow-forward-outline" size={22} color={colors.greyishWhite} />
             </View>
@@ -488,7 +485,6 @@ export default function MapsNavigation() {
                       styles.modalOptionItem,
                       {
                         backgroundColor: isSelected ? colors.insetBg : "transparent",
-                        borderColor: isSelected ? colors.activeBorder : colors.cardBorder,
                       },
                       pressed && styles.pressed,
                     ]}
@@ -511,7 +507,7 @@ export default function MapsNavigation() {
                       </Text>
                     </View>
                     {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.activeBorder} />
+                      <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
                     )}
                   </Pressable>
                 );
@@ -521,7 +517,7 @@ export default function MapsNavigation() {
             <Pressable
               style={({ pressed }) => [
                 styles.modalCloseBtn,
-                { borderColor: colors.cardBorder, backgroundColor: colors.insetBg },
+                { backgroundColor: colors.insetBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setDistanceModalVisible(false)}
@@ -562,7 +558,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -583,17 +579,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
   },
 
-  // Card matching modernCardGroup in Settings
+  // Card matching modernCardGroup in Settings (28px radius, zero border)
   card: {
     marginHorizontal: 20,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 5,
-    elevation: 1,
+    elevation: 0,
   },
 
   // Segment Block inside Card
@@ -669,7 +665,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   divider: {
-    height: StyleSheet.hairlineWidth,
+    height: 0,
     marginHorizontal: 16,
   },
 
@@ -707,15 +703,15 @@ const styles = StyleSheet.create({
   modalCard: {
     width: "100%",
     maxWidth: 390,
-    borderRadius: 24,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 22,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
-    elevation: 8,
+    elevation: 0,
   },
   modalTitle: {
     fontSize: 18,
@@ -739,8 +735,8 @@ const styles = StyleSheet.create({
     width: "100%",
     paddingVertical: 12,
     paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -756,8 +752,8 @@ const styles = StyleSheet.create({
   modalCloseBtn: {
     width: "100%",
     height: 44,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },

@@ -36,6 +36,7 @@ import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
 import { useAppSettings } from "../contexts/AppSettingsContext";
 import { useLanguage } from "../contexts/LanguageContext";
+import { SettingsActionModal } from "../components/ui/SettingsActionModal";
 
 type VisibilityOption = "public" | "private";
 
@@ -80,11 +81,13 @@ export default function PrivacyAndData() {
   // Dynamic Theme matching ProfileSettings and ProfileEdit exactly
   let themeMode: "dark" | "light" | "system" = "system";
   let dynamicAccent = "#FF5A5F";
+  let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
+      dynamicThemeColors = themeContext.themeColors;
     }
   } catch {
     // fallback
@@ -97,30 +100,30 @@ export default function PrivacyAndData() {
   const colors = useMemo(() => {
     const accent = dynamicAccent;
     return {
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
-      textPrimary: isDark ? "#FFFFFF" : "#11141A",
-      textSecondary: isDark ? "#8E95A2" : "#7E8590",
-      sectionHeader: isDark ? "#8E95A2" : "#7E8590",
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      divider: "transparent",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       accent: accent,
       coral: accent,
       accentBg: isDark ? hexToRgba(accent, 0.16) : hexToRgba(accent, 0.09),
       switchActive: accent,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
       greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
-      segmentBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#F2F4F7",
-      segmentActiveBg: isDark ? "#222228" : "#FFFFFF",
+      segmentBg: isDark ? "#202024" : "#E8EAEE",
+      segmentActiveBg: isDark ? "#2C2C32" : "#FFFFFF",
       pledgeBg: isDark ? "rgba(16, 185, 129, 0.10)" : "#EDFAF5",
-      pledgeBorder: isDark ? "rgba(16, 185, 129, 0.35)" : "#86EFAC",
+      pledgeBorder: "transparent",
       pledgeIcon: "#10B981",
       pledgeTitle: isDark ? "#34D399" : "#059669",
       pledgeText: isDark ? "#A7F3D0" : "#4B5563",
     };
-  }, [isDark, dynamicAccent]);
+  }, [isDark, dynamicAccent, dynamicThemeColors]);
 
   // Auth observer
   useEffect(() => {
@@ -185,22 +188,20 @@ export default function PrivacyAndData() {
     return () => unsubscribe();
   }, [authLoading, user]);
 
-  // Firestore & AsyncStorage synchronization helper
-  const syncSetting = async (field: string, value: any, storageKey?: string) => {
+  // Firestore & AsyncStorage synchronization helper (non-blocking background sync)
+  const syncSetting = (field: string, value: any, storageKey?: string) => {
     updatePrivacyPreferences({ [field]: value });
     if (storageKey) {
       AsyncStorage.setItem(storageKey, typeof value === "string" ? value : String(value)).catch(() => {});
     }
 
     if (!user) return;
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        [`privacy.${field}`]: value,
-        updatedAt: new Date(),
-      });
-    } catch (e) {
+    updateDoc(doc(db, "users", user.uid), {
+      [`privacy.${field}`]: value,
+      updatedAt: new Date(),
+    }).catch((e) => {
       console.log(`Failed to update privacy.${field}:`, e);
-    }
+    });
   };
 
   // 1. Profile Visibility
@@ -423,7 +424,7 @@ export default function PrivacyAndData() {
                 styles.smallDropdownPill,
                 {
                   backgroundColor: isDark ? "rgba(226, 232, 240, 0.10)" : "rgba(0, 0, 0, 0.05)",
-                  borderColor: isDark ? "rgba(226, 232, 240, 0.22)" : "#CBD5E1",
+                  borderColor: "transparent",
                 },
                 pressed && styles.pressed,
               ]}
@@ -451,7 +452,7 @@ export default function PrivacyAndData() {
                   styles.compactDropdownMenu,
                   {
                     backgroundColor: isDark ? "#18181D" : "#FFFFFF",
-                    borderColor: isDark ? "rgba(255, 255, 255, 0.12)" : "#E2E8F0",
+                    borderColor: "transparent",
                   },
                 ]}
               >
@@ -753,7 +754,7 @@ export default function PrivacyAndData() {
                   <Pressable
                     style={({ pressed }) => [
                       styles.modalActionBtn,
-                      { backgroundColor: colors.segmentBg, borderColor: colors.cardBorder, borderWidth: 1 },
+                      { backgroundColor: colors.segmentBg, borderWidth: 0 },
                       pressed && styles.pressed,
                     ]}
                     onPress={handleCopyExportJson}
@@ -769,7 +770,7 @@ export default function PrivacyAndData() {
               <Pressable
                 style={({ pressed }) => [
                   styles.modalActionBtn,
-                  { borderColor: colors.cardBorder, borderWidth: 1 },
+                  { backgroundColor: colors.segmentBg, borderWidth: 0 },
                   pressed && styles.pressed,
                 ]}
                 onPress={() => setShowExportModal(false)}
@@ -781,56 +782,46 @@ export default function PrivacyAndData() {
         </View>
       </Modal>
 
-      {/* ── CLEAR SEARCH HISTORY MODAL ── */}
-      <Modal
+      {/* ── CLEAR SEARCH HISTORY CONFIRMATION & SUCCESS FLOW (Matching Image 1 & 2) ── */}
+      <SettingsActionModal
         visible={showClearHistoryModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowClearHistoryModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 46, height: 46, borderRadius: 23, marginBottom: 12, marginRight: 0 }]}>
-              <Ionicons name="trash-outline" size={24} color={colors.greyishWhite} />
-            </View>
-
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Clear Search History?")}</Text>
-            <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              {t("This will remove all recent destination, location, and trip search queries stored on this device.", "This will remove all recent destination, location, and trip search queries stored on this device.")}
-            </Text>
-
-            <View style={styles.modalBtnRow}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalSecBtn,
-                  { borderColor: colors.cardBorder },
-                  pressed && styles.pressed,
-                ]}
-                onPress={() => setShowClearHistoryModal(false)}
-                disabled={isClearingHistory}
-              >
-                <Text style={[styles.modalSecBtnText, { color: colors.textSecondary }]}>{t("Cancel")}</Text>
-              </Pressable>
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalDangerBtn,
-                  { backgroundColor: colors.coral },
-                  pressed && styles.pressed,
-                ]}
-                onPress={handleConfirmClearHistory}
-                disabled={isClearingHistory}
-              >
-                {isClearingHistory ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.modalDangerBtnText}>{t("Clear History")}</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setShowClearHistoryModal(false)}
+        iconType="trash"
+        title={t("Clear Search History?")}
+        message={t(
+          "This will remove all recent destination, location, and trip search queries stored on this device."
+        )}
+        confirmLabel={t("Clear History")}
+        cancelLabel={t("Cancel")}
+        confirmColor={colors.coral}
+        onConfirm={async () => {
+          try {
+            await AsyncStorage.multiRemove([
+              "@bunkmates_search_history",
+              "@search_history",
+              "searchHistory",
+              "recent_searches",
+              "@destination_searches",
+            ]);
+            if (user) {
+              await updateDoc(doc(db, "users", user.uid), {
+                searchHistory: [],
+                updatedAt: new Date(),
+              }).catch(() => {});
+            }
+            return true;
+          } catch (e) {
+            console.log("Error wiping search history:", e);
+            return false;
+          }
+        }}
+        successTitle={t("Search History Cleared")}
+        successMessage={t(
+          "All recent destination, places, and trip searches have been removed from this device."
+        )}
+        successButtonLabel={t("Done")}
+        onDone={() => setShowClearHistoryModal(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -862,7 +853,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -883,17 +874,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
   },
 
-  // Card matching modernCardGroup in Settings
+  // Card matching modernCardGroup in Settings (28px radius, zero border)
   card: {
     marginHorizontal: 20,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 5,
-    elevation: 1,
+    elevation: 0,
   },
 
   // Compact Dropdown in Greyish-White matching Bunkmates app theme
@@ -902,8 +893,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 6,
     paddingHorizontal: 11,
-    borderRadius: 9,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 0,
   },
   smallDropdownPillText: {
     fontSize: 12.5,
@@ -918,8 +909,8 @@ const styles = StyleSheet.create({
   },
   compactDropdownMenu: {
     width: 120,
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 14,
+    borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 3 },
@@ -937,7 +928,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   compactDropdownDivider: {
-    height: StyleSheet.hairlineWidth,
+    height: 0,
   },
 
   // Row matching modernRow in Settings
@@ -970,7 +961,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   divider: {
-    height: StyleSheet.hairlineWidth,
+    height: 0,
     marginHorizontal: 16,
   },
 
@@ -979,8 +970,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     flexDirection: "row",
     alignItems: "flex-start",
-    borderRadius: 20,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 16,
     marginTop: 22,
     marginBottom: 10,
@@ -1015,8 +1006,8 @@ const styles = StyleSheet.create({
   modalCard: {
     width: "100%",
     maxWidth: 380,
-    borderRadius: 22,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 24,
     alignItems: "center",
     shadowColor: "#000",
@@ -1048,8 +1039,8 @@ const styles = StyleSheet.create({
   },
   exportInfoCard: {
     width: "100%",
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     padding: 12,
     marginBottom: 18,
     gap: 8,
@@ -1073,10 +1064,11 @@ const styles = StyleSheet.create({
   modalActionBtn: {
     width: "100%",
     height: 46,
-    borderRadius: 14,
+    borderRadius: 24,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 0,
   },
   modalBtnRow: {
     flexDirection: "row",
@@ -1086,8 +1078,8 @@ const styles = StyleSheet.create({
   modalSecBtn: {
     flex: 1,
     height: 46,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },

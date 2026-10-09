@@ -28,6 +28,7 @@ import Animated, { FadeIn } from "react-native-reanimated";
 import { MotiView } from "moti";
 import placesData from "./data/data.json";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useThemeToggle } from "../contexts/ThemeContext";
 
 const { width } = Dimensions.get("window");
 
@@ -36,6 +37,7 @@ export default function SearchScreen() {
   const router = useRouter();
   const { user } = useUser();
   const { t } = useLanguage();
+  const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -161,26 +163,26 @@ export default function SearchScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" />
-      <View style={styles.container}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+      <View style={[styles.container, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
         {/* Fixed Search Bar */}
         {searchOpen && (
-          <Animated.View entering={FadeIn} style={styles.searchBarContainer}>
+          <Animated.View entering={FadeIn} style={[styles.searchBarContainer, { backgroundColor: themeColors.card, borderBottomWidth: 0 }]}>
             {/* **@** Back Button */}
             <Pressable
               onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/home" as any))}
               style={{ padding: 4 }}
               accessibilityLabel="Go Back"
             >
-              <Ionicons name="arrow-back" size={24} color="#fff" />
+              <Ionicons name="arrow-back" size={24} color={themeColors.text} />
             </Pressable>
-            <View style={styles.searchInputWrapper}>
-              <Ionicons name="search-outline" size={20} color="#fff" />
+            <View style={[styles.searchInputWrapper, { backgroundColor: isDark ? "#202024" : "#F4F5F7" }]}>
+              <Ionicons name="search-outline" size={20} color={themeColors.textSecondary} />
               <TextInput
-                style={styles.searchInput}
+                style={[styles.searchInput, { color: themeColors.text }]}
                 placeholder={t("Find people, trips, or places...", "Search destination, user, or trip...")}
-                placeholderTextColor="#666"
+                placeholderTextColor={themeColors.textSecondary}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 autoFocus
@@ -269,7 +271,7 @@ export default function SearchScreen() {
               {searchQuery ? (
                 loading ? (
                   <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#00f721" />
+                    <ActivityIndicator size="large" color={accentColor} />
                   </View>
                 ) : filteredResults.length > 0 ? (
                   <View>

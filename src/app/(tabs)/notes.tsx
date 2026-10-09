@@ -32,6 +32,7 @@ import {
 } from "firebase/firestore";
 import { MaterialCommunityIcons, Feather, Ionicons } from "@expo/vector-icons";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 import NotificationBell from '../../components/NotificationBell';
 import Animated, { FadeIn } from "../reanimatedShim";
 // ...existing code...
@@ -67,6 +68,7 @@ const COLOR_ICONS = ["#ffb300", "#1976d2", "#43a047", "#d81b60", "#f57c00", "#7b
 
 export default function NotesScreen() {
   const router = useRouter();
+  const { isDark, themeColors, accentColor, background, scaleFont } = useThemeToggle();
   const { t } = useLanguage();
   const [authInitialized, setAuthInitialized] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -211,32 +213,37 @@ const createNote = async () => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={[styles.container, styles.centerContent]}>
-          <ActivityIndicator size="large" color="#fff" />
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
+        <View style={[styles.container, styles.centerContent, { backgroundColor: "transparent" }]}>
+          <ActivityIndicator size="large" color={accentColor} />
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#0e0e0e" />
-      <View style={styles.container}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={themeColors.background}
+      />
+      <View style={[styles.container, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
         
         {/* MATCHING HEADER */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>{t("notes", "Notes")}</Text>
+          <Text style={[styles.headerTitle, { color: themeColors.text, fontSize: scaleFont(28) }]}>
+            {t("notes", "Notes")}
+          </Text>
           <NotificationBell />
         </View>
 
         {/* MATCHING SEARCH BAR */}
-        <View style={styles.searchContainer}>
-          <Feather name="search" size={18} color="#888" style={styles.searchIcon} />
+        <View style={[styles.searchContainer, { backgroundColor: themeColors.card, borderWidth: 0 }]}>
+          <Feather name="search" size={18} color={themeColors.textSecondary} style={styles.searchIcon} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: themeColors.text, fontSize: scaleFont(14) }]}
             placeholder={t("search_notes", "Search notes...")}
-            placeholderTextColor="#888"
+            placeholderTextColor={themeColors.textSecondary}
             value={searchText}
             onChangeText={setSearchText}
           />
@@ -308,8 +315,8 @@ const createNote = async () => {
         )}
 
         {/* MATCHING FAB */}
-        <Pressable onPress={() => setShowCreateModal(true)} style={styles.fab}>
-          <Feather name="plus" size={24} color="#fff" />
+        <Pressable onPress={() => setShowCreateModal(true)} style={[styles.fab, { backgroundColor: accentColor, borderWidth: 0 }]}>
+          <Feather name="plus" size={24} color="#ffffff" />
         </Pressable>
 
 

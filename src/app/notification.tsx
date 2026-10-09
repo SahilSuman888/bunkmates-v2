@@ -1,4 +1,4 @@
-// **@** Notifications Settings — Pixel-perfect reference UI matching Settings design system with greyish-white icons, circular back button, dynamic theme toggle colors, and real Firestore persistence
+// **@** Notifications Settings — Pixel-perfect reference UI matching Settings design system with greyish-white icons, circular back button, dynamic theme toggle colors, centralized AppSettingsContext persistence, live Quiet Hours status, and interactive in-app test dispatchers
 import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
@@ -17,12 +17,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { auth, db } from "../lib/firebase";
+import { auth } from "../lib/firebase";
 import { registerForPushNotifications, disablePushNotifications } from "../lib/pushNotifications";
 import { useThemeToggle } from "../contexts/ThemeContext";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useAppSettings } from "../contexts/AppSettingsContext";
+import {
+  NotificationCategory,
+  NotificationPreferences,
+  sendTestNotification,
+} from "../lib/NotificationService";
 
 const TIME_OPTIONS = [
   "08:00 PM",
@@ -47,31 +51,45 @@ const TIME_OPTIONS = [
 export default function NotificationSettings() {
   const router = useRouter();
   const { t } = useLanguage();
+  const {
+    notificationPreferences,
+    updateNotificationPreferences,
+    isQuietHoursActive,
+    triggerHaptic,
+  } = useAppSettings();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-
-  // Notification settings states matching reference UI defaults
-  const [allPushEnabled, setAllPushEnabled] = useState<boolean>(true);
-  const [tripUpdates, setTripUpdates] = useState<boolean>(true);
-  const [chatMessages, setChatMessages] = useState<boolean>(true);
-  const [reminders, setReminders] = useState<boolean>(true);
-  const [recommendations, setRecommendations] = useState<boolean>(false);
-  const [promotions, setPromotions] = useState<boolean>(false);
-
-  // Quiet Hours states
-  const [doNotDisturb, setDoNotDisturb] = useState<boolean>(true);
-  const [silenceFrom, setSilenceFrom] = useState<string>("10:00 PM");
-  const [silenceUntil, setSilenceUntil] = useState<string>("07:00 AM");
 
   // Time picker modal state
   const [showTimeModal, setShowTimeModal] = useState<"from" | "until" | null>(null);
+  const [testingCategory, setTestingCategory] = useState<NotificationCategory | null>(null);
+
+  // Active preferences from centralized context
+  const {
+    allPushEnabled,
+    tripUpdates,
+    chatMessages,
+    reminders,
+    recommendations,
+    promotions,
+    doNotDisturb,
+    silenceFrom,
+    silenceUntil,
+  } = notificationPreferences;
+
+  const quietHoursNow = isQuietHoursActive();
 
   // Helper for dynamic alpha tints
   const hexToRgba = (hex: string, alpha: number) => {
     const cleanHex = hex.replace("#", "");
-    const fullHex = cleanHex.length === 3 ? cleanHex.split("").map((c) => c + c).join("") : cleanHex;
+    const fullHex =
+      cleanHex.length === 3
+        ? cleanHex
+            .split("")
+            .map((c) => c + c)
+            .join("")
+        : cleanHex;
     const r = parseInt(fullHex.substring(0, 2), 16) || 255;
     const g = parseInt(fullHex.substring(2, 4), 16) || 90;
     const b = parseInt(fullHex.substring(4, 6), 16) || 95;
@@ -81,11 +99,13 @@ export default function NotificationSettings() {
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
   let dynamicAccent = "#FF5A5F";
+  let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
+      dynamicThemeColors = themeContext.themeColors;
     }
   } catch (e) {}
 
@@ -96,115 +116,47 @@ export default function NotificationSettings() {
   const colors = useMemo(() => {
     const accent = dynamicAccent;
     return {
-      bg: isDark ? "#0A0A0C" : "#F4F6F9",
-      card: isDark ? "#141418" : "#FFFFFF",
-      cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "#F2F4F7",
-      textPrimary: isDark ? "#FFFFFF" : "#11141A",
-      textSecondary: isDark ? "#8E95A2" : "#7E8590",
-      sectionHeader: isDark ? "#8E95A2" : "#7E8590",
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"),
+      cardBorder: "transparent",
+      divider: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary:
+        dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader:
+        dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       accent: accent,
       accentBg: isDark ? hexToRgba(accent, 0.12) : hexToRgba(accent, 0.07),
-      accentBorder: isDark ? hexToRgba(accent, 0.35) : hexToRgba(accent, 0.25),
+      accentBorder: "transparent",
       switchActive: accent,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
-      // Greyish-white icon & title color matching Settings page
       greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
-      // Subtle neutral circular icon box matching Settings page modernIconBox
-      iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
-      timeBoxBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#F2F4F7",
+      timeBoxBg: isDark ? "#202024" : "#F2F4F7",
+      successGreen: "#10B981",
+      warningAmber: "#F59E0B",
     };
-  }, [isDark, dynamicAccent]);
+  }, [isDark, dynamicAccent, dynamicThemeColors]);
 
   // Auth listener
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      setAuthLoading(false);
     });
     return () => unsub();
   }, []);
 
-  // Restore local cache & live Firestore sync
-  useEffect(() => {
-    (async () => {
-      try {
-        const cached = await AsyncStorage.getItem("@bunkmates_notification_preferences");
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (parsed.allPushEnabled !== undefined) setAllPushEnabled(parsed.allPushEnabled);
-          if (parsed.tripUpdates !== undefined) setTripUpdates(parsed.tripUpdates);
-          if (parsed.chatMessages !== undefined) setChatMessages(parsed.chatMessages);
-          if (parsed.reminders !== undefined) setReminders(parsed.reminders);
-          if (parsed.recommendations !== undefined) setRecommendations(parsed.recommendations);
-          if (parsed.promotions !== undefined) setPromotions(parsed.promotions);
-          if (parsed.doNotDisturb !== undefined) setDoNotDisturb(parsed.doNotDisturb);
-          if (parsed.silenceFrom) setSilenceFrom(parsed.silenceFrom);
-          if (parsed.silenceUntil) setSilenceUntil(parsed.silenceUntil);
-        }
-      } catch (e) {
-        console.log("AsyncStorage read error:", e);
-      }
-    })();
+  // Central toggle dispatcher
+  const handleTogglePreference = async (
+    key: keyof NotificationPreferences,
+    value: boolean
+  ) => {
+    triggerHaptic("selection");
+    await updateNotificationPreferences({ [key]: value });
 
-    if (authLoading || !user) return;
-
-    const userDocRef = doc(db, "users", user.uid);
-    const unsubscribe = onSnapshot(
-      userDocRef,
-      (snap) => {
-        if (snap.exists()) {
-          const uData = snap.data();
-          const n = uData.notifications || {};
-
-          if (n.allPushEnabled !== undefined) setAllPushEnabled(!!n.allPushEnabled);
-          if (n.tripUpdates !== undefined) setTripUpdates(!!n.tripUpdates);
-          if (n.chatMessages !== undefined) setChatMessages(!!n.chatMessages);
-          if (n.reminders !== undefined) setReminders(!!n.reminders);
-          if (n.recommendations !== undefined) setRecommendations(!!n.recommendations);
-          if (n.promotions !== undefined) setPromotions(!!n.promotions);
-          if (n.doNotDisturb !== undefined) setDoNotDisturb(!!n.doNotDisturb);
-          if (n.silenceFrom) setSilenceFrom(n.silenceFrom);
-          if (n.silenceUntil) setSilenceUntil(n.silenceUntil);
-        }
-      },
-      (err) => {
-        console.log("Notification settings onSnapshot error:", err);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [authLoading, user]);
-
-  // Sync setting helper
-  const syncNotificationSetting = async (field: string, value: any) => {
-    // Cache locally
-    try {
-      const current = await AsyncStorage.getItem("@bunkmates_notification_preferences");
-      const currentObj = current ? JSON.parse(current) : {};
-      currentObj[field] = value;
-      await AsyncStorage.setItem("@bunkmates_notification_preferences", JSON.stringify(currentObj));
-    } catch (e) {}
-
-    // Sync to Firestore
-    if (!user) return;
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        [`notifications.${field}`]: value,
-        updatedAt: new Date(),
-      });
-    } catch (e) {
-      console.log(`Failed to update notifications.${field}:`, e);
-    }
-  };
-
-  // Toggle handlers
-  const handleToggleAllPush = async (val: boolean) => {
-    setAllPushEnabled(val);
-    syncNotificationSetting("allPushEnabled", val);
-    if (user) {
-      if (val) {
+    if (key === "allPushEnabled" && user) {
+      if (value) {
         registerForPushNotifications(user.uid).catch(() => {});
       } else {
         disablePushNotifications(user.uid).catch(() => {});
@@ -212,58 +164,57 @@ export default function NotificationSettings() {
     }
   };
 
-  const handleToggleTripUpdates = (val: boolean) => {
-    setTripUpdates(val);
-    syncNotificationSetting("tripUpdates", val);
-  };
-
-  const handleToggleChatMessages = (val: boolean) => {
-    setChatMessages(val);
-    syncNotificationSetting("chatMessages", val);
-  };
-
-  const handleToggleReminders = (val: boolean) => {
-    setReminders(val);
-    syncNotificationSetting("reminders", val);
-  };
-
-  const handleToggleRecommendations = (val: boolean) => {
-    setRecommendations(val);
-    syncNotificationSetting("recommendations", val);
-  };
-
-  const handleTogglePromotions = (val: boolean) => {
-    setPromotions(val);
-    syncNotificationSetting("promotions", val);
-  };
-
-  const handleToggleDoNotDisturb = (val: boolean) => {
-    setDoNotDisturb(val);
-    syncNotificationSetting("doNotDisturb", val);
-  };
-
-  const handleSelectTime = (time: string) => {
+  const handleSelectTime = async (time: string) => {
+    triggerHaptic("selection");
     if (showTimeModal === "from") {
-      setSilenceFrom(time);
-      syncNotificationSetting("silenceFrom", time);
+      await updateNotificationPreferences({ silenceFrom: time });
     } else if (showTimeModal === "until") {
-      setSilenceUntil(time);
-      syncNotificationSetting("silenceUntil", time);
+      await updateNotificationPreferences({ silenceUntil: time });
     }
     setShowTimeModal(null);
   };
 
-  return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+  // Test Notification handler with feedback
+  const handleTriggerTest = async (category: NotificationCategory) => {
+    triggerHaptic("medium");
+    setTestingCategory(category);
+    try {
+      const res = await sendTestNotification(category, notificationPreferences);
+      if (res.delivered) {
+        // Notification banner will slide in automatically at root level!
+      } else {
+        // Suppressed by gatekeeper: explain reason to user
+        Alert.alert(
+          "Alert Suppressed by Rules",
+          res.reason ||
+            "This notification was not delivered because your notification rules or quiet hours filtered it out.",
+          [{ text: "OK" }]
+        );
+      }
+    } catch (e: any) {
+      Alert.alert("Test Notification Error", e?.message || "Failed to trigger test.");
+    } finally {
+      setTimeout(() => setTestingCategory(null), 500);
+    }
+  };
 
-      {/* ── Top Header: Exact circular button matching Settings page (modernHeaderBtn) ── */}
+  return (
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: colors.bg }]}
+      edges={["top", "left", "right"]}
+    >
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={colors.bg}
+      />
+
+      {/* ── Top Header: Exact circular button matching Settings page ── */}
       <View style={styles.header}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            { backgroundColor: colors.card },
             pressed && styles.pressed,
           ]}
           hitSlop={6}
@@ -271,9 +222,25 @@ export default function NotificationSettings() {
         >
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+        <Text
+          style={[styles.headerTitle, { color: colors.textPrimary }]}
+          numberOfLines={1}
+        >
           {t("Notifications")}
         </Text>
+
+        <Pressable
+          onPress={() => router.push("/(tabs)/notifications" as any)}
+          style={({ pressed }) => [
+            styles.inboxBtn,
+            { backgroundColor: colors.card },
+            pressed && styles.pressed,
+          ]}
+          hitSlop={6}
+          accessibilityLabel="View inbox"
+        >
+          <Ionicons name="mail-outline" size={19} color={colors.textPrimary} />
+        </Pressable>
       </View>
 
       <ScrollView
@@ -281,36 +248,39 @@ export default function NotificationSettings() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── TOP HERO CARD: All Push Notifications with Greyish-White Title ── */}
+        {/* ── TOP HERO CARD: All Push Notifications ── */}
         <View
           style={[
             styles.heroCard,
             {
               backgroundColor: colors.card,
-              borderColor: colors.cardBorder,
             },
           ]}
         >
           <View style={styles.heroTextWrap}>
-            <Text style={[styles.heroTitle, { color: colors.greyishWhite }]}>{t("All Push Notifications")}</Text>
+            <Text style={[styles.heroTitle, { color: colors.greyishWhite }]}>
+              {t("All Push Notifications")}
+            </Text>
             <Text style={[styles.heroSub, { color: colors.textSecondary }]}>
               {t("Quickly silence or enable all mobile alerts")}
             </Text>
           </View>
           <Switch
             value={allPushEnabled}
-            onValueChange={handleToggleAllPush}
+            onValueChange={(val) => handleTogglePreference("allPushEnabled", val)}
             trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
             thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
           />
         </View>
 
         {/* ── 1. NOTIFICATION CATEGORIES ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("NOTIFICATION CATEGORIES")}</Text>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("NOTIFICATION CATEGORIES")}
+        </Text>
         <View
           style={[
             styles.card,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            { backgroundColor: colors.card },
             !allPushEnabled && { opacity: 0.6 },
           ]}
           pointerEvents={allPushEnabled ? "auto" : "none"}
@@ -321,14 +291,16 @@ export default function NotificationSettings() {
               <Ionicons name="airplane-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Trip Updates")}</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("Trip Updates")}
+              </Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
                 {t("Flight delays, gate changes, booking syncs")}
               </Text>
             </View>
             <Switch
               value={tripUpdates && allPushEnabled}
-              onValueChange={handleToggleTripUpdates}
+              onValueChange={(val) => handleTogglePreference("tripUpdates", val)}
               disabled={!allPushEnabled}
               trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
               thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
@@ -340,17 +312,23 @@ export default function NotificationSettings() {
           {/* Messages & Chat */}
           <View style={styles.row}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
-              <Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.greyishWhite} />
+              <Ionicons
+                name="chatbubble-ellipses-outline"
+                size={20}
+                color={colors.greyishWhite}
+              />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Messages & Chat")}</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("Messages & Chat")}
+              </Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
                 {t("Instant pings from your travel group chat")}
               </Text>
             </View>
             <Switch
               value={chatMessages && allPushEnabled}
-              onValueChange={handleToggleChatMessages}
+              onValueChange={(val) => handleTogglePreference("chatMessages", val)}
               disabled={!allPushEnabled}
               trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
               thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
@@ -365,14 +343,16 @@ export default function NotificationSettings() {
               <Ionicons name="time-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Reminders")}</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("Reminders")}
+              </Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
                 {t("Pack list alerts, check-in prompts")}
               </Text>
             </View>
             <Switch
               value={reminders && allPushEnabled}
-              onValueChange={handleToggleReminders}
+              onValueChange={(val) => handleTogglePreference("reminders", val)}
               disabled={!allPushEnabled}
               trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
               thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
@@ -387,14 +367,16 @@ export default function NotificationSettings() {
               <Ionicons name="sparkles-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Recommendations")}</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("Recommendations")}
+              </Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
                 {t("Curated cafes & local events nearby")}
               </Text>
             </View>
             <Switch
               value={recommendations && allPushEnabled}
-              onValueChange={handleToggleRecommendations}
+              onValueChange={(val) => handleTogglePreference("recommendations", val)}
               disabled={!allPushEnabled}
               trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
               thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
@@ -409,14 +391,16 @@ export default function NotificationSettings() {
               <Ionicons name="pricetag-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Promotions & Deals")}</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("Promotions & Deals")}
+              </Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
                 {t("Discounts on hostels, budget flights & events")}
               </Text>
             </View>
             <Switch
               value={promotions && allPushEnabled}
-              onValueChange={handleTogglePromotions}
+              onValueChange={(val) => handleTogglePreference("promotions", val)}
               disabled={!allPushEnabled}
               trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
               thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
@@ -425,37 +409,81 @@ export default function NotificationSettings() {
         </View>
 
         {/* ── 2. QUIET HOURS ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("QUIET HOURS")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 16 }]}>
+        <View style={styles.sectionHeadingWrap}>
+          <Text style={[styles.sectionHeading, { color: colors.sectionHeader, flex: 1 }]}>
+            {t("QUIET HOURS (DND)")}
+          </Text>
+          {doNotDisturb && (
+            <View
+              style={[
+                styles.dndStatusBadge,
+                {
+                  backgroundColor: quietHoursNow
+                    ? hexToRgba(colors.accent, 0.15)
+                    : isDark
+                    ? "#202024"
+                    : "#E5E7EB",
+                },
+              ]}
+            >
+              <Ionicons
+                name={quietHoursNow ? "moon" : "sunny-outline"}
+                size={11}
+                color={quietHoursNow ? colors.accent : colors.textSecondary}
+              />
+              <Text
+                style={[
+                  styles.dndStatusText,
+                  {
+                    color: quietHoursNow ? colors.accent : colors.textSecondary,
+                  },
+                ]}
+              >
+                {quietHoursNow ? "Active Now" : "Inactive"}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
           {/* Do Not Disturb Toggle */}
           <View style={styles.dndRow}>
             <View style={styles.dndTextWrap}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Do Not Disturb")}</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("Do Not Disturb")}
+              </Text>
               <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-                {t("Auto-silence non-critical trip pings")}
+                {t("Auto-silence non-critical trip pings during sleep")}
               </Text>
             </View>
             <Switch
               value={doNotDisturb}
-              onValueChange={handleToggleDoNotDisturb}
+              onValueChange={(val) => handleTogglePreference("doNotDisturb", val)}
               trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
               thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
             />
           </View>
 
           {/* Time Range Selector */}
-          <View style={[styles.timeRow, !doNotDisturb && { opacity: 0.45 }]} pointerEvents={doNotDisturb ? "auto" : "none"}>
+          <View
+            style={[styles.timeRow, !doNotDisturb && { opacity: 0.45 }]}
+            pointerEvents={doNotDisturb ? "auto" : "none"}
+          >
             {/* Silence From */}
             <Pressable
               style={({ pressed }) => [
                 styles.timeBox,
-                { backgroundColor: colors.timeBoxBg, borderColor: colors.cardBorder },
+                { backgroundColor: colors.timeBoxBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setShowTimeModal("from")}
             >
-              <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>SILENCE FROM</Text>
-              <Text style={[styles.timeValue, { color: colors.textPrimary }]}>{silenceFrom}</Text>
+              <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>
+                SILENCE FROM
+              </Text>
+              <Text style={[styles.timeValue, { color: colors.textPrimary }]}>
+                {silenceFrom}
+              </Text>
             </Pressable>
 
             <Text style={[styles.toLabel, { color: colors.textSecondary }]}>to</Text>
@@ -464,13 +492,109 @@ export default function NotificationSettings() {
             <Pressable
               style={({ pressed }) => [
                 styles.timeBox,
-                { backgroundColor: colors.timeBoxBg, borderColor: colors.cardBorder },
+                { backgroundColor: colors.timeBoxBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setShowTimeModal("until")}
             >
-              <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>SILENCE UNTIL</Text>
-              <Text style={[styles.timeValue, { color: colors.textPrimary }]}>{silenceUntil}</Text>
+              <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>
+                SILENCE UNTIL
+              </Text>
+              <Text style={[styles.timeValue, { color: colors.textPrimary }]}>
+                {silenceUntil}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {/* ── 3. TEST NOTIFICATION DISPATCHER (LIVE SIMULATOR) ── */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          TEST NOTIFICATIONS (LIVE SIMULATOR)
+        </Text>
+        <View style={[styles.card, { backgroundColor: colors.card, padding: 14 }]}>
+          <Text style={[styles.testIntroText, { color: colors.textSecondary }]}>
+            Tap any category below to simulate real-time notification dispatching. Rules,
+            DND hours, and category filters are evaluated live.
+          </Text>
+
+          <View style={styles.testGrid}>
+            <Pressable
+              onPress={() => handleTriggerTest("tripUpdates")}
+              disabled={testingCategory !== null}
+              style={({ pressed }) => [
+                styles.testPill,
+                { backgroundColor: colors.timeBoxBg },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons name="airplane-outline" size={16} color={colors.accent} />
+              <Text style={[styles.testPillText, { color: colors.textPrimary }]}>
+                Flight Alert
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => handleTriggerTest("chatMessages")}
+              disabled={testingCategory !== null}
+              style={({ pressed }) => [
+                styles.testPill,
+                { backgroundColor: colors.timeBoxBg },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons
+                name="chatbubble-ellipses-outline"
+                size={16}
+                color={colors.accent}
+              />
+              <Text style={[styles.testPillText, { color: colors.textPrimary }]}>
+                Chat Message
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => handleTriggerTest("reminders")}
+              disabled={testingCategory !== null}
+              style={({ pressed }) => [
+                styles.testPill,
+                { backgroundColor: colors.timeBoxBg },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons name="time-outline" size={16} color={colors.accent} />
+              <Text style={[styles.testPillText, { color: colors.textPrimary }]}>
+                Packing List
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => handleTriggerTest("recommendations")}
+              disabled={testingCategory !== null}
+              style={({ pressed }) => [
+                styles.testPill,
+                { backgroundColor: colors.timeBoxBg },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons name="sparkles-outline" size={16} color={colors.accent} />
+              <Text style={[styles.testPillText, { color: colors.textPrimary }]}>
+                Local Cafe
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => handleTriggerTest("promotions")}
+              disabled={testingCategory !== null}
+              style={({ pressed }) => [
+                styles.testPill,
+                { backgroundColor: colors.timeBoxBg },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons name="pricetag-outline" size={16} color={colors.accent} />
+              <Text style={[styles.testPillText, { color: colors.textPrimary }]}>
+                Hostel Deal
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -484,8 +608,20 @@ export default function NotificationSettings() {
         onRequestClose={() => setShowTimeModal(null)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
+            <View
+              style={[
+                styles.iconBox,
+                {
+                  backgroundColor: colors.iconBoxBg,
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  marginBottom: 10,
+                  marginRight: 0,
+                },
+              ]}
+            >
               <Ionicons name="time-outline" size={22} color={colors.greyishWhite} />
             </View>
 
@@ -496,10 +632,15 @@ export default function NotificationSettings() {
               Select the time to automatically start or stop quiet hours.
             </Text>
 
-            <ScrollView style={styles.timeListScroll} contentContainerStyle={styles.timeListGrid}>
+            <ScrollView
+              style={styles.timeListScroll}
+              contentContainerStyle={styles.timeListGrid}
+            >
               {TIME_OPTIONS.map((timeOption) => {
                 const isSelected =
-                  showTimeModal === "from" ? silenceFrom === timeOption : silenceUntil === timeOption;
+                  showTimeModal === "from"
+                    ? silenceFrom === timeOption
+                    : silenceUntil === timeOption;
                 return (
                   <Pressable
                     key={timeOption}
@@ -507,7 +648,6 @@ export default function NotificationSettings() {
                       styles.timeOptionPill,
                       {
                         backgroundColor: isSelected ? colors.accent : colors.timeBoxBg,
-                        borderColor: isSelected ? colors.accent : colors.cardBorder,
                       },
                       pressed && styles.pressed,
                     ]}
@@ -529,12 +669,14 @@ export default function NotificationSettings() {
             <Pressable
               style={({ pressed }) => [
                 styles.modalCloseBtn,
-                { borderColor: colors.cardBorder },
+                { backgroundColor: colors.timeBoxBg },
                 pressed && styles.pressed,
               ]}
               onPress={() => setShowTimeModal(null)}
             >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textSecondary }]}>Close</Text>
+              <Text style={[styles.modalCloseBtnText, { color: colors.textSecondary }]}>
+                Close
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -570,7 +712,15 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  inboxBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -586,8 +736,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 6,
     marginBottom: 6,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     paddingHorizontal: 18,
     paddingVertical: 16,
     flexDirection: "row",
@@ -597,7 +747,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 5,
-    elevation: 1,
+    elevation: 0,
   },
   heroTextWrap: {
     flex: 1,
@@ -615,6 +765,12 @@ const styles = StyleSheet.create({
   },
 
   // Section Heading matching Settings
+  sectionHeadingWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingRight: 22,
+  },
   sectionHeading: {
     fontSize: 12,
     fontWeight: "700",
@@ -623,18 +779,31 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     paddingHorizontal: 22,
   },
+  dndStatusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginTop: 14,
+  },
+  dndStatusText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
 
-  // Card matching modernCardGroup in Settings
+  // Card matching modernCardGroup in Settings (28px radius, zero border)
   card: {
     marginHorizontal: 20,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 5,
-    elevation: 1,
+    elevation: 0,
   },
 
   // Rows inside cards
@@ -691,8 +860,8 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    borderWidth: 0,
     alignItems: "center",
   },
   timeLabel: {
@@ -712,6 +881,30 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
+  // Test Simulator Styles
+  testIntroText: {
+    fontSize: 12.5,
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  testGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  testPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 16,
+  },
+  testPillText: {
+    fontSize: 12.5,
+    fontWeight: "600",
+  },
+
   // Modal styles
   modalOverlay: {
     flex: 1,
@@ -723,15 +916,15 @@ const styles = StyleSheet.create({
   modalCard: {
     width: "100%",
     maxWidth: 380,
-    borderRadius: 22,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 24,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
-    elevation: 8,
+    elevation: 0,
   },
   modalTitle: {
     fontSize: 18,
@@ -760,8 +953,8 @@ const styles = StyleSheet.create({
   timeOptionPill: {
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
+    borderRadius: 18,
+    borderWidth: 0,
     minWidth: "46%",
     alignItems: "center",
   },
@@ -772,8 +965,8 @@ const styles = StyleSheet.create({
   modalCloseBtn: {
     width: "100%",
     height: 44,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 24,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },

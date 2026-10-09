@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -24,6 +24,8 @@ import {
 
 import { useUser } from "../contexts/UserContext";
 import { auth, db } from "../lib/firebase";
+import { useThemeToggle } from "../contexts/ThemeContext";
+import { SkeletonLoadingScreen } from "../components/ui/SkeletonLoadingScreen";
 
 type ProfileData = {
   name?: string;
@@ -38,6 +40,7 @@ type ProfileData = {
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, loading: authLoading } = useUser();
+  const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
   const { width, height } = useWindowDimensions();
 
   const [loading, setLoading] = useState(true);
@@ -176,11 +179,7 @@ export default function ProfileScreen() {
   };
 
   if (authLoading || loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#ffffff" />
-      </View>
-    );
+    return <SkeletonLoadingScreen title="Profile" showAvatarCard={true} itemCount={3} />;
   }
 
   const displayName =
@@ -215,7 +214,7 @@ export default function ProfileScreen() {
     "https://i.pravatar.cc/600?img=12";
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={[

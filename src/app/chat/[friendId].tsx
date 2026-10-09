@@ -20,8 +20,10 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useChatSettings, wallpaperList } from "../../contexts/ChatSettingsContext";
 import { useCall } from "../../contexts/CallContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
+import * as Sharing from "expo-sharing";
 import {
   collection,
   addDoc,
@@ -45,8 +47,22 @@ export default function ChatRoom() {
   const router = useRouter();
   const { user, userData } = useUser();
   const { startCall } = useCall();
+  const { isDark, themeColors, scaleFont } = useThemeToggle();
 
-  const { wallpaper, fontSize, theme: chatTheme } = useChatSettings();
+  const {
+    wallpaper,
+    fontSize,
+    theme: chatTheme,
+    enterIsSend,
+    readReceipts,
+    typingIndicator,
+    autoDownloadMedia,
+    saveToGallery,
+    linkPreviews,
+    disappearingTimer,
+    clearedAt,
+  } = useChatSettings();
+
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState("");
   const [friendData, setFriendData] = useState<any>(null);
@@ -59,6 +75,11 @@ export default function ChatRoom() {
 
   const [pendingImage, setPendingImage] = useState<{ uri: string; base64: string } | null>(null);
   const [reactionMsg, setReactionMsg] = useState<any | null>(null);
+
+  // Industry-level Chat States: Typing & Data Saver
+  const [isFriendTyping, setIsFriendTyping] = useState(false);
+  const [downloadedMediaMap, setDownloadedMediaMap] = useState<Record<string, boolean>>({});
+  const typingTimeoutRef = useRef<any>(null);
 
   let friendId = rawId as string;
   if (friendId?.includes("_") && user) {
@@ -100,26 +121,103 @@ export default function ChatRoom() {
     return () => unsub();
   }, [friendId]);
 
+  // Typing indicator listener
+  useEffect(() => {
+    if (!chatId || !friendId || !typingIndicator) {
+      setIsFriendTyping(false);
+      return;
+    }
+    const unsub = onSnapshot(doc(db, "chats", chatId, "typing", friendId), (snap) => {
+      if (snap.exists()) {
+        const d: any = snap.data();
+        const isRecent = d.updatedAt && Date.now() - d.updatedAt < 4000;
+        setIsFriendTyping(!!d.isTyping && isRecent);
+      } else {
+        setIsFriendTyping(false);
+      }
+    });
+    return () => unsub();
+  }, [chatId, friendId, typingIndicator]);
+
+  // Messages real-time listener with clearedAt & disappearing filtering
   useEffect(() => {
     if (!chatId || !user) return;
     const q = query(collection(db, "chats", chatId, "messages"), orderBy("timestamp", "asc"), limit(300));
     const unsub = onSnapshot(q, (snapshot) => {
+      const now = Date.now();
+      const clearedTime = clearedAt ? new Date(clearedAt).getTime() : 0;
       const msgs: any[] = [];
-      snapshot.forEach((docSnap) => msgs.push({ id: docSnap.id, ...docSnap.data() }));
+
+      snapshot.forEach((docSnap) => {
+        const data: any = docSnap.data();
+        const msgTime = data.timestamp?.seconds ? data.timestamp.seconds * 1000 : now;
+        // Filter out cleared messages
+        if (clearedTime && msgTime < clearedTime) return;
+        // Filter out expired disappearing messages
+        if (data.expiresAt && data.expiresAt < now) return;
+        msgs.push({ id: docSnap.id, ...data });
+      });
+
       setMessages(msgs);
 
-      msgs.forEach(async (msg) => {
-        if (msg.senderId !== user.uid && !msg.isRead) {
-          await updateDoc(doc(db, "chats", chatId, "messages", msg.id), { isRead: true }).catch(() => {});
-        }
-      });
+      // Only mark as read if readReceipts is enabled
+      if (readReceipts) {
+        msgs.forEach(async (msg) => {
+          if (msg.senderId !== user.uid && !msg.isRead) {
+            await updateDoc(doc(db, "chats", chatId, "messages", msg.id), { isRead: true }).catch(() => {});
+          }
+        });
+      }
 
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
     });
     return () => unsub();
-  }, [chatId]);
+  }, [chatId, readReceipts, clearedAt]);
+
+  const getDisappearingExpiresAt = () => {
+    const nowMs = Date.now();
+    if (disappearingTimer === "24h") return nowMs + 24 * 3600 * 1000;
+    if (disappearingTimer === "7d") return nowMs + 7 * 24 * 3600 * 1000;
+    if (disappearingTimer === "30d") return nowMs + 30 * 24 * 3600 * 1000;
+    if (disappearingTimer === "90d") return nowMs + 90 * 24 * 60 * 60 * 1000;
+    return null;
+  };
+
+  const handleInputChange = (text: string) => {
+    setInput(text);
+    if (!typingIndicator || !chatId || !user) return;
+
+    setDoc(
+      doc(db, "chats", chatId, "typing", user.uid),
+      { isTyping: true, updatedAt: Date.now() },
+      { merge: true }
+    ).catch(() => {});
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      setDoc(
+        doc(db, "chats", chatId, "typing", user.uid),
+        { isTyping: false, updatedAt: Date.now() },
+        { merge: true }
+      ).catch(() => {});
+    }, 2500);
+  };
+
+  const handleSaveImageToDevice = async (imgUri: string | null) => {
+    if (!imgUri) return;
+    try {
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(imgUri);
+      } else {
+        Alert.alert("Image Saved", "Image URL copied to clipboard.");
+        await Clipboard.setStringAsync(imgUri);
+      }
+    } catch (e: any) {
+      Alert.alert("Notice", e?.message || "Could not open share/save modal");
+    }
+  };
 
   const sendMessage = async () => {
     if (!input.trim() || !chatId || !user) return;
@@ -127,12 +225,25 @@ export default function ChatRoom() {
     setInput("");
     setReplyTo(null);
 
+    // Clear typing in Firestore
+    if (typingIndicator) {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      setDoc(
+        doc(db, "chats", chatId, "typing", user.uid),
+        { isTyping: false, updatedAt: Date.now() },
+        { merge: true }
+      ).catch(() => {});
+    }
+
+    const expiresAt = getDisappearingExpiresAt();
+
     try {
       await addDoc(collection(db, "chats", chatId, "messages"), {
         text: messageText,
         senderId: user.uid,
         timestamp: serverTimestamp(),
         isRead: false,
+        expiresAt,
         replyTo: replyTo
           ? {
               text: replyTo.text,
@@ -198,6 +309,8 @@ export default function ChatRoom() {
     setPendingImage(null);
     setUploading(true);
 
+    const expiresAt = getDisappearingExpiresAt();
+
     try {
       const storage = getStorage();
       const filename = `chat_images/${chatId}/${Date.now()}.jpg`;
@@ -215,6 +328,7 @@ export default function ChatRoom() {
         senderId: user.uid,
         timestamp: serverTimestamp(),
         isRead: false,
+        expiresAt,
       });
 
       await updateDoc(doc(db, "chats", chatId), {
@@ -373,12 +487,24 @@ export default function ChatRoom() {
                 </View>
               )}
 
+              {/* Media Image with Auto-Download Data Saver */}
               {item.imageUrl && !item.deleted && (
-                <Pressable onPress={() => setSelectedImage(item.imageUrl)}>
-                  <Image source={{ uri: item.imageUrl }} style={styles.chatImage} resizeMode="cover" />
-                </Pressable>
+                autoDownloadMedia || downloadedMediaMap[item.id] || isOwn ? (
+                  <Pressable onPress={() => setSelectedImage(item.imageUrl)}>
+                    <Image source={{ uri: item.imageUrl }} style={styles.chatImage} resizeMode="cover" />
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    onPress={() => setDownloadedMediaMap((prev) => ({ ...prev, [item.id]: true }))}
+                    style={styles.dataSaverMediaCard}
+                  >
+                    <Ionicons name="arrow-down-circle-outline" size={30} color="#FFFFFF" />
+                    <Text style={styles.dataSaverMediaText}>Tap to load photo • Data Saver</Text>
+                  </Pressable>
+                )
               )}
 
+              {/* Message Text */}
               {item.text || item.deleted ? (
                 <Text
                   style={{
@@ -392,6 +518,34 @@ export default function ChatRoom() {
                 </Text>
               ) : null}
 
+              {/* Rich Link Preview Card */}
+              {linkPreviews && item.text && !item.deleted && (() => {
+                const urlMatch = item.text.match(/https?:\/\/[^\s]+/i);
+                if (!urlMatch) return null;
+                const linkUrl = urlMatch[0];
+                let hostname = "Link";
+                try {
+                  hostname = linkUrl.replace(/https?:\/\//i, "").split("/")[0];
+                } catch {}
+                return (
+                  <Pressable
+                    style={styles.linkCard}
+                    onPress={() => Linking.openURL(linkUrl).catch(() => {})}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Ionicons name="link" size={13} color="#38BDF8" />
+                      <Text style={styles.linkDomainText} numberOfLines={1}>
+                        {hostname}
+                      </Text>
+                      <Ionicons name="open-outline" size={12} color="#94A3B8" />
+                    </View>
+                    <Text style={styles.linkUrlText} numberOfLines={1}>
+                      {linkUrl}
+                    </Text>
+                  </Pressable>
+                );
+              })()}
+
               <View style={styles.metaRow}>
                 <Text style={styles.timeText}>
                   {item.timestamp?.seconds
@@ -402,11 +556,12 @@ export default function ChatRoom() {
                       })
                     : ""}
                 </Text>
+                {/* Industry-level Read Receipts Checkmark */}
                 {isOwn && (
                   <Ionicons
-                    name="checkmark-done"
+                    name={readReceipts && item.isRead ? "checkmark-done" : "checkmark"}
                     size={14}
-                    color={item.isRead ? "#4fc3f7" : "#667781"}
+                    color={readReceipts && item.isRead ? "#38BDF8" : "#8E8E93"}
                     style={{ marginLeft: 4 }}
                   />
                 )}
@@ -425,22 +580,21 @@ export default function ChatRoom() {
     );
   };
 
-  const backgroundUri =
-    wallpaper === "default"
-      ? "https://i.ibb.co/C0f9vH9/dark-wave-bg.png"
-      : wallpaperList.find((w) => w.id === wallpaper)?.uri ||
-        "https://i.ibb.co/C0f9vH9/dark-wave-bg.png";
+  const selectedWallpaper = wallpaperList.find((w) => w.id === wallpaper);
+  const isCustomWallpaper = wallpaper !== "default" && !!selectedWallpaper?.uri;
 
   const isDarkChat =
     chatTheme === "dark" ||
-    (chatTheme === "system" && Appearance.getColorScheme() === "dark");
+    (chatTheme === "system" && (isDark ?? Appearance.getColorScheme() === "dark"));
 
-  return (
-    <ImageBackground source={{ uri: backgroundUri }} style={[styles.container, { backgroundColor: isDarkChat ? "#0b141a" : "#f4f4f4" }]}>
+  const chatBgColor = isDarkChat ? "#0b141a" : "#f4f4f4";
+
+  const renderChatContent = () => (
+    <>
       <StatusBar barStyle="light-content" backgroundColor="#0b141a" translucent={true} />
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        {/* HEADER matching Screenshot 1 */}
+        {/* HEADER */}
         <View style={styles.header}>
           <Pressable style={styles.circleBtn} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={20} color="white" />
@@ -458,9 +612,21 @@ export default function ChatRoom() {
               <Text style={styles.userName} numberOfLines={1}>
                 {friendData?.displayName || friendData?.name || friendData?.username || "BunkMate"}
               </Text>
-              <Text style={styles.userHandle} numberOfLines={1}>
-                @{friendData?.username || "traveler"}
-              </Text>
+              {isFriendTyping ? (
+                <Text style={{ color: "#10B981", fontSize: 11.5, fontWeight: "600" }}>typing...</Text>
+              ) : (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                  <Text style={styles.userHandle} numberOfLines={1}>
+                    @{friendData?.username || "traveler"}
+                  </Text>
+                  {disappearingTimer !== "off" && (
+                    <View style={styles.timerPill}>
+                      <Ionicons name="timer-outline" size={10} color="#10B981" />
+                      <Text style={styles.timerPillText}>{disappearingTimer}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
             </View>
           </Pressable>
 
@@ -479,7 +645,7 @@ export default function ChatRoom() {
           data={messages}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 16 }}
+          contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 20 }}
           showsVerticalScrollIndicator={false}
         />
 
@@ -499,7 +665,7 @@ export default function ChatRoom() {
           </View>
         )}
 
-        {/* INPUT BAR matching Screenshot 1 */}
+        {/* INPUT BAR */}
         <View style={styles.inputArea}>
           <Pressable style={styles.cameraCircleBtn} onPress={pickImage} disabled={uploading}>
             {uploading ? (
@@ -512,11 +678,14 @@ export default function ChatRoom() {
           <View style={styles.inputContainer}>
             <TextInput
               value={input}
-              onChangeText={setInput}
+              onChangeText={handleInputChange}
               placeholder="Type your message..."
               placeholderTextColor="#777777"
               style={styles.textInput}
-              multiline
+              multiline={!enterIsSend}
+              blurOnSubmit={enterIsSend}
+              onSubmitEditing={enterIsSend ? sendMessage : undefined}
+              returnKeyType={enterIsSend ? "send" : "default"}
             />
           </View>
 
@@ -597,9 +766,19 @@ export default function ChatRoom() {
       {/* FULL SCREEN IMAGE VIEWER */}
       <Modal visible={!!selectedImage} transparent animationType="fade" onRequestClose={() => setSelectedImage(null)}>
         <View style={styles.modalContainer}>
-          <Pressable style={styles.closeModalButton} onPress={() => setSelectedImage(null)}>
-            <Ionicons name="close" size={28} color="white" />
-          </Pressable>
+          <View style={styles.modalTopBar}>
+            {saveToGallery && selectedImage ? (
+              <Pressable
+                style={styles.downloadModalButton}
+                onPress={() => handleSaveImageToDevice(selectedImage)}
+              >
+                <Ionicons name="download-outline" size={24} color="white" />
+              </Pressable>
+            ) : <View />}
+            <Pressable style={styles.closeModalButton} onPress={() => setSelectedImage(null)}>
+              <Ionicons name="close" size={28} color="white" />
+            </Pressable>
+          </View>
           {selectedImage && (
             <Image source={{ uri: selectedImage }} style={styles.fullScreenImage} resizeMode="contain" />
           )}
@@ -639,7 +818,25 @@ export default function ChatRoom() {
           }
         }}
       />
-    </ImageBackground>
+    </>
+  );
+
+  if (isCustomWallpaper && selectedWallpaper?.uri) {
+    return (
+      <ImageBackground
+        source={{ uri: selectedWallpaper.uri }}
+        style={[styles.container, { backgroundColor: chatBgColor }]}
+        resizeMode="cover"
+      >
+        {renderChatContent()}
+      </ImageBackground>
+    );
+  }
+
+  return (
+    <View style={[styles.container, { backgroundColor: chatBgColor }]}>
+      {renderChatContent()}
+    </View>
   );
 }
 
@@ -914,5 +1111,72 @@ const styles = StyleSheet.create({
     color: "#00e6b0",
     fontSize: 11,
     fontWeight: "700",
+  },
+  timerPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  timerPillText: {
+    color: "#10B981",
+    fontSize: 9.5,
+    fontWeight: "700",
+  },
+  dataSaverMediaCard: {
+    width: 220,
+    height: 140,
+    borderRadius: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.35)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+  dataSaverMediaText: {
+    color: "#E2E8F0",
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  linkCard: {
+    marginTop: 6,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.25)",
+    borderWidth: 1,
+    borderColor: "rgba(56, 189, 248, 0.25)",
+  },
+  linkDomainText: {
+    color: "#38BDF8",
+    fontSize: 11,
+    fontWeight: "700",
+    flex: 1,
+  },
+  linkUrlText: {
+    color: "#94A3B8",
+    fontSize: 10,
+    marginTop: 2,
+  },
+  modalTopBar: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 50 : (StatusBar.currentHeight || 30) + 10,
+    left: 20,
+    right: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    zIndex: 10,
+  },
+  downloadModalButton: {
+    padding: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: 20,
   },
 });

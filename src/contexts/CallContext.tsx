@@ -9,6 +9,7 @@ import React, {
 } from "react";
 import { Alert, Platform } from "react-native";
 import * as Haptics from "expo-haptics";
+import { triggerAppHaptic } from "./AppSettingsContext";
 import { Camera } from "expo-camera";
 import {
   collection,
@@ -147,11 +148,16 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     activeCallRef.current = activeCall;
   }, [activeCall]);
-
   const triggerHaptic = useCallback(
     (style: Haptics.ImpactFeedbackStyle = Haptics.ImpactFeedbackStyle.Medium) => {
       try {
-        Haptics.impactAsync(style);
+        if (style === Haptics.ImpactFeedbackStyle.Light) {
+          triggerAppHaptic("light");
+        } else if (style === Haptics.ImpactFeedbackStyle.Heavy) {
+          triggerAppHaptic("heavy");
+        } else {
+          triggerAppHaptic("medium");
+        }
       } catch (e) {}
     },
     []
