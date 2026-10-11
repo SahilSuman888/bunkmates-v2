@@ -3,7 +3,7 @@ import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
-import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, serverTimestamp, deleteField } from 'firebase/firestore';
 import { loginOneSignalUser, logoutOneSignalUser } from '../lib/onesignal';
 
 interface UserContextType {
@@ -50,6 +50,10 @@ export const UserProvider = ({ children }: UserProviderProps) => {
   useEffect(() => {
     if (user?.uid) {
       loginOneSignalUser(user.uid);
+      // Clean up legacy expoPushToken so Cloud Functions never double-push
+      updateDoc(doc(db, 'users', user.uid), {
+        expoPushToken: deleteField(),
+      }).catch(() => {});
     } else if (!loading && !user) {
       logoutOneSignalUser();
     }

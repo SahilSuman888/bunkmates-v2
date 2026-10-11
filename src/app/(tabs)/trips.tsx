@@ -17,6 +17,8 @@ import {
   Linking,
   PanResponder,
   Easing,
+  LayoutAnimation,
+  UIManager,
 } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import * as FileSystem from "expo-file-system";
@@ -37,6 +39,7 @@ import {
 } from "firebase/firestore";
 import { db, auth } from "../../lib/firebase";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import NotificationBell from "../../components/NotificationBell";
 import CreateTripSheet from "../../components/trips/CreateTripSheet";
 import ConfirmDeleteDialog from "../../components/trip_components/ConfirmDeleteDialog";
@@ -47,6 +50,7 @@ import Svg, { Circle } from "react-native-svg";
 import { useUserGroups } from "../../hooks/useUserGroups";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const SUGGESTED_CARD_WIDTH = Math.floor((SCREEN_WIDTH - 42) / 2);
 
 /* ──────── Types ──────── */
 
@@ -80,12 +84,38 @@ interface TripData {
   timelineProgress?: number;
 }
 
+interface CalendarReminder {
+  id: string;
+  text: string;
+  date: string; // YYYY-MM-DD or date string
+  time?: string;
+  completed?: boolean;
+  tripId?: string;
+  tripName?: string;
+}
+
 /* ──────── Helpers ──────── */
 
 const isSameDay = (d1: Date, d2: Date) =>
   d1.getFullYear() === d2.getFullYear() &&
   d1.getMonth() === d2.getMonth() &&
   d1.getDate() === d2.getDate();
+
+const formatDateKey = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+const isSameDateString = (date: Date, dateStr?: string) => {
+  if (!dateStr) return false;
+  const key = formatDateKey(date);
+  if (dateStr === key || dateStr.startsWith(key)) return true;
+  const parsed = new Date(dateStr);
+  if (!isNaN(parsed.getTime())) return isSameDay(date, parsed);
+  return false;
+};
 
 const getTripAccent = (id: string) => {
   const colors = ["#ffffff", "#e2e8f0", "#FBBF24"];
@@ -166,6 +196,9 @@ const getFallbackImage = (location?: string, name?: string) => {
   return "https://images.unsplash.com/photo-1530507629858-e4977d30e9e0?q=80&w=800&auto=format&fit=crop";
 };
 
+const memoryCachedTrips: Record<string, TripData[]> = {};
+const memoryCachedCalendarReminders: Record<string, CalendarReminder[]> = {};
+
 /* ════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ════════════════════════════════════════════════════════════════════ */
@@ -179,10 +212,14 @@ export default function TripsScreen() {
   // Real-time group chats hook (already manages groupChats for current user)
   const { groups = [] } = useUserGroups(user?.uid || null) || {};
 
-  /* ── State ── */
-  const [trips, setTrips] = useState<TripData[]>([]);
+  /* ── State (0ms instant render from memory cache) ── */
+  const [trips, setTrips] = useState<TripData[]>(() => {
+    return (user?.uid && memoryCachedTrips[user.uid]) || [];
+  });
   const [directGroupIcons, setDirectGroupIcons] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => {
+    return !(user?.uid && memoryCachedTrips[user.uid]?.length);
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [filterPlace, setFilterPlace] = useState("");
@@ -210,20 +247,43 @@ export default function TripsScreen() {
   const modalScrollOffset = useRef(0);
   const mainScrollY = useRef(new Animated.Value(0)).current;
 
-  /* ── Calendar Drawer (Instagram Stories Archive style) ── */
+  // Dynamic blur opacity: 0 when at top, smoothly fades in as user scrolls
+  const headerBlurOpacity = useMemo(() => {
+    return mainScrollY.interpolate({
+      inputRange: [0, 20, 65],
+      outputRange: [0, 0.7, 1],
+      extrapolate: "clamp",
+    });
+  }, [mainScrollY]);
+
+  /* ── Calendar Drawer & Google Calendar Reminders State ── */
   const [calendarDrawerOpen, setCalendarDrawerOpen] = useState(false);
   const [archiveMonthOffset, setArchiveMonthOffset] = useState(0);
+  const [selectedArchiveDate, setSelectedArchiveDate] = useState<Date>(new Date());
   const [selectedArchiveTrip, setSelectedArchiveTrip] = useState<TripData | null>(null);
+  const [calendarReminders, setCalendarReminders] = useState<CalendarReminder[]>(() => {
+    return (user?.uid && memoryCachedCalendarReminders[user.uid]) || [];
+  });
+  const [newReminderModalOpen, setNewReminderModalOpen] = useState(false);
+  const [newReminderText, setNewReminderText] = useState("");
+  const [newReminderTime, setNewReminderTime] = useState("10:00 AM");
+  const [newReminderTripId, setNewReminderTripId] = useState("");
+  const [monthYearPickerOpen, setMonthYearPickerOpen] = useState(false);
+  const [pickerSelectedYear, setPickerSelectedYear] = useState(new Date().getFullYear());
   const calendarDrawerAnim = useRef(new Animated.Value(0)).current;
   const calendarDrawerPanY = useRef(new Animated.Value(0)).current;
   const calendarDrawerScrollOffset = useRef(0);
 
-  /* ── AI Suggested Trips State ── */
-  const [suggestedModalOpen, setSuggestedModalOpen] = useState(false);
-  const [visibleSuggestedCount, setVisibleSuggestedCount] = useState(3);
+  /* ── Calendar Pull Down & Framer Motion Drag Physics ── */
+  const [mainScrollEnabled, setMainScrollEnabled] = useState(true);
+  const [isPullingCalendar, setIsPullingCalendar] = useState(false);
+  const calPullAnim = useRef(new Animated.Value(0)).current;
+
+  /* ── AI Suggested Trips State (Inline Grid View) ── */
+  const [suggestedExpanded, setSuggestedExpanded] = useState(false);
+  const [visibleSuggestedCount, setVisibleSuggestedCount] = useState(4);
   const [prefilledTripData, setPrefilledTripData] = useState<any>(null);
-  const suggestedModalAnim = useRef(new Animated.Value(0)).current;
-  const suggestedPanY = useRef(new Animated.Value(0)).current;
+  const mainScrollRef = useRef<any>(null);
 
   /* ── Open create sheet from params ── */
   useEffect(() => {
@@ -242,6 +302,50 @@ export default function TripsScreen() {
     });
   }, [user?.uid]);
 
+  /* ── Realtime Reminders Subscription for Travel Calendar (0ms Offline Hydration) ── */
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    AsyncStorage.getItem(`bunkmate.cachedCalendarReminders.${user.uid}`).then((cached) => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            memoryCachedCalendarReminders[user.uid] = parsed;
+            setCalendarReminders(parsed);
+          }
+        } catch { }
+      }
+    });
+
+    const q = query(collection(db, "reminders"), where("uid", "==", user.uid));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const list: CalendarReminder[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() || {};
+          list.push({
+            id: docSnap.id,
+            text: d.text || d.title || "Reminder",
+            date: d.date || "",
+            time: d.time || "10:00 AM",
+            completed: !!d.completed,
+            tripId: d.tripId || "",
+            tripName: d.tripName || "",
+          });
+        });
+        memoryCachedCalendarReminders[user.uid] = list;
+        setCalendarReminders(list);
+        AsyncStorage.setItem(`bunkmate.cachedCalendarReminders.${user.uid}`, JSON.stringify(list)).catch(() => { });
+      },
+      (err) => {
+        console.log("Reminders subscription error:", err);
+      }
+    );
+    return () => unsubscribe();
+  }, [user?.uid]);
+
   /* ── Realtime Firestore Subscription for Trips with Offline Resilience ── */
   useEffect(() => {
     if (!user?.uid) {
@@ -255,6 +359,7 @@ export default function TripsScreen() {
         try {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
+            memoryCachedTrips[user.uid] = parsed;
             setTrips(parsed);
             setLoading(false);
           }
@@ -262,115 +367,151 @@ export default function TripsScreen() {
       }
     });
 
-    setLoading(true);
+    if (!trips.length && !memoryCachedTrips[user.uid]?.length) {
+      setLoading(true);
+    }
+
     const q = query(collection(db, "trips"), where("members", "array-contains", user.uid));
 
     const unsubscribe = onSnapshot(
       q,
-      async (snapshot) => {
-        const fetchedTrips = await Promise.all(
-          snapshot.docs.map(async (docSnap) => {
-            const data = docSnap.data() || {};
-            const trip: TripData = {
-              id: docSnap.id,
-              name: data.name || "Untitled Trip",
-              from: data.from || "",
-              to: data.to || "",
-              location:
-                data.location ||
-                (data.from && data.to
-                  ? `${data.from}, ${data.to?.split(",")[0]?.trim() || data.to}`
-                  : "Destination"),
-              startDate: data.startDate || "",
-              endDate: data.endDate || "",
-              travelType: data.travelType || "Adventure",
-              members: data.members || [user.uid],
-              iconURL: data.iconURL || data.coverImage || data.image || data.photoURL || "",
+      (snapshot) => {
+        // FAST-PATH: Render primary trip cards immediately without waiting for secondary queries
+        const fastTrips: TripData[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() || {};
+          return {
+            id: docSnap.id,
+            name: data.name || "Untitled Trip",
+            from: data.from || "",
+            to: data.to || "",
+            location:
+              data.location ||
+              (data.from && data.to
+                ? `${data.from}, ${data.to?.split(",")[0]?.trim() || data.to}`
+                : "Destination"),
+            startDate: data.startDate || "",
+            endDate: data.endDate || "",
+            travelType: data.travelType || "Adventure",
+            members: data.members || [user.uid],
+            iconURL: data.iconURL || data.coverImage || data.image || data.photoURL || "",
+            budget: data.budget ? { total: parseFloat(data.budget) || 0, used: 0, expensesCount: 0 } : null,
+            memberProfiles: [],
+            timelineStats: { total: 1, completed: 0 },
+            timelineProgress: 0,
+          };
+        });
+
+        // Merge with existing trips to retain any previously loaded budgets/profiles
+        setTrips((prevTrips) => {
+          const prevMap = new Map(prevTrips.map((t) => [t.id, t]));
+          const merged = fastTrips.map((ft) => {
+            const existing = prevMap.get(ft.id);
+            if (!existing) return ft;
+            return {
+              ...ft,
+              budget: existing.budget || ft.budget,
+              memberProfiles: existing.memberProfiles?.length ? existing.memberProfiles : ft.memberProfiles,
+              timelineStats: existing.timelineStats || ft.timelineStats,
+              timelineProgress: existing.timelineProgress ?? ft.timelineProgress,
+              iconURL: existing.iconURL || ft.iconURL,
             };
-
-            // Direct fetch from groupChats for this trip ID
-            try {
-              const gSnap = await getDoc(doc(db, "groupChats", trip.id));
-              if (gSnap.exists()) {
-                const gd = gSnap.data();
-                const icon =
-                  gd.iconURL ||
-                  gd.photoURL ||
-                  gd.groupChatIcon ||
-                  gd.groupIcon ||
-                  gd.imageBackgroundUrl ||
-                  "";
-                if (icon) {
-                  setDirectGroupIcons((prev) => ({ ...prev, [trip.id]: icon }));
-                  trip.iconURL = icon;
-                }
-              }
-            } catch (err) {
-              console.log("Direct groupChat fetch error:", err);
-            }
-
-            // Fetch budget
-            try {
-              const budgetSnap = await getDoc(doc(db, "budgets", trip.id));
-              if (budgetSnap.exists()) {
-                const bData = budgetSnap.data();
-                const expenses = Array.isArray(bData.expenses) ? bData.expenses : [];
-                const used = expenses.reduce((sum: number, e: any) => sum + (parseFloat(e.amount) || 0), 0);
-                const total = parseFloat(bData.total) || parseFloat(data.budget) || 0;
-                trip.budget = { total, used, expensesCount: expenses.length };
-              } else if (data.budget) {
-                trip.budget = { total: parseFloat(data.budget) || 0, used: 0, expensesCount: 0 };
-              }
-            } catch {
-              trip.budget = null;
-            }
-
-            // Fetch member profiles
-            try {
-              const profiles = await Promise.all(
-                (trip.members || []).slice(0, 6).map(async (uid) => {
-                  const uSnap = await getDoc(doc(db, "users", uid));
-                  if (uSnap.exists()) {
-                    const uData = uSnap.data();
-                    return {
-                      uid: uSnap.id,
-                      name: uData.name || uData.displayName || "User",
-                      username: uData.username || "user",
-                      photoURL: uData.photoURL || `https://api.dicebear.com/7.x/identicon/svg?seed=${uid}`,
-                    };
-                  }
-                  return {
-                    uid,
-                    name: "Traveler",
-                    username: "traveler",
-                    photoURL: `https://api.dicebear.com/7.x/identicon/svg?seed=${uid}`,
-                  };
-                })
-              );
-              trip.memberProfiles = profiles;
-            } catch {
-              trip.memberProfiles = [];
-            }
-
-            // Fetch timeline stats
-            try {
-              const timelineSnap = await getDocs(collection(db, "trips", trip.id, "timeline"));
-              const events = timelineSnap.docs.map((d) => d.data());
-              const total = events.length || 1;
-              const completed = events.filter((e: any) => e?.completed === true).length;
-              trip.timelineStats = { total, completed };
-              trip.timelineProgress = Math.round((completed / total) * 100);
-            } catch {
-              trip.timelineStats = { total: 1, completed: 0 };
-              trip.timelineProgress = 0;
-            }
-
-            return trip;
-          })
-        );
-        setTrips(fetchedTrips);
+          });
+          memoryCachedTrips[user.uid] = merged;
+          return merged;
+        });
         setLoading(false);
-        AsyncStorage.setItem(`bunkmate.cachedTrips.${user.uid}`, JSON.stringify(fetchedTrips)).catch(() => { });
+
+        // BACKGROUND ENRICHMENT: Fetch group icons, budgets, member profiles, and timeline asynchronously
+        (async () => {
+          try {
+            const enrichedTrips = await Promise.all(
+              fastTrips.map(async (trip) => {
+                const tripCopy = { ...trip };
+
+                // Direct fetch from groupChats for this trip ID
+                try {
+                  const gSnap = await getDoc(doc(db, "groupChats", tripCopy.id));
+                  if (gSnap.exists()) {
+                    const gd = gSnap.data();
+                    const icon =
+                      gd.iconURL ||
+                      gd.photoURL ||
+                      gd.groupChatIcon ||
+                      gd.groupIcon ||
+                      gd.imageBackgroundUrl ||
+                      "";
+                    if (icon) {
+                      setDirectGroupIcons((prev) => ({ ...prev, [tripCopy.id]: icon }));
+                      tripCopy.iconURL = icon;
+                    }
+                  }
+                } catch (err) { }
+
+                // Fetch budget
+                try {
+                  const budgetSnap = await getDoc(doc(db, "budgets", tripCopy.id));
+                  if (budgetSnap.exists()) {
+                    const bData = budgetSnap.data();
+                    const expenses = Array.isArray(bData.expenses) ? bData.expenses : [];
+                    const used = expenses.reduce((sum: number, e: any) => sum + (parseFloat(e.amount) || 0), 0);
+                    const total = parseFloat(bData.total) || (tripCopy.budget?.total || 0);
+                    tripCopy.budget = { total, used, expensesCount: expenses.length };
+                  }
+                } catch { }
+
+                // Fetch member profiles
+                try {
+                  const profiles = await Promise.all(
+                    (tripCopy.members || []).slice(0, 6).map(async (uid) => {
+                      try {
+                        const uSnap = await getDoc(doc(db, "users", uid));
+                        if (uSnap.exists()) {
+                          const uData = uSnap.data();
+                          return {
+                            uid: uSnap.id,
+                            name: uData.name || uData.displayName || "User",
+                            username: uData.username || "user",
+                            photoURL: uData.photoURL || `https://api.dicebear.com/7.x/identicon/svg?seed=${uid}`,
+                          };
+                        }
+                      } catch { }
+                      return {
+                        uid,
+                        name: "Traveler",
+                        username: "traveler",
+                        photoURL: `https://api.dicebear.com/7.x/identicon/svg?seed=${uid}`,
+                      };
+                    })
+                  );
+                  tripCopy.memberProfiles = profiles;
+                } catch {
+                  tripCopy.memberProfiles = [];
+                }
+
+                // Fetch timeline stats
+                try {
+                  const timelineSnap = await getDocs(collection(db, "trips", tripCopy.id, "timeline"));
+                  const events = timelineSnap.docs.map((d) => d.data());
+                  const total = events.length || 1;
+                  const completed = events.filter((e: any) => e?.completed === true).length;
+                  tripCopy.timelineStats = { total, completed };
+                  tripCopy.timelineProgress = Math.round((completed / total) * 100);
+                } catch {
+                  tripCopy.timelineStats = { total: 1, completed: 0 };
+                  tripCopy.timelineProgress = 0;
+                }
+
+                return tripCopy;
+              })
+            );
+
+            memoryCachedTrips[user.uid] = enrichedTrips;
+            setTrips(enrichedTrips);
+            AsyncStorage.setItem(`bunkmate.cachedTrips.${user.uid}`, JSON.stringify(enrichedTrips)).catch(() => { });
+          } catch (enrichErr) {
+            console.log("Background trip enrichment error:", enrichErr);
+          }
+        })();
       },
       () => setLoading(false)
     );
@@ -861,19 +1002,61 @@ export default function TripsScreen() {
     extrapolate: "clamp",
   });
 
-  /* ── Calendar Drawer (Instagram Stories Archive style) Handlers ── */
+  /* ── Calendar Drawer & Reminders Handlers ── */
+  const getTripForArchiveDate = useCallback(
+    (date: Date): TripData | null => {
+      const target = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+      return (
+        trips.find((t) => {
+          if (!t.startDate) return false;
+          const st = parseFlexibleDate(t.startDate);
+          if (!st) return false;
+          const et = t.endDate ? parseFlexibleDate(t.endDate) || st : st;
+          const sTime = new Date(st.getFullYear(), st.getMonth(), st.getDate()).getTime();
+          const eTime = new Date(et.getFullYear(), et.getMonth(), et.getDate()).getTime();
+          return target >= sTime && target <= eTime;
+        }) || null
+      );
+    },
+    [trips, parseFlexibleDate]
+  );
+
+  const getTripsForDate = useCallback(
+    (date: Date): TripData[] => {
+      const target = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+      return trips.filter((t) => {
+        if (!t.startDate) return false;
+        const st = parseFlexibleDate(t.startDate);
+        if (!st) return false;
+        const et = t.endDate ? parseFlexibleDate(t.endDate) || st : st;
+        const sTime = new Date(st.getFullYear(), st.getMonth(), st.getDate()).getTime();
+        const eTime = new Date(et.getFullYear(), et.getMonth(), et.getDate()).getTime();
+        return target >= sTime && target <= eTime;
+      });
+    },
+    [trips, parseFlexibleDate]
+  );
+
+  const getRemindersForDate = useCallback(
+    (date: Date): CalendarReminder[] => {
+      return calendarReminders.filter((r) => isSameDateString(date, r.date));
+    },
+    [calendarReminders]
+  );
+
   const closeCalendarDrawer = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     Animated.parallel([
       Animated.timing(calendarDrawerPanY, {
         toValue: SCREEN_HEIGHT,
-        duration: 260,
-        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        duration: 250,
+        easing: Easing.bezier(0.3, 0.05, 0.2, 1),
         useNativeDriver: true,
       }),
       Animated.timing(calendarDrawerAnim, {
         toValue: 0,
-        duration: 260,
-        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+        duration: 250,
+        easing: Easing.bezier(0.3, 0.05, 0.2, 1),
         useNativeDriver: true,
       }),
     ]).start(() => {
@@ -886,21 +1069,72 @@ export default function TripsScreen() {
   }, [calendarDrawerAnim, calendarDrawerPanY]);
 
   const openCalendarDrawer = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     calendarDrawerPanY.setValue(0);
     calendarDrawerAnim.setValue(0);
-    setSelectedArchiveTrip(null);
+    setSelectedArchiveDate(selectedCalendarDate || new Date());
+    const matched = getTripForArchiveDate(selectedCalendarDate || new Date());
+    setSelectedArchiveTrip(matched);
     calendarDrawerScrollOffset.current = 0;
     setCalendarDrawerOpen(true);
     requestAnimationFrame(() => {
       Animated.spring(calendarDrawerAnim, {
         toValue: 1,
         damping: 24,
-        stiffness: 190,
-        mass: 0.9,
+        stiffness: 220,
+        mass: 0.85,
         useNativeDriver: true,
       }).start();
     });
-  }, [calendarDrawerAnim, calendarDrawerPanY]);
+  }, [calendarDrawerAnim, calendarDrawerPanY, selectedCalendarDate, getTripForArchiveDate]);
+
+  const toggleReminder = useCallback(async (remId: string, currentCompleted: boolean) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setCalendarReminders((prev) =>
+      prev.map((r) => (r.id === remId ? { ...r, completed: !currentCompleted } : r))
+    );
+    try {
+      await setDoc(doc(db, "reminders", remId), { completed: !currentCompleted }, { merge: true });
+    } catch (e) {
+      console.log("Error updating reminder:", e);
+    }
+  }, []);
+
+  const deleteReminder = useCallback(async (remId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setCalendarReminders((prev) => prev.filter((r) => r.id !== remId));
+    try {
+      await deleteDoc(doc(db, "reminders", remId));
+    } catch (e) {
+      console.log("Error deleting reminder:", e);
+    }
+  }, []);
+
+  const handleCreateReminder = useCallback(async () => {
+    if (!newReminderText.trim() || !user?.uid) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    const targetDateStr = formatDateKey(selectedArchiveDate);
+    const matchedTrip = trips.find((t) => t.id === newReminderTripId);
+    const reminderData = {
+      uid: user.uid,
+      text: newReminderText.trim(),
+      date: targetDateStr,
+      time: newReminderTime,
+      tripId: newReminderTripId || "",
+      tripName: matchedTrip ? matchedTrip.name : "",
+      completed: false,
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      const docRef = await addDoc(collection(db, "reminders"), reminderData);
+      setCalendarReminders((prev) => [{ id: docRef.id, ...reminderData }, ...prev]);
+      setNewReminderText("");
+      setNewReminderTripId("");
+      setNewReminderModalOpen(false);
+    } catch (e) {
+      console.log("Error adding reminder:", e);
+    }
+  }, [newReminderText, user?.uid, selectedArchiveDate, newReminderTripId, newReminderTime, trips]);
 
   const calendarHandlePanResponder = useRef(
     PanResponder.create({
@@ -960,25 +1194,136 @@ export default function TripsScreen() {
     })
   ).current;
 
-  // Swiping down on horizontal calendar strip triggers the calendar drawer!
+  /* ── Dedicated Framer-Motion Elastic PanResponder for Calendar Pull Handle ── */
+  const calPullBarPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: () => {
+        setMainScrollEnabled(false);
+        setIsPullingCalendar(true);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => { });
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const dy = gestureState.dy;
+        if (dy > 0) {
+          // Rubber-band physics curve matching Framer-Motion drag="y"
+          const rubber = dy * (1 - Math.exp((-dy * 0.3) / 100));
+          calPullAnim.setValue(rubber);
+        } else {
+          calPullAnim.setValue(dy * 0.15);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        setMainScrollEnabled(true);
+        setIsPullingCalendar(false);
+        const isTap = Math.abs(gestureState.dy) < 5 && Math.abs(gestureState.dx) < 5;
+        if (gestureState.dy > 25 || gestureState.vy > 0.25 || isTap) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => { });
+          openCalendarDrawer();
+        }
+        Animated.spring(calPullAnim, {
+          toValue: 0,
+          stiffness: 220,
+          damping: 22,
+          mass: 0.8,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        setMainScrollEnabled(true);
+        setIsPullingCalendar(false);
+        Animated.spring(calPullAnim, {
+          toValue: 0,
+          stiffness: 220,
+          damping: 22,
+          mass: 0.8,
+          useNativeDriver: true,
+        }).start();
+      },
+    })
+  ).current;
+
+  /* ── Swiping/scrolling down on horizontal calendar strip triggers the full calendar drawer ── */
   const calStripPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onStartShouldSetPanResponderCapture: () => false,
-      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-        // Capture immediately when pulling down so inner horizontal ScrollView does not intercept it
-        return gestureState.dy > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.1;
-      },
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        return gestureState.dy > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.1;
+        return gestureState.dy > 5 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 0.6;
+      },
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
+        return gestureState.dy > 5 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 0.6;
+      },
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: () => {
+        setMainScrollEnabled(false);
+        setIsPullingCalendar(true);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => { });
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const dy = gestureState.dy;
+        if (dy > 0) {
+          const rubber = dy * (1 - Math.exp((-dy * 0.3) / 100));
+          calPullAnim.setValue(rubber);
+        }
       },
       onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 12 || gestureState.vy > 0.3) {
+        setMainScrollEnabled(true);
+        setIsPullingCalendar(false);
+        if (gestureState.dy > 25 || gestureState.vy > 0.25) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => { });
           openCalendarDrawer();
         }
+        Animated.spring(calPullAnim, {
+          toValue: 0,
+          stiffness: 220,
+          damping: 22,
+          mass: 0.8,
+          useNativeDriver: true,
+        }).start();
+      },
+      onPanResponderTerminate: () => {
+        setMainScrollEnabled(true);
+        setIsPullingCalendar(false);
+        Animated.spring(calPullAnim, {
+          toValue: 0,
+          stiffness: 220,
+          damping: 22,
+          mass: 0.8,
+          useNativeDriver: true,
+        }).start();
       },
     })
   ).current;
+
+  /* ── Framer-Motion Elastic Drag Animations (Native Driver ScaleX instead of Width) ── */
+  const pullBarScaleX = calPullAnim.interpolate({
+    inputRange: [0, 80],
+    outputRange: [1, 2],
+    extrapolate: "clamp",
+  });
+
+  const pullBarTranslateY = calPullAnim.interpolate({
+    inputRange: [0, 100],
+    outputRange: [0, 10],
+    extrapolate: "clamp",
+  });
+
+  const pullChevronOpacity = calPullAnim.interpolate({
+    inputRange: [0, 25, 60],
+    outputRange: [0.65, 0.9, 1],
+    extrapolate: "clamp",
+  });
+
+  const calendarStripTranslateY = calPullAnim.interpolate({
+    inputRange: [0, 100],
+    outputRange: [0, 8],
+    extrapolate: "clamp",
+  });
 
   // Vibrant scenic background wallpaper for ambient blur (matches User Image 2)
   const calendarBackgroundImage = useMemo(() => {
@@ -990,22 +1335,53 @@ export default function TripsScreen() {
   const calendarDrawerTranslateY = Animated.add(
     calendarDrawerAnim.interpolate({
       inputRange: [0, 1],
-      outputRange: [SCREEN_HEIGHT, 0],
+      outputRange: [SCREEN_HEIGHT * 0.85, 0],
     }),
     calendarDrawerPanY
   );
 
-  const calendarDrawerScale = calendarDrawerPanY.interpolate({
-    inputRange: [0, SCREEN_HEIGHT],
-    outputRange: [1, 0.88],
-    extrapolate: "clamp",
-  });
+  const calendarDrawerScale = Animated.multiply(
+    calendarDrawerAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.93, 1],
+      extrapolate: "clamp",
+    }),
+    calendarDrawerPanY.interpolate({
+      inputRange: [0, SCREEN_HEIGHT],
+      outputRange: [1, 0.88],
+      extrapolate: "clamp",
+    })
+  );
 
   const calendarBackdropFade = calendarDrawerPanY.interpolate({
     inputRange: [0, SCREEN_HEIGHT * 0.7],
     outputRange: [1, 0.15],
     extrapolate: "clamp",
   });
+
+  /* ── Month Grid Horizontal Swipe Gesture (Left = Next Month, Right = Prev Month) ── */
+  const monthSwipePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return (
+          Math.abs(gestureState.dx) > 20 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4
+        );
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx < -35) {
+          // Swiped left -> next month
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          setArchiveMonthOffset((prev) => prev + 1);
+        } else if (gestureState.dx > 35) {
+          // Swiped right -> prev month
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          setArchiveMonthOffset((prev) => prev - 1);
+        }
+      },
+    })
+  ).current;
 
   /* ── Instagram-Style Travel Archive Calendar Data ── */
   const currentArchiveDate = useMemo(() => {
@@ -1035,148 +1411,31 @@ export default function TripsScreen() {
     return grid;
   }, [currentArchiveDate]);
 
-  const getTripForArchiveDate = useCallback(
-    (date: Date): TripData | null => {
-      const target = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-      return (
-        trips.find((t) => {
-          if (!t.startDate) return false;
-          const st = parseFlexibleDate(t.startDate);
-          if (!st) return false;
-          const et = t.endDate ? parseFlexibleDate(t.endDate) || st : st;
-          const sTime = new Date(st.getFullYear(), st.getMonth(), st.getDate()).getTime();
-          const eTime = new Date(et.getFullYear(), et.getMonth(), et.getDate()).getTime();
-          return target >= sTime && target <= eTime;
-        }) || null
-      );
-    },
-    [trips, parseFlexibleDate]
-  );
-
-  /* ── AI Suggested Trips Handlers ── */
-  const closeSuggestedModal = useCallback(() => {
-    Animated.parallel([
-      Animated.timing(suggestedPanY, {
-        toValue: SCREEN_HEIGHT,
-        duration: 250,
-        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-        useNativeDriver: true,
-      }),
-      Animated.timing(suggestedModalAnim, {
-        toValue: 0,
-        duration: 250,
-        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setSuggestedModalOpen(false);
-      suggestedPanY.setValue(0);
-      suggestedModalAnim.setValue(0);
+  /* ── AI Suggested Trips Handlers (Inline Grid View) ── */
+  const toggleSuggestedExpanded = useCallback(() => {
+    if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setSuggestedExpanded((prev) => {
+      const next = !prev;
+      if (next) {
+        setTimeout(() => {
+          if (mainScrollRef.current) {
+            if (typeof mainScrollRef.current.scrollToEnd === "function") {
+              mainScrollRef.current.scrollToEnd({ animated: true });
+            } else if (
+              mainScrollRef.current.getNode &&
+              typeof mainScrollRef.current.getNode().scrollToEnd === "function"
+            ) {
+              mainScrollRef.current.getNode().scrollToEnd({ animated: true });
+            }
+          }
+        }, 120);
+      }
+      return next;
     });
-  }, [suggestedModalAnim, suggestedPanY]);
-
-  const openSuggestedModal = useCallback(() => {
-    suggestedPanY.setValue(0);
-    suggestedModalAnim.setValue(0);
-    setSuggestedModalOpen(true);
-    requestAnimationFrame(() => {
-      Animated.spring(suggestedModalAnim, {
-        toValue: 1,
-        damping: 24,
-        stiffness: 200,
-        mass: 0.9,
-        useNativeDriver: true,
-      }).start();
-    });
-  }, [suggestedModalAnim, suggestedPanY]);
-
-  const suggestedScrollOffset = useRef(0);
-
-  const suggestedHandlePanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onStartShouldSetPanResponderCapture: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponderCapture: () => true,
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          suggestedPanY.setValue(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 70 || gestureState.vy > 0.4) {
-          closeSuggestedModal();
-        } else {
-          Animated.spring(suggestedPanY, {
-            toValue: 0,
-            damping: 24,
-            stiffness: 300,
-            mass: 0.8,
-            useNativeDriver: true,
-          }).start();
-        }
-      },
-    })
-  ).current;
-
-  const suggestedContainerPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onStartShouldSetPanResponderCapture: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return (
-          suggestedScrollOffset.current <= 0 &&
-          gestureState.dy > 12 &&
-          Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3
-        );
-      },
-      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-        return (
-          suggestedScrollOffset.current <= 0 &&
-          gestureState.dy > 12 &&
-          Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.3
-        );
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          suggestedPanY.setValue(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 80 || gestureState.vy > 0.4) {
-          closeSuggestedModal();
-        } else {
-          Animated.spring(suggestedPanY, {
-            toValue: 0,
-            damping: 24,
-            stiffness: 300,
-            mass: 0.8,
-            useNativeDriver: true,
-          }).start();
-        }
-      },
-    })
-  ).current;
-
-  const suggestedModalTranslateY = Animated.add(
-    suggestedModalAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [SCREEN_HEIGHT, 0],
-    }),
-    suggestedPanY
-  );
-
-  const suggestedModalScale = suggestedPanY.interpolate({
-    inputRange: [0, SCREEN_HEIGHT],
-    outputRange: [1, 0.88],
-    extrapolate: "clamp",
-  });
-
-  const suggestedBackdropFade = suggestedPanY.interpolate({
-    inputRange: [0, SCREEN_HEIGHT * 0.7],
-    outputRange: [1, 0.15],
-    extrapolate: "clamp",
-  });
+  }, []);
 
   /* ── AI Analysis for Genuine Suggested Trips based on User Past Trips ── */
   const suggestedTripsData = useMemo(() => {
@@ -1428,15 +1687,7 @@ export default function TripsScreen() {
       description: `Curated ${suggestion.travelType} adventure to ${suggestion.to}. ${suggestion.insight || ""}`,
     });
 
-    // Close suggested modal immediately to clear Android modal window stack
-    setSuggestedModalOpen(false);
-    suggestedPanY.setValue(0);
-    suggestedModalAnim.setValue(0);
-
-    // Mount CreateTripSheet smoothly without native modal collision
-    setTimeout(() => {
-      setCreateSheetOpen(true);
-    }, 120);
+    setCreateSheetOpen(true);
   };
 
   const isSelectedPinned = selectedTrip ? pinnedTripIds.includes(selectedTrip.id) : false;
@@ -1495,6 +1746,32 @@ export default function TripsScreen() {
       {/* Top Safe Area background spacer cap */}
       <View style={{ height: insets.top, width: "100%", backgroundColor: "#0c0e15", zIndex: 999 }} />
 
+      {/* ── Trips Page Native Blur Backdrop when Calendar Drawer is Open ── */}
+      {calendarDrawerOpen && (
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              zIndex: 900,
+              opacity: calendarDrawerAnim,
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <BlurView
+            intensity={Platform.OS === "ios" ? 80 : 45}
+            tint="dark"
+            style={StyleSheet.absoluteFill}
+          />
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: "rgba(10, 14, 22, 0.55)" },
+            ]}
+          />
+        </Animated.View>
+      )}
+
       {/* ── SCROLLABLE TRIPS DASHBOARD ── */}
       {loading ? (
         <View style={s.loadingBox}>
@@ -1502,9 +1779,11 @@ export default function TripsScreen() {
         </View>
       ) : (
         <Animated.ScrollView
+          ref={mainScrollRef}
           stickyHeaderIndices={[1]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          scrollEnabled={mainScrollEnabled}
           contentContainerStyle={{
             paddingBottom: insets.bottom + 120,
           }}
@@ -1625,46 +1904,43 @@ export default function TripsScreen() {
 
           {/* ── SECTION 1: STICKY SEARCH & CALENDAR HEADER WITH BLUR BACKDROP ── */}
           <View style={s.stickyHeaderContainer}>
-            {/* Ambient Scenic Blurred Image matching 3-dots modal */}
-            {displayedTrips.length > 0 ? (
-              <Animated.View
-                style={[
-                  StyleSheet.absoluteFill,
-                  {
-                    opacity: mainScrollY.interpolate({
-                      inputRange: [80, 260],
-                      outputRange: [0, 0.95],
-                      extrapolate: "clamp",
-                    }),
-                  },
-                ]}
-              >
-                <ExpoImage
-                  source={{ uri: getTripDisplayImage(displayedTrips[0]) }}
-                  style={StyleSheet.absoluteFill}
-                  contentFit="cover"
-                  blurRadius={Platform.OS === "ios" ? 40 : 28}
-                />
-              </Animated.View>
-            ) : null}
-
-            {/* Frosted Glass BlurView (exact intensity as 3-dots modal) */}
-            <BlurView
-              intensity={Platform.OS === "ios" ? 85 : 70}
-              tint="dark"
-              style={StyleSheet.absoluteFill}
-            />
-
-            {/* Deep Translucent Gradient Veil */}
-            <LinearGradient
-              colors={[
-                "rgba(10, 14, 22, 0.55)",
-                "rgba(10, 14, 22, 0.72)",
-                "rgba(8, 10, 15, 0.92)",
+            {/* Scroll-Driven Native Frosted Glass Blur Backdrop — 0 at top, fades in smoothly on scroll */}
+            <Animated.View
+              style={[
+                StyleSheet.absoluteFill,
+                {
+                  opacity: headerBlurOpacity,
+                  borderBottomWidth: 1,
+                  borderBottomColor: "rgba(255, 255, 255, 0.14)",
+                },
               ]}
-              locations={[0, 0.5, 1]}
-              style={StyleSheet.absoluteFill}
-            />
+              pointerEvents="none"
+            >
+              <BlurView
+                intensity={Platform.OS === "ios" ? 95 : 75}
+                tint="dark"
+                style={StyleSheet.absoluteFill}
+              />
+
+              <LinearGradient
+                colors={[
+                  "rgba(10, 14, 22, 0.98)",
+                  "rgba(11, 15, 24, 0.95)",
+                  "rgba(12, 16, 26, 0.90)",
+                ]}
+                locations={[0, 0.65, 1]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={StyleSheet.absoluteFill}
+              />
+
+              {/* Bottom progressive feather fade extending past the tabs */}
+              <LinearGradient
+                colors={["rgba(12, 16, 26, 0.90)", "transparent"]}
+                style={s.stickyFeatherBottom}
+                pointerEvents="none"
+              />
+            </Animated.View>
 
             <View style={s.stickyHeaderContent}>
               {/* 4. Search & Filter Bar */}
@@ -1724,7 +2000,13 @@ export default function TripsScreen() {
               ) : null}
 
               {/* 5. Horizontal Horizon Calendar Strip (Slide down or tap header opens Travel Calendar Drawer) */}
-              <View {...calStripPanResponder.panHandlers} style={s.calSectionWrap}>
+              <Animated.View
+                {...calStripPanResponder.panHandlers}
+                style={[
+                  s.calSectionWrap,
+                  { transform: [{ translateY: calendarStripTranslateY }] },
+                ]}
+              >
                 <View style={s.calHeaderRow}>
                   <Pressable
                     onPress={openCalendarDrawer}
@@ -1769,10 +2051,57 @@ export default function TripsScreen() {
                   </View>
                 </View>
 
-                {/* Subtle Pull Down Hint Bar */}
-                <Pressable onPress={openCalendarDrawer} style={s.calPullIndicatorWrap}>
-                  <View style={s.calPullIndicatorBar} />
-                </Pressable>
+                {/* Interactive Swipe-Down Pull Handle (Framer Motion Elastic Drag) */}
+                <Animated.View
+                  {...calPullBarPanResponder.panHandlers}
+                  style={[
+                    s.calPullIndicatorWrap,
+                    { transform: [{ translateY: pullBarTranslateY }] },
+                  ]}
+                >
+                  <Animated.View
+                    style={[
+                      s.calPullIndicatorBar,
+                      {
+                        transform: [{ scaleX: pullBarScaleX }],
+                        backgroundColor: isPullingCalendar
+                          ? "rgba(255, 255, 255, 0.85)"
+                          : "rgba(255, 255, 255, 0.3)",
+                      },
+                    ]}
+                  />
+                  <Animated.View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 3,
+                      marginTop: 3,
+                      opacity: pullChevronOpacity,
+                    }}
+                  >
+                    <Ionicons
+                      name="chevron-down"
+                      size={11}
+                      color={isPullingCalendar ? "#ffffff" : "rgba(255, 255, 255, 0.6)"}
+                    />
+                    <Text
+                      style={{
+                        fontSize: 9.5,
+                        color: isPullingCalendar ? "#ffffff" : "rgba(255, 255, 255, 0.55)",
+                        fontWeight: "700",
+                        letterSpacing: 0.3,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {isPullingCalendar ? "Release to Open Calendar" : "Swipe Down for Calendar"}
+                    </Text>
+                    <Ionicons
+                      name="chevron-down"
+                      size={11}
+                      color={isPullingCalendar ? "#ffffff" : "rgba(255, 255, 255, 0.6)"}
+                    />
+                  </Animated.View>
+                </Animated.View>
 
                 <ScrollView
                   ref={calendarScrollRef}
@@ -1850,7 +2179,7 @@ export default function TripsScreen() {
                     );
                   })}
                 </ScrollView>
-              </View>
+              </Animated.View>
 
               {/* 6. Status Tabs Row with Counts (Including Pinned) */}
               <ScrollView
@@ -2160,24 +2489,29 @@ export default function TripsScreen() {
                   </View>
                 )}
 
-                {/* ── AI SUGGESTED TRIPS TRIGGER BUTTON ── */}
+                {/* ── AI SUGGESTED TRIPS SECTION (INLINE EXPANDABLE GRID VIEW) ── */}
                 <View style={s.suggestedSectionContainer}>
                   <Pressable
-                    onPress={openSuggestedModal}
+                    onPress={toggleSuggestedExpanded}
                     style={({ pressed }) => [
                       s.suggestedTripsTriggerBtn,
+                      suggestedExpanded && s.suggestedTripsTriggerBtnActive,
                       pressed && s.showMoreBtnPressed,
                     ]}
                   >
                     <LinearGradient
-                      colors={["rgba(255, 255, 255, 0.12)", "rgba(255, 255, 255, 0.04)"]}
+                      colors={
+                        suggestedExpanded
+                          ? ["rgba(255, 255, 255, 0.16)", "rgba(255, 255, 255, 0.07)"]
+                          : ["rgba(255, 255, 255, 0.12)", "rgba(255, 255, 255, 0.04)"]
+                      }
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
                       style={StyleSheet.absoluteFill}
                     />
                     <View style={s.suggestedTriggerInner}>
-                      <View style={s.suggestedTriggerIconWrap}>
-                        <Ionicons name="sparkles" size={17} color="#ffffff" />
+                      <View style={[s.suggestedTriggerIconWrap, suggestedExpanded && s.suggestedTriggerIconWrapActive]}>
+                        <Ionicons name="sparkles" size={17} color={suggestedExpanded ? "#fbbf24" : "#ffffff"} />
                       </View>
                       <View style={{ flex: 1, paddingRight: 8 }}>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -2187,14 +2521,138 @@ export default function TripsScreen() {
                           </View>
                         </View>
                         <Text style={s.suggestedTriggerSub}>
-                          Analyzed from your past places, travel taste & budget
+                          {suggestedExpanded
+                            ? "AI curated based on your taste & budget • Tap to collapse"
+                            : "Analyzed from your past places, travel taste & budget"}
                         </Text>
                       </View>
-                      <View style={s.suggestedArrowCircle}>
-                        <Ionicons name="arrow-forward" size={15} color="#ffffff" />
+                      <View style={[s.suggestedArrowCircle, suggestedExpanded && s.suggestedArrowCircleActive]}>
+                        <Ionicons
+                          name={suggestedExpanded ? "chevron-up" : "chevron-down"}
+                          size={16}
+                          color="#ffffff"
+                        />
                       </View>
                     </View>
                   </Pressable>
+
+                  {/* ── INLINE GRID VIEW (Directly inside Trip Page) ── */}
+                  {suggestedExpanded && (
+                    <View style={s.suggestedGridContainer}>
+                      {/* Grid Header Info Banner */}
+                      <View style={s.suggestedGridHeader}>
+                        <View style={s.suggestedGridHeaderLeft}>
+                          <Ionicons name="sparkles" size={12} color="#fbbf24" />
+                          <Text style={s.suggestedGridHeaderText}>
+                            Tailored for <Text style={s.suggestedGridHeaderHighlight}>{suggestedTripsData.favType}</Text> • ~₹{suggestedTripsData.avgBudget.toLocaleString()}
+                          </Text>
+                        </View>
+                        <View style={s.suggestedGridHeaderCountBadge}>
+                          <Text style={s.suggestedGridHeaderCountText}>
+                            {suggestedTripsData.list.length} of {suggestedTripsData.totalCount}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* 2-Column Grid */}
+                      <View style={s.suggestedGridRow}>
+                        {suggestedTripsData.list.map((sug) => (
+                          <Pressable
+                            key={sug.id}
+                            onPress={() => handleOpenCreateWithSuggestion(sug)}
+                            style={({ pressed }) => [
+                              s.sugGridCard,
+                              pressed && s.sugGridCardPressed,
+                            ]}
+                          >
+                            <ExpoImage
+                              source={{ uri: sug.image }}
+                              style={s.sugGridCardBg}
+                              contentFit="cover"
+                              transition={200}
+                            />
+                            <LinearGradient
+                              colors={[
+                                "rgba(10, 13, 20, 0.2)",
+                                "rgba(10, 13, 20, 0.55)",
+                                "rgba(10, 13, 20, 0.96)",
+                              ]}
+                              locations={[0, 0.45, 1]}
+                              style={StyleSheet.absoluteFill}
+                            />
+
+                            {/* Top row badges */}
+                            <View style={s.sugGridTopRow}>
+                              <View style={s.sugGridTypeBadge}>
+                                <Text style={s.sugGridTypeBadgeText} numberOfLines={1}>
+                                  {sug.travelType.split("&")[0].trim()}
+                                </Text>
+                              </View>
+                              <View style={s.sugGridDaysBadge}>
+                                <Text style={s.sugGridDaysBadgeText}>{sug.days}d</Text>
+                              </View>
+                            </View>
+
+                            {/* Bottom Card Details */}
+                            <View style={s.sugGridBottomInfo}>
+                              <Text style={s.sugGridTitle} numberOfLines={2}>
+                                {sug.name}
+                              </Text>
+
+                              <View style={s.sugGridLocationRow}>
+                                <Ionicons name="location-sharp" size={11} color="rgba(255,255,255,0.7)" />
+                                <Text style={s.sugGridLocationText} numberOfLines={1}>
+                                  {sug.location.split(",")[0].trim()}
+                                </Text>
+                              </View>
+
+                              <View style={s.sugGridFooterRow}>
+                                <View style={s.sugGridBudgetPill}>
+                                  <Text style={s.sugGridBudgetText}>
+                                    ₹{sug.budget.toLocaleString()}
+                                  </Text>
+                                </View>
+                                <View style={s.sugGridActionBtn}>
+                                  <Ionicons name="sparkles" size={10} color="#000000" />
+                                  <Text style={s.sugGridActionBtnText}>Plan</Text>
+                                </View>
+                              </View>
+                            </View>
+                          </Pressable>
+                        ))}
+                      </View>
+
+                      {/* Load More / Show Less pagination */}
+                      <View style={s.sugGridPaginationRow}>
+                        {suggestedTripsData.hasMore ? (
+                          <Pressable
+                            onPress={() => setVisibleSuggestedCount((prev) => prev + 2)}
+                            style={({ pressed }) => [
+                              s.sugGridLoadMoreBtn,
+                              pressed && { opacity: 0.8 },
+                            ]}
+                          >
+                            <Ionicons name="sparkles" size={13} color="#ffffff" />
+                            <Text style={s.sugGridLoadMoreText}>
+                              Load More Suggestions ({suggestedTripsData.totalCount - visibleSuggestedCount} more)
+                            </Text>
+                            <Ionicons name="chevron-down" size={13} color="#ffffff" />
+                          </Pressable>
+                        ) : visibleSuggestedCount > 4 ? (
+                          <Pressable
+                            onPress={() => setVisibleSuggestedCount(4)}
+                            style={({ pressed }) => [
+                              s.sugGridLoadMoreBtn,
+                              pressed && { opacity: 0.8 },
+                            ]}
+                          >
+                            <Text style={s.sugGridLoadMoreText}>Show Less</Text>
+                            <Ionicons name="chevron-up" size={13} color="#ffffff" />
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    </View>
+                  )}
                 </View>
               </>
             ) : (
@@ -2483,7 +2941,7 @@ export default function TripsScreen() {
       </Modal>
 
       {/* ═══════════════════════════════════════════════════════════
-         INSTAGRAM-STYLE STORIES & TRAVEL ARCHIVE CALENDAR DRAWER
+         INSTAGRAM & GOOGLE CALENDAR TRAVEL ARCHIVE DRAWER (Matches Image 3)
          ═══════════════════════════════════════════════════════════ */}
       <Modal
         animationType="none"
@@ -2491,30 +2949,20 @@ export default function TripsScreen() {
         visible={calendarDrawerOpen}
         onRequestClose={closeCalendarDrawer}
       >
-        {/* Ambient Blur Backdrop - Blurs the underlying Trip Page without random blue accent */}
+        {/* Full-screen backdrop blurring the underlying trip page */}
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: calendarDrawerAnim }]}>
-          <Animated.View style={[StyleSheet.absoluteFill, { opacity: calendarBackdropFade }]}>
-            <BlurView
-              intensity={Platform.OS === "ios" ? 80 : 65}
-              tint="dark"
-              style={StyleSheet.absoluteFill}
-            />
-            <View
-              style={[
-                StyleSheet.absoluteFill,
-                { backgroundColor: "rgba(12, 14, 21, 0.76)" },
-              ]}
-            />
-            <Pressable style={StyleSheet.absoluteFill} onPress={closeCalendarDrawer} />
-          </Animated.View>
+          <BlurView intensity={Platform.OS === "ios" ? 85 : 55} tint="dark" style={StyleSheet.absoluteFill} />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(4, 7, 12, 0.78)" }]} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeCalendarDrawer} />
         </Animated.View>
 
-        {/* Animated Drawer Container with slide-down-to-close gesture */}
+        {/* Sliding Calendar Drawer Card with Apple Spring & Drag-to-Dismiss Physics */}
         <Animated.View
           {...calendarDrawerPanResponder.panHandlers}
           style={[
-            StyleSheet.absoluteFill,
+            s.archiveDrawerModalContainer,
             {
+              paddingTop: insets.top + 8,
               transform: [{ translateY: calendarDrawerTranslateY }, { scale: calendarDrawerScale }],
             },
           ]}
@@ -2522,24 +2970,37 @@ export default function TripsScreen() {
           {/* Top Pull Handle (Slide down to close) */}
           <View
             {...calendarHandlePanResponder.panHandlers}
-            style={[s.modalPullHeader, { paddingTop: insets.top + 8 }]}
+            style={s.modalPullHeader}
           >
             <View style={s.modalPullPill} />
           </View>
 
           <View style={s.archiveDrawerWrapper}>
-            {/* Clean Travel Calendar Header */}
+            {/* Header with Title and Google Calendar "+ Add" Action */}
             <View style={s.archiveHeaderRow}>
               <Pressable onPress={closeCalendarDrawer} hitSlop={10} style={s.archiveBackBtn}>
                 <Ionicons name="arrow-back" size={22} color="#ffffff" />
               </Pressable>
               <View style={s.archiveTitleRow}>
-                <Ionicons name="calendar-outline" size={18} color="#ffffff" style={{ marginRight: 6 }} />
+                <Ionicons name="calendar" size={18} color="#ffffff" style={{ marginRight: 6 }} />
                 <Text style={s.archiveTitleText}>Travel Calendar</Text>
               </View>
-              <Pressable onPress={closeCalendarDrawer} hitSlop={10} style={s.archiveCloseBtn}>
-                <Ionicons name="close" size={22} color="#ffffff" />
-              </Pressable>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                    setNewReminderModalOpen(true);
+                  }}
+                  hitSlop={8}
+                  style={s.archiveAddEventBtn}
+                >
+                  <Ionicons name="add" size={16} color="#000000" />
+                  <Text style={s.archiveAddEventText}>Add</Text>
+                </Pressable>
+                <Pressable onPress={closeCalendarDrawer} hitSlop={10} style={s.archiveCloseBtn}>
+                  <Ionicons name="close" size={22} color="#ffffff" />
+                </Pressable>
+              </View>
             </View>
 
             <ScrollView
@@ -2549,262 +3010,538 @@ export default function TripsScreen() {
               onScroll={(e) => {
                 calendarDrawerScrollOffset.current = e.nativeEvent.contentOffset.y;
               }}
-              contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
             >
-              {/* 3. Month & Year Title with Navigation - Matches Image */}
-              <View style={s.archiveMonthNavRow}>
-                <Pressable
-                  onPress={() => setArchiveMonthOffset((prev) => prev - 1)}
-                  hitSlop={12}
-                  style={s.archiveMonthNavBtn}
-                >
-                  <Ionicons name="chevron-back" size={20} color="#ffffff" />
-                </Pressable>
-                <Text style={s.archiveMonthTitleText}>{archiveMonthTitle}</Text>
-                <Pressable
-                  onPress={() => setArchiveMonthOffset((prev) => prev + 1)}
-                  hitSlop={12}
-                  style={s.archiveMonthNavBtn}
-                >
-                  <Ionicons name="chevron-forward" size={20} color="#ffffff" />
-                </Pressable>
-              </View>
-
-              {/* 4. Weekday Header Labels (Sun, Mon, Tue, Wed, Thu, Fri, Sat) */}
-              <View style={s.archiveWeekdayRow}>
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((w, idx) => (
-                  <View key={idx} style={s.archiveWeekdayCell}>
-                    <Text style={s.archiveWeekdayText}>{w}</Text>
+              {/* 1. Month Navigator & Grid in Glass Card (with Swipe Left/Right Gesture) */}
+              <View style={s.archiveGlassCard} {...monthSwipePanResponder.panHandlers}>
+                <View style={s.archiveMonthNavRow}>
+                  <Pressable
+                    onPress={() => setArchiveMonthOffset((prev) => prev - 1)}
+                    hitSlop={12}
+                    style={s.archiveMonthNavBtn}
+                  >
+                    <Ionicons name="chevron-back" size={20} color="#ffffff" />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      Haptics.selectionAsync().catch(() => {});
+                      setPickerSelectedYear(currentArchiveDate.getFullYear());
+                      setMonthYearPickerOpen(true);
+                    }}
+                    hitSlop={10}
+                    style={s.archiveMonthTitleBtn}
+                  >
+                    <Text style={s.archiveMonthTitleText}>{archiveMonthTitle}</Text>
+                    <Ionicons name="chevron-down" size={14} color="rgba(255, 255, 255, 0.7)" style={{ marginLeft: 5 }} />
+                  </Pressable>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Pressable
+                      onPress={() => {
+                        setArchiveMonthOffset(0);
+                        setSelectedArchiveDate(new Date());
+                      }}
+                      hitSlop={8}
+                      style={[
+                        s.calTodayBtn,
+                        isSameDay(selectedArchiveDate, new Date()) && s.calTodayBtnActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          s.calTodayBtnText,
+                          isSameDay(selectedArchiveDate, new Date()) && s.calTodayBtnTextActive,
+                        ]}
+                      >
+                        Today
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setArchiveMonthOffset((prev) => prev + 1)}
+                      hitSlop={12}
+                      style={s.archiveMonthNavBtn}
+                    >
+                      <Ionicons name="chevron-forward" size={20} color="#ffffff" />
+                    </Pressable>
                   </View>
-                ))}
-              </View>
+                </View>
 
-              {/* 5. Calendar Days Grid (Exact Instagram circular photo thumbnail style!) */}
-              <View style={s.archiveGridContainer}>
-                {archiveGridDays.map((item, idx) => {
-                  if (!item) {
-                    return <View key={`empty-${idx}`} style={s.archiveDayCell} />;
-                  }
+                {/* Weekday Labels (Sun..Sat) */}
+                <View style={s.archiveWeekdayRow}>
+                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((w, idx) => (
+                    <View key={idx} style={s.archiveWeekdayCell}>
+                      <Text style={s.archiveWeekdayText}>{w}</Text>
+                    </View>
+                  ))}
+                </View>
 
-                  const tripOnDate = getTripForArchiveDate(item.date);
-                  const isToday = isSameDay(item.date, new Date());
-                  const isSelected = selectedArchiveTrip && tripOnDate && selectedArchiveTrip.id === tripOnDate.id;
+                {/* Days Grid */}
+                <View style={s.archiveGridContainer}>
+                  {archiveGridDays.map((item, idx) => {
+                    if (!item) {
+                      return <View key={`empty-${idx}`} style={s.archiveDayCell} />;
+                    }
 
-                  return (
-                    <View key={`day-${item.dayNum}`} style={s.archiveDayCell}>
-                      {tripOnDate ? (
-                        /* PHOTO CIRCLE WITH DAY NUMBER OVER IT (Exact Instagram style) */
+                    const isToday = isSameDay(item.date, new Date());
+                    const isSelected = isSameDay(item.date, selectedArchiveDate);
+                    const dayTrips = getTripsForDate(item.date);
+                    const dayReminders = getRemindersForDate(item.date);
+                    const hasTrip = dayTrips.length > 0;
+                    const hasReminder = dayReminders.length > 0;
+
+                    return (
+                      <View key={`day-${item.dayNum}`} style={s.archiveDayCell}>
                         <Pressable
-                          onPress={() => setSelectedArchiveTrip(tripOnDate)}
+                          onPress={() => {
+                            Haptics.selectionAsync().catch(() => {});
+                            setSelectedArchiveDate(item.date);
+                            setSelectedArchiveTrip(hasTrip ? dayTrips[0] : null);
+                          }}
                           style={[
-                            s.archivePhotoCircle,
-                            isSelected && s.archivePhotoCircleSelected,
+                            s.archiveDayContainer,
+                            isSelected && s.archiveDayContainerSelected,
                           ]}
                         >
-                          <ExpoImage
-                            source={{ uri: getTripDisplayImage(tripOnDate) }}
-                            style={StyleSheet.absoluteFill}
-                            contentFit="cover"
-                          />
-                          <View style={s.archivePhotoCircleOverlay} />
-                          <Text style={s.archivePhotoDayText}>{item.dayNum}</Text>
+                          {hasTrip ? (
+                            /* Trip Date: Circular Thumbnail with Trip Image & Day Number (Previous Travel Archive Style) */
+                            <View
+                              style={[
+                                s.archivePhotoCircle,
+                                isSelected && s.archivePhotoCircleSelected,
+                              ]}
+                            >
+                              <ExpoImage
+                                source={{ uri: getTripDisplayImage(dayTrips[0]) }}
+                                style={StyleSheet.absoluteFill}
+                                contentFit="cover"
+                              />
+                              <View style={s.archivePhotoCircleOverlay} />
+                              <Text style={s.archivePhotoDayText}>{item.dayNum}</Text>
+                            </View>
+                          ) : isSelected ? (
+                            /* Selected Date (when no trip): Pure White Circle with Black Text */
+                            <View style={s.archiveSelectedCircle}>
+                              <Text style={s.archiveSelectedDayText}>{item.dayNum}</Text>
+                            </View>
+                          ) : isToday ? (
+                            /* Today Date: Frosted White Border Circle */
+                            <View style={s.archiveTodayCircle}>
+                              <Text style={s.archiveTodayDayText}>{item.dayNum}</Text>
+                            </View>
+                          ) : (
+                            /* Plain Day */
+                            <View style={s.archivePlainDay}>
+                              <Text style={s.archivePlainDayText}>
+                                {item.dayNum}
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Indicators Row: White Dot for Trip, Alarm Icon for Reminder */}
+                          <View style={s.archiveDayIndicatorsRow}>
+                            {hasTrip && <View style={s.archivePhotoWhiteDot} />}
+                            {hasReminder && (
+                              <Ionicons
+                                name="alarm"
+                                size={10}
+                                color="#F59E0B"
+                                style={hasTrip ? { marginLeft: 2 } : undefined}
+                              />
+                            )}
+                          </View>
                         </Pressable>
-                      ) : isToday ? (
-                        /* Today indicator circle */
-                        <View style={s.archiveTodayCircle}>
-                          <Text style={s.archiveTodayDayText}>{item.dayNum}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* 2. Google Calendar Style: Selected Day Agenda & Schedule */}
+              <View style={s.archiveAgendaCard}>
+                <View style={s.archiveAgendaHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.archiveAgendaDateTitle}>
+                      {selectedArchiveDate.toLocaleDateString("en-US", {
+                        weekday: "long",
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                      })}
+                    </Text>
+                    <View style={s.archiveAgendaBadgesRow}>
+                      {getTripsForDate(selectedArchiveDate).length > 0 && (
+                        <View style={s.archiveAgendaTripBadge}>
+                          <Ionicons name="airplane" size={10} color="#10B981" />
+                          <Text style={s.archiveAgendaTripBadgeText}>
+                            {getTripsForDate(selectedArchiveDate).length} Trip Active
+                          </Text>
                         </View>
-                      ) : (
-                        /* Normal day number text */
-                        <View style={s.archivePlainDay}>
-                          <Text style={s.archivePlainDayText}>{item.dayNum}</Text>
+                      )}
+                      {getRemindersForDate(selectedArchiveDate).length > 0 && (
+                        <View style={s.archiveAgendaRemBadge}>
+                          <Ionicons name="alarm" size={10} color="#F59E0B" />
+                          <Text style={s.archiveAgendaRemBadgeText}>
+                            {getRemindersForDate(selectedArchiveDate).length} Reminders
+                          </Text>
                         </View>
                       )}
                     </View>
+                  </View>
+
+                  <Pressable
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                      setNewReminderModalOpen(true);
+                    }}
+                    style={s.archiveAgendaQuickAddBtn}
+                  >
+                    <Ionicons name="add" size={13} color="#ffffff" />
+                    <Text style={s.archiveAgendaQuickAddText}>Add Event</Text>
+                  </Pressable>
+                </View>
+
+                {/* A. Trips on this date */}
+                {getTripsForDate(selectedArchiveDate).map((t) => (
+                  <View key={`agenda-trip-${t.id}`} style={s.agendaTripItem}>
+                    <ExpoImage
+                      source={{ uri: getTripDisplayImage(t) }}
+                      style={s.agendaTripThumb}
+                      contentFit="cover"
+                    />
+                    <View style={{ flex: 1, paddingLeft: 12 }}>
+                      <Text style={s.agendaTripTitle} numberOfLines={1}>{t.name}</Text>
+                      <Text style={s.agendaTripRoute} numberOfLines={1}>
+                        📍 {t.from && t.to ? `${t.from} ➔ ${t.to}` : t.location || "Scenic Location"}
+                      </Text>
+                      <Text style={s.agendaTripDates}>
+                        📅 {formatSpanHorizon(t.startDate, t.endDate)}
+                      </Text>
+                      <Pressable
+                        onPress={() => {
+                          closeCalendarDrawer();
+                          setTimeout(() => openDetailsModal(t), 220);
+                        }}
+                        style={s.agendaTripOpenBtn}
+                      >
+                        <Text style={s.agendaTripOpenText}>Open Trip Details</Text>
+                        <Ionicons name="arrow-forward" size={12} color="#000000" />
+                      </Pressable>
+                    </View>
+                  </View>
+                ))}
+
+                {/* B. Reminders on this date */}
+                {getRemindersForDate(selectedArchiveDate).length > 0 ? (
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={s.agendaSectionSubTitle}>Reminders & Tasks</Text>
+                    {getRemindersForDate(selectedArchiveDate).map((rem) => (
+                      <View key={`agenda-rem-${rem.id}`} style={s.agendaRemItem}>
+                        <Pressable
+                          onPress={() => toggleReminder(rem.id, !!rem.completed)}
+                          hitSlop={8}
+                          style={[s.agendaRemCheck, rem.completed && s.agendaRemCheckDone]}
+                        >
+                          {rem.completed && <Ionicons name="checkmark" size={13} color="#000000" />}
+                        </Pressable>
+                        <View style={{ flex: 1, paddingHorizontal: 10 }}>
+                          <Text style={[s.agendaRemText, rem.completed && s.agendaRemTextDone]}>
+                            {rem.text}
+                          </Text>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                            {rem.time ? (
+                              <View style={s.agendaRemTimeTag}>
+                                <Ionicons name="time-outline" size={10} color="rgba(255,255,255,0.7)" />
+                                <Text style={s.agendaRemTimeText}>{rem.time}</Text>
+                              </View>
+                            ) : null}
+                            {rem.tripName ? (
+                              <View style={s.agendaRemTripTag}>
+                                <Ionicons name="briefcase-outline" size={10} color="#60A5FA" />
+                                <Text style={s.agendaRemTripText} numberOfLines={1}>{rem.tripName}</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        </View>
+                        <Pressable
+                          onPress={() => deleteReminder(rem.id)}
+                          hitSlop={10}
+                          style={s.agendaRemTrashBtn}
+                        >
+                          <Ionicons name="trash-outline" size={16} color="rgba(239,68,68,0.7)" />
+                        </Pressable>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                {/* C. Empty Agenda state if neither trips nor reminders on this date */}
+                {getTripsForDate(selectedArchiveDate).length === 0 && getRemindersForDate(selectedArchiveDate).length === 0 && (
+                  <View style={s.agendaEmptyState}>
+                    <Ionicons name="calendar-outline" size={30} color="rgba(255,255,255,0.25)" />
+                    <Text style={s.agendaEmptyText}>No trips or reminders scheduled for this date</Text>
+                    <Pressable
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        setNewReminderModalOpen(true);
+                      }}
+                      style={s.agendaEmptyActionBtn}
+                    >
+                      <Ionicons name="add-circle-outline" size={15} color="#ffffff" />
+                      <Text style={s.agendaEmptyActionText}>Add Trip Reminder</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+
+              {/* 3. Upcoming Reminders Overview Card */}
+              {calendarReminders.length > 0 && (
+                <View style={s.archiveOverviewCard}>
+                  <View style={s.archiveOverviewHeader}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Ionicons name="alarm-outline" size={16} color="#F59E0B" />
+                      <Text style={s.archiveOverviewTitle}>All Trip Reminders</Text>
+                    </View>
+                    <View style={s.archiveOverviewBadge}>
+                      <Text style={s.archiveOverviewBadgeText}>
+                        {calendarReminders.filter((r) => !r.completed).length} Pending
+                      </Text>
+                    </View>
+                  </View>
+
+                  {calendarReminders.slice(0, 5).map((rem) => (
+                    <View key={`overview-rem-${rem.id}`} style={s.agendaRemItem}>
+                      <Pressable
+                        onPress={() => toggleReminder(rem.id, !!rem.completed)}
+                        hitSlop={8}
+                        style={[s.agendaRemCheck, rem.completed && s.agendaRemCheckDone]}
+                      >
+                        {rem.completed && <Ionicons name="checkmark" size={13} color="#000000" />}
+                      </Pressable>
+                      <View style={{ flex: 1, paddingHorizontal: 10 }}>
+                        <Text style={[s.agendaRemText, rem.completed && s.agendaRemTextDone]}>
+                          {rem.text}
+                        </Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                          <Text style={s.agendaRemTimeText}>📅 {rem.date} {rem.time ? `• ${rem.time}` : ""}</Text>
+                          {rem.tripName ? (
+                            <Text style={s.agendaRemTripText}>• {rem.tripName}</Text>
+                          ) : null}
+                        </View>
+                      </View>
+                      <Pressable
+                        onPress={() => deleteReminder(rem.id)}
+                        hitSlop={10}
+                        style={s.agendaRemTrashBtn}
+                      >
+                        <Ionicons name="trash-outline" size={16} color="rgba(239,68,68,0.7)" />
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </Animated.View>
+
+        {/* ── Google Calendar: Quick "+ Add Reminder / Trip Event" Modal ── */}
+        <Modal
+          animationType="fade"
+          transparent
+          visible={newReminderModalOpen}
+          onRequestClose={() => setNewReminderModalOpen(false)}
+        >
+          <View style={s.addRemOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setNewReminderModalOpen(false)} />
+            <View style={s.addRemCard}>
+              <View style={s.addRemHeaderRow}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Ionicons name="alarm" size={18} color="#F59E0B" />
+                  <Text style={s.addRemTitle}>Add Trip Reminder</Text>
+                </View>
+                <Pressable onPress={() => setNewReminderModalOpen(false)} hitSlop={10}>
+                  <Ionicons name="close" size={20} color="#ffffff" />
+                </Pressable>
+              </View>
+
+              <Text style={s.addRemDateNote}>
+                📅 Date: {selectedArchiveDate.toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
+              </Text>
+
+              {/* Reminder Note Input */}
+              <TextInput
+                value={newReminderText}
+                onChangeText={setNewReminderText}
+                placeholder="What to remember? (e.g. Flight web check-in, Pack boots)..."
+                placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                style={s.addRemInput}
+                autoFocus
+              />
+
+              {/* Time Presets */}
+              <Text style={s.addRemSectionLabel}>Suggested Time</Text>
+              <View style={s.addRemTimePillsRow}>
+                {["08:00 AM", "10:00 AM", "01:00 PM", "06:00 PM", "09:00 PM"].map((t) => (
+                  <Pressable
+                    key={t}
+                    onPress={() => setNewReminderTime(t)}
+                    style={[s.addRemTimePill, newReminderTime === t && s.addRemTimePillActive]}
+                  >
+                    <Text style={[s.addRemTimePillText, newReminderTime === t && s.addRemTimePillTextActive]}>
+                      {t}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              {/* Link to Trip (Optional) */}
+              {trips.length > 0 && (
+                <>
+                  <Text style={s.addRemSectionLabel}>Link to Trip (Optional)</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                    {trips.map((tr) => {
+                      const isChosen = newReminderTripId === tr.id;
+                      return (
+                        <Pressable
+                          key={tr.id}
+                          onPress={() => setNewReminderTripId(isChosen ? "" : tr.id)}
+                          style={[s.addRemTripChip, isChosen && s.addRemTripChipActive]}
+                        >
+                          <Text style={[s.addRemTripChipText, isChosen && s.addRemTripChipTextActive]}>
+                            {tr.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </>
+              )}
+
+              {/* Save & Cancel Buttons */}
+              <View style={s.addRemActionsRow}>
+                <Pressable
+                  onPress={() => setNewReminderModalOpen(false)}
+                  style={s.addRemCancelBtn}
+                >
+                  <Text style={s.addRemCancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleCreateReminder}
+                  style={[s.addRemSaveBtn, !newReminderText.trim() && { opacity: 0.5 }]}
+                  disabled={!newReminderText.trim()}
+                >
+                  <Ionicons name="checkmark" size={16} color="#000000" />
+                  <Text style={s.addRemSaveText}>Save Reminder</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* ── Month & Year Fast Selector Modal (Tapping Month/Year opens this) ── */}
+        <Modal
+          animationType="fade"
+          transparent
+          visible={monthYearPickerOpen}
+          onRequestClose={() => setMonthYearPickerOpen(false)}
+        >
+          <View style={s.myPickerOverlay}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setMonthYearPickerOpen(false)} />
+            <View style={s.myPickerCard}>
+              <View style={s.myPickerHeaderRow}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Ionicons name="calendar-outline" size={18} color="#ffffff" />
+                  <Text style={s.myPickerTitle}>Select Month & Year</Text>
+                </View>
+                <Pressable onPress={() => setMonthYearPickerOpen(false)} hitSlop={10}>
+                  <Ionicons name="close" size={20} color="#ffffff" />
+                </Pressable>
+              </View>
+
+              {/* Year Selector with Left/Right Arrows */}
+              <View style={s.myPickerYearRow}>
+                <Pressable
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setPickerSelectedYear((y) => y - 1);
+                  }}
+                  hitSlop={10}
+                  style={s.myPickerYearNavBtn}
+                >
+                  <Ionicons name="chevron-back" size={18} color="#ffffff" />
+                </Pressable>
+                <Text style={s.myPickerYearText}>{pickerSelectedYear}</Text>
+                <Pressable
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setPickerSelectedYear((y) => y + 1);
+                  }}
+                  hitSlop={10}
+                  style={s.myPickerYearNavBtn}
+                >
+                  <Ionicons name="chevron-forward" size={18} color="#ffffff" />
+                </Pressable>
+              </View>
+
+              {/* 12 Months Grid */}
+              <View style={s.myPickerMonthsGrid}>
+                {[
+                  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+                ].map((mName, mIdx) => {
+                  const isCurrent =
+                    currentArchiveDate.getFullYear() === pickerSelectedYear &&
+                    currentArchiveDate.getMonth() === mIdx;
+                  const isNowMonth =
+                    new Date().getFullYear() === pickerSelectedYear &&
+                    new Date().getMonth() === mIdx;
+
+                  return (
+                    <Pressable
+                      key={mName}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        const now = new Date();
+                        const newOffset = (pickerSelectedYear - now.getFullYear()) * 12 + (mIdx - now.getMonth());
+                        setArchiveMonthOffset(newOffset);
+                        setMonthYearPickerOpen(false);
+                      }}
+                      style={[
+                        s.myPickerMonthChip,
+                        isCurrent && s.myPickerMonthChipActive,
+                        isNowMonth && !isCurrent && s.myPickerMonthChipNow,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          s.myPickerMonthChipText,
+                          isCurrent && s.myPickerMonthChipTextActive,
+                          isNowMonth && !isCurrent && s.myPickerMonthChipTextNow,
+                        ]}
+                      >
+                        {mName}
+                      </Text>
+                    </Pressable>
                   );
                 })}
               </View>
 
-              {/* 6. Selected Trip Preview Card from Archive */}
-              {selectedArchiveTrip && (
-                <View style={s.archiveTripPreviewBox}>
-                  <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
-                  <ExpoImage
-                    source={{ uri: getTripDisplayImage(selectedArchiveTrip) }}
-                    style={s.archivePreviewCover}
-                    contentFit="cover"
-                  />
-                  <View style={{ flex: 1, paddingLeft: 12 }}>
-                    <Text style={s.archivePreviewName} numberOfLines={1}>
-                      {selectedArchiveTrip.name}
-                    </Text>
-                    <Text style={s.archivePreviewLoc} numberOfLines={1}>
-                      📍 {selectedArchiveTrip.location || "Scenic Location"}
-                    </Text>
-                    <Text style={s.archivePreviewDates}>
-                      📅 {formatSpanHorizon(selectedArchiveTrip.startDate, selectedArchiveTrip.endDate)}
-                    </Text>
-                    <Pressable
-                      onPress={() => {
-                        closeCalendarDrawer();
-                        setTimeout(() => openDetailsModal(selectedArchiveTrip), 200);
-                      }}
-                      style={s.archivePreviewActionBtn}
-                    >
-                      <Text style={s.archivePreviewActionText}>Open Trip Details</Text>
-                      <Ionicons name="arrow-forward" size={13} color="#000000" />
-                    </Pressable>
-                  </View>
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        </Animated.View>
-      </Modal>
-
-      {/* ═══════════════════════════════════════════════════════════
-         AI SUGGESTED TRIPS MODAL
-         ═══════════════════════════════════════════════════════════ */}
-      <Modal
-        animationType="none"
-        transparent
-        visible={suggestedModalOpen}
-        onRequestClose={closeSuggestedModal}
-      >
-        {/* Ambient Blur Backdrop - Blurs the underlying Trip Page without random blue accent */}
-        <Animated.View style={[StyleSheet.absoluteFill, { opacity: suggestedModalAnim }]}>
-          <Animated.View style={[StyleSheet.absoluteFill, { opacity: suggestedBackdropFade }]}>
-            <BlurView
-              intensity={Platform.OS === "ios" ? 80 : 65}
-              tint="dark"
-              style={StyleSheet.absoluteFill}
-            />
-            <View
-              style={[
-                StyleSheet.absoluteFill,
-                { backgroundColor: "rgba(12, 14, 21, 0.76)" },
-              ]}
-            />
-            <Pressable style={StyleSheet.absoluteFill} onPress={closeSuggestedModal} />
-          </Animated.View>
-        </Animated.View>
-
-        {/* Modal Container with pull-down-to-close */}
-        <Animated.View
-          {...suggestedContainerPanResponder.panHandlers}
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              transform: [{ translateY: suggestedModalTranslateY }, { scale: suggestedModalScale }],
-            },
-          ]}
-        >
-          {/* Top Pull Handle */}
-          <View
-            {...suggestedHandlePanResponder.panHandlers}
-            style={[s.modalPullHeader, { paddingTop: insets.top + 8 }]}
-          >
-            <View style={s.modalPullPill} />
-          </View>
-
-          <View style={s.suggestedModalWrapper}>
-            {/* Header */}
-            <View style={s.suggestedHeaderRow}>
-              <View>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <Text style={s.suggestedModalTitle}>Suggested Trips</Text>
-                  <View style={s.aiBadge}>
-                    <Text style={s.aiBadgeText}>AI CURATED</Text>
-                  </View>
-                </View>
-                <Text style={s.suggestedModalSubtitle}>
-                  Tailored to your {suggestedTripsData.favType} preference & ₹{suggestedTripsData.avgBudget.toLocaleString()} budget
-                </Text>
-              </View>
-              <Pressable onPress={closeSuggestedModal} hitSlop={10} style={s.suggestedCloseBtn}>
-                <Ionicons name="close" size={20} color="#ffffff" />
+              {/* Quick Jump to Current Month */}
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  setArchiveMonthOffset(0);
+                  setSelectedArchiveDate(new Date());
+                  setMonthYearPickerOpen(false);
+                }}
+                style={s.myPickerResetBtn}
+              >
+                <Text style={s.myPickerResetText}>Jump to Current Month</Text>
               </Pressable>
             </View>
-
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              scrollEventThrottle={16}
-              onScroll={(e) => {
-                suggestedScrollOffset.current = e.nativeEvent.contentOffset.y;
-              }}
-              nestedScrollEnabled={true}
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
-            >
-              {suggestedTripsData.list.map((sug) => {
-                return (
-                  <View key={sug.id} style={s.sugCard}>
-                    <ExpoImage source={{ uri: sug.image }} style={s.sugCardBg} contentFit="cover" />
-                    <LinearGradient
-                      colors={["transparent", "rgba(10, 13, 20, 0.7)", "rgba(10, 13, 20, 0.96)"]}
-                      locations={[0, 0.45, 1]}
-                      style={StyleSheet.absoluteFill}
-                    />
-
-                    <View style={s.sugCardBody}>
-                      <View style={s.sugTopBadges}>
-                        <View style={s.sugBadgePill}>
-                          <Text style={s.sugBadgeText}>{sug.travelType}</Text>
-                        </View>
-                        <View style={s.sugBudgetPill}>
-                          <Text style={s.sugBudgetText}>₹{sug.budget.toLocaleString()} Estimated</Text>
-                        </View>
-                      </View>
-
-                      <Text style={s.sugTitle}>{sug.name}</Text>
-                      <View style={s.sugRouteRow}>
-                        <Ionicons name="location-sharp" size={13} color="#ffffff" />
-                        <Text style={s.sugRouteText}>{sug.from} ➔ {sug.to}</Text>
-                      </View>
-
-                      {/* AI Rationale Tag */}
-                      <View style={s.sugInsightBox}>
-                        <Ionicons name="sparkles" size={12} color="#fbbf24" />
-                        <Text style={s.sugInsightText}>{sug.insight}</Text>
-                      </View>
-
-                      {/* Create Trip Action Button (Directly opens CreateTripSheet with auto-fill) */}
-                      <Pressable
-                        onPress={() => handleOpenCreateWithSuggestion(sug)}
-                        style={({ pressed }) => [
-                          s.sugAdoptBtn,
-                          pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
-                        ]}
-                      >
-                        <Ionicons name="sparkles" size={15} color="#000000" />
-                        <Text style={s.sugAdoptBtnText}>Create Trip (Auto-fill)</Text>
-                        <Ionicons name="arrow-forward" size={14} color="#000000" />
-                      </Pressable>
-                    </View>
-                  </View>
-                );
-              })}
-
-              {/* Load 2 More Suggestions Button */}
-              {suggestedTripsData.hasMore && (
-                <Pressable
-                  onPress={() => setVisibleSuggestedCount((prev) => prev + 2)}
-                  style={({ pressed }) => [
-                    s.moreSuggestionsBtn,
-                    pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
-                  ]}
-                >
-                  <Ionicons name="sparkles" size={15} color="#ffffff" />
-                  <Text style={s.moreSuggestionsBtnText}>
-                    Load 2 More Suggestions ({suggestedTripsData.totalCount - visibleSuggestedCount} more)
-                  </Text>
-                  <Ionicons name="chevron-down" size={15} color="#ffffff" />
-                </Pressable>
-              )}
-            </ScrollView>
           </View>
-        </Animated.View>
+        </Modal>
       </Modal>
+
+
 
       {/* ── FILTER MODAL (Exact glossy glassmorphic style with blur effect) ── */}
       <Modal
@@ -2984,9 +3721,7 @@ const s = StyleSheet.create({
     width: "100%",
     zIndex: 20,
     elevation: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255, 255, 255, 0.12)",
-    overflow: "hidden",
+    overflow: "visible",
     backgroundColor: "transparent",
   },
   stickyHeaderContent: {
@@ -3356,14 +4091,15 @@ const s = StyleSheet.create({
   calPullIndicatorWrap: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 2,
-    marginBottom: 6,
+    paddingVertical: 5,
+    paddingHorizontal: 16,
+    marginBottom: 4,
   },
   calPullIndicatorBar: {
-    width: 34,
-    height: 3,
+    width: 38,
+    height: 4,
     borderRadius: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.25)",
+    backgroundColor: "rgba(255, 255, 255, 0.3)",
   },
   calScrollContent: { gap: 8, paddingHorizontal: 2 },
   calDayPill: {
@@ -4184,7 +4920,7 @@ const s = StyleSheet.create({
     fontWeight: "800",
   },
 
-  /* ── Suggested Trips Trigger & Modal Styles ── */
+  /* ── Suggested Trips Trigger & Inline Grid Styles ── */
   suggestedSectionContainer: {
     marginTop: 12,
     marginBottom: 8,
@@ -4194,6 +4930,9 @@ const s = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.14)",
+  },
+  suggestedTripsTriggerBtnActive: {
+    borderColor: "rgba(255, 255, 255, 0.28)",
   },
   suggestedTriggerInner: {
     flexDirection: "row",
@@ -4210,6 +4949,10 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.18)",
+  },
+  suggestedTriggerIconWrapActive: {
+    backgroundColor: "rgba(251, 191, 36, 0.18)",
+    borderColor: "rgba(251, 191, 36, 0.4)",
   },
   suggestedTriggerTitle: {
     color: "#ffffff",
@@ -4243,137 +4986,185 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  suggestedModalWrapper: {
-    flex: 1,
-    paddingHorizontal: 16,
+  suggestedArrowCircleActive: {
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
   },
-  suggestedHeaderRow: {
+  suggestedGridContainer: {
+    marginTop: 14,
+  },
+  suggestedGridHeader: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    marginBottom: 16,
-    paddingTop: 4,
-  },
-  suggestedModalTitle: {
-    color: "#ffffff",
-    fontSize: 22,
-    fontWeight: "900",
-    letterSpacing: -0.4,
-  },
-  suggestedModalSubtitle: {
-    color: "rgba(255, 255, 255, 0.6)",
-    fontSize: 12,
-    fontWeight: "500",
-    marginTop: 3,
-  },
-  suggestedCloseBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+    paddingHorizontal: 4,
   },
-  sugCard: {
-    height: 230,
-    borderRadius: 22,
+  suggestedGridHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flex: 1,
+  },
+  suggestedGridHeaderText: {
+    color: "rgba(255, 255, 255, 0.65)",
+    fontSize: 11.5,
+    fontWeight: "600",
+  },
+  suggestedGridHeaderHighlight: {
+    color: "#ffffff",
+    fontWeight: "800",
+  },
+  suggestedGridHeaderCountBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
+  suggestedGridHeaderCountText: {
+    color: "rgba(255, 255, 255, 0.7)",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  suggestedGridRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: 12,
+  },
+  sugGridCard: {
+    width: SUGGESTED_CARD_WIDTH,
+    height: 235,
+    borderRadius: 20,
     overflow: "hidden",
-    marginBottom: 16,
-    backgroundColor: "#161922",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
+    backgroundColor: "#141724",
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.12)",
     position: "relative",
+    justifyContent: "space-between",
   },
-  sugCardBg: {
+  sugGridCardPressed: {
+    opacity: 0.88,
+    transform: [{ scale: 0.98 }],
+  },
+  sugGridCardBg: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
+    width: "100%",
+    height: "100%",
   },
-  sugCardBody: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
-  },
-  sugTopBadges: {
+  sugGridTopRow: {
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    gap: 8,
-    marginBottom: 6,
+    padding: 10,
+    zIndex: 2,
   },
-  sugBadgePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-  },
-  sugBadgeText: {
-    color: "#ffffff",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  sugBudgetPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-    backgroundColor: "rgba(0, 0, 0, 0.45)",
+  sugGridTypeBadge: {
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    borderRadius: 9,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.15)",
+    borderColor: "rgba(255, 255, 255, 0.2)",
+    maxWidth: "68%",
   },
-  sugBudgetText: {
+  sugGridTypeBadgeText: {
     color: "#ffffff",
-    fontSize: 11,
-    fontWeight: "700",
+    fontSize: 9.5,
+    fontWeight: "800",
   },
-  sugTitle: {
+  sugGridDaysBadge: {
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: 9,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  sugGridDaysBadgeText: {
     color: "#ffffff",
-    fontSize: 18,
+    fontSize: 9.5,
+    fontWeight: "800",
+  },
+  sugGridBottomInfo: {
+    padding: 11,
+    zIndex: 2,
+  },
+  sugGridTitle: {
+    color: "#ffffff",
+    fontSize: 13,
     fontWeight: "900",
-    letterSpacing: -0.3,
+    lineHeight: 16.5,
+    letterSpacing: -0.2,
+    marginBottom: 4,
   },
-  sugRouteRow: {
+  sugGridLocationRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    marginTop: 3,
+    gap: 3,
+    marginBottom: 8,
   },
-  sugRouteText: {
-    color: "rgba(255, 255, 255, 0.8)",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  sugInsightBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    backgroundColor: "rgba(0, 0, 0, 0.35)",
-  },
-  sugInsightText: {
-    color: "rgba(255, 255, 255, 0.85)",
-    fontSize: 11,
+  sugGridLocationText: {
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 10.5,
     fontWeight: "600",
   },
-  sugAdoptBtn: {
+  sugGridFooterRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 4,
+  },
+  sugGridBudgetPill: {
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 3.5,
+  },
+  sugGridBudgetText: {
+    color: "#ffffff",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  sugGridActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#ffffff",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4.5,
+  },
+  sugGridActionBtnText: {
+    color: "#000000",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  sugGridPaginationRow: {
+    marginTop: 12,
+    alignItems: "center",
+    gap: 8,
+  },
+  sugGridLoadMoreBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    backgroundColor: "#ffffff",
-    paddingVertical: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.14)",
     borderRadius: 16,
-    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    width: "100%",
   },
-  sugAdoptBtnText: {
-    color: "#000000",
-    fontSize: 13,
-    fontWeight: "900",
+  sugGridLoadMoreText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "800",
   },
 
   /* ── Instagram-Style Travel Archive Calendar Drawer Styles ── */
@@ -4475,34 +5266,47 @@ const s = StyleSheet.create({
   },
   archiveDayCell: {
     width: (SCREEN_WIDTH - 32) / 7,
-    height: 52,
+    height: 56,
     alignItems: "center",
     justifyContent: "center",
   },
+  archiveDayContainer: {
+    width: (SCREEN_WIDTH - 32) / 7,
+    height: 56,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  archiveDayContainerSelected: {
+    transform: [{ scale: 1.05 }],
+  },
   archivePhotoCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.8)",
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.75)",
   },
   archivePhotoCircleSelected: {
     borderColor: "#ffffff",
-    transform: [{ scale: 1.1 }],
+    borderWidth: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
     elevation: 6,
   },
   archivePhotoCircleOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.35)",
+    backgroundColor: "rgba(0, 0, 0, 0.38)",
   },
   archivePhotoDayText: {
     color: "#ffffff",
-    fontSize: 13.5,
+    fontSize: 13,
     fontWeight: "900",
-    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowColor: "rgba(0,0,0,0.9)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
@@ -4510,11 +5314,36 @@ const s = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#ffffff",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.75)",
     alignItems: "center",
     justifyContent: "center",
   },
+  archiveTodayCircleSelected: {
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    transform: [{ scale: 1.08 }],
+  },
   archiveTodayDayText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  archiveSelectedCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  archiveSelectedDayText: {
     color: "#000000",
     fontSize: 13.5,
     fontWeight: "900",
@@ -4522,13 +5351,158 @@ const s = StyleSheet.create({
   archivePlainDay: {
     width: 36,
     height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
   },
+  archivePlainDaySelected: {
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.6)",
+  },
   archivePlainDayText: {
-    color: "rgba(255, 255, 255, 0.65)",
+    color: "rgba(255, 255, 255, 0.75)",
     fontSize: 13,
     fontWeight: "600",
+  },
+  archivePlainDayTextSelected: {
+    color: "#ffffff",
+    fontWeight: "800",
+  },
+  archiveDayIndicatorsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    height: 12,
+    marginTop: 2,
+    gap: 3,
+  },
+  archivePhotoWhiteDot: {
+    width: 4.5,
+    height: 4.5,
+    borderRadius: 2.5,
+    backgroundColor: "#ffffff",
+  },
+  archiveMonthTitleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+
+  /* ── Month & Year Picker Styles ── */
+  myPickerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  myPickerCard: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: "rgba(18, 22, 34, 0.96)",
+    borderRadius: 26,
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.16)",
+    padding: 22,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.6,
+    shadowRadius: 28,
+    elevation: 24,
+  },
+  myPickerHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  myPickerTitle: {
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  myPickerYearRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(255, 255, 255, 0.07)",
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  myPickerYearNavBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  myPickerYearText: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+  },
+  myPickerMonthsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    justifyContent: "space-between",
+    marginBottom: 18,
+  },
+  myPickerMonthChip: {
+    width: "31%",
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  myPickerMonthChipActive: {
+    backgroundColor: "#ffffff",
+    borderColor: "#ffffff",
+  },
+  myPickerMonthChipNow: {
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.5)",
+  },
+  myPickerMonthChipText: {
+    color: "rgba(255, 255, 255, 0.8)",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  myPickerMonthChipTextActive: {
+    color: "#000000",
+    fontWeight: "900",
+  },
+  myPickerMonthChipTextNow: {
+    color: "#ffffff",
+  },
+  myPickerResetBtn: {
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  myPickerResetText: {
+    color: "rgba(255, 255, 255, 0.8)",
+    fontSize: 12.5,
+    fontWeight: "700",
   },
   archiveTripPreviewBox: {
     flexDirection: "row",
@@ -4596,6 +5570,519 @@ const s = StyleSheet.create({
   moreSuggestionsBtnText: {
     color: "#ffffff",
     fontSize: 14,
+    fontWeight: "800",
+  },
+
+  /* ── Sticky Header Progressive Scroll Feather ── */
+  stickyFeatherBottom: {
+    position: "absolute",
+    bottom: -22,
+    left: 0,
+    right: 0,
+    height: 22,
+  },
+
+  /* ── Google Calendar & Travel Archive Modal Styles ── */
+  archiveDrawerModalContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#0d101a",
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.14)",
+    borderBottomWidth: 0,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -12 },
+    shadowOpacity: 0.85,
+    shadowRadius: 28,
+    elevation: 28,
+  },
+  archiveAddEventBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+    borderRadius: 14,
+  },
+  archiveAddEventText: {
+    color: "#000000",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  archiveGlassCard: {
+    backgroundColor: "rgba(20, 25, 38, 0.94)",
+    borderRadius: 24,
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    marginBottom: 16,
+    overflow: "hidden",
+  },
+  archiveDayPill: {
+    width: 38,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  archiveDayPillSelected: {
+    backgroundColor: "#ffffff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  archiveDayPillToday: {
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.6)",
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+  },
+  archiveDayPillText: {
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  archiveDayPillTextSelected: {
+    color: "#000000",
+    fontWeight: "900",
+  },
+  archiveDayPillTextToday: {
+    color: "#ffffff",
+    fontWeight: "800",
+  },
+  archiveDayDotsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    marginTop: 2,
+    height: 5,
+  },
+  archiveDayTripDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#10B981",
+  },
+  archiveDayReminderDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "#F59E0B",
+  },
+
+  /* Selected Day Agenda Card (Google Calendar style) */
+  archiveAgendaCard: {
+    backgroundColor: "rgba(20, 25, 38, 0.94)",
+    borderRadius: 24,
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    padding: 18,
+    marginBottom: 16,
+  },
+  archiveAgendaHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 14,
+    gap: 12,
+  },
+  archiveAgendaDateTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: -0.3,
+  },
+  archiveAgendaBadgesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 6,
+  },
+  archiveAgendaTripBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(16, 185, 129, 0.18)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.35)",
+  },
+  archiveAgendaTripBadgeText: {
+    color: "#34D399",
+    fontSize: 10.5,
+    fontWeight: "700",
+  },
+  archiveAgendaRemBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(245, 158, 11, 0.18)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(245, 158, 11, 0.35)",
+  },
+  archiveAgendaRemBadgeText: {
+    color: "#FBBF24",
+    fontSize: 10.5,
+    fontWeight: "700",
+  },
+  archiveAgendaQuickAddBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.14)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.18)",
+  },
+  archiveAgendaQuickAddText: {
+    color: "#ffffff",
+    fontSize: 11.5,
+    fontWeight: "700",
+  },
+  agendaTripItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderRadius: 18,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    marginBottom: 10,
+  },
+  agendaTripThumb: {
+    width: 68,
+    height: 68,
+    borderRadius: 14,
+  },
+  agendaTripTitle: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  agendaTripRoute: {
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 11.5,
+    fontWeight: "600",
+    marginTop: 3,
+  },
+  agendaTripDates: {
+    color: "rgba(255, 255, 255, 0.55)",
+    fontSize: 11,
+    fontWeight: "500",
+    marginTop: 2,
+  },
+  agendaTripOpenBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    alignSelf: "flex-start",
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 10,
+    paddingVertical: 4.5,
+    borderRadius: 10,
+    marginTop: 8,
+  },
+  agendaTripOpenText: {
+    color: "#000000",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  agendaSectionSubTitle: {
+    color: "rgba(255, 255, 255, 0.6)",
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  agendaRemItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    marginBottom: 8,
+  },
+  agendaRemCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  agendaRemCheckDone: {
+    backgroundColor: "#10B981",
+    borderColor: "#10B981",
+  },
+  agendaRemText: {
+    color: "#ffffff",
+    fontSize: 13.5,
+    fontWeight: "600",
+  },
+  agendaRemTextDone: {
+    textDecorationLine: "line-through",
+    color: "rgba(255, 255, 255, 0.4)",
+  },
+  agendaRemTimeTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  agendaRemTimeText: {
+    color: "rgba(255, 255, 255, 0.7)",
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  agendaRemTripTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(59, 130, 246, 0.15)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    maxWidth: 140,
+  },
+  agendaRemTripText: {
+    color: "#93C5FD",
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  agendaRemTrashBtn: {
+    padding: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  agendaEmptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+  },
+  agendaEmptyText: {
+    color: "rgba(255, 255, 255, 0.45)",
+    fontSize: 12.5,
+    fontWeight: "500",
+    textAlign: "center",
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  agendaEmptyActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+  },
+  agendaEmptyActionText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  /* All Reminders Overview Section */
+  archiveOverviewCard: {
+    backgroundColor: "rgba(20, 25, 38, 0.94)",
+    borderRadius: 24,
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    padding: 18,
+    marginBottom: 16,
+  },
+  archiveOverviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  archiveOverviewTitle: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  archiveOverviewBadge: {
+    backgroundColor: "rgba(245, 158, 11, 0.18)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(245, 158, 11, 0.35)",
+  },
+  archiveOverviewBadgeText: {
+    color: "#FBBF24",
+    fontSize: 10.5,
+    fontWeight: "700",
+  },
+
+  /* Add Reminder Popup Modal */
+  addRemOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.72)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  addRemCard: {
+    width: "100%",
+    maxWidth: 400,
+    backgroundColor: "rgba(20, 24, 36, 0.96)",
+    borderRadius: 26,
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.16)",
+    padding: 22,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.6,
+    shadowRadius: 28,
+    elevation: 24,
+  },
+  addRemHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  addRemTitle: {
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  addRemDateNote: {
+    color: "rgba(255, 255, 255, 0.6)",
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 14,
+  },
+  addRemInput: {
+    backgroundColor: "rgba(255, 255, 255, 0.07)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    color: "#ffffff",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    marginBottom: 14,
+  },
+  addRemSectionLabel: {
+    color: "rgba(255, 255, 255, 0.7)",
+    fontSize: 11.5,
+    fontWeight: "700",
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  addRemTimePillsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 14,
+  },
+  addRemTimePill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  addRemTimePillActive: {
+    backgroundColor: "#F59E0B",
+    borderColor: "#F59E0B",
+  },
+  addRemTimePillText: {
+    color: "rgba(255, 255, 255, 0.8)",
+    fontSize: 11.5,
+    fontWeight: "600",
+  },
+  addRemTimePillTextActive: {
+    color: "#000000",
+    fontWeight: "800",
+  },
+  addRemTripChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    marginBottom: 14,
+  },
+  addRemTripChipActive: {
+    backgroundColor: "#ffffff",
+    borderColor: "#ffffff",
+  },
+  addRemTripChipText: {
+    color: "rgba(255, 255, 255, 0.8)",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  addRemTripChipTextActive: {
+    color: "#000000",
+    fontWeight: "800",
+  },
+  addRemActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 6,
+  },
+  addRemCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addRemCancelText: {
+    color: "rgba(255, 255, 255, 0.7)",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  addRemSaveBtn: {
+    flex: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: "#ffffff",
+  },
+  addRemSaveText: {
+    color: "#000000",
+    fontSize: 13,
     fontWeight: "800",
   },
 });

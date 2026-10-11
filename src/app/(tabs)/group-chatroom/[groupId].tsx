@@ -16,6 +16,8 @@ import {
   ImageBackground,
   Linking,
   BackHandler,
+  Keyboard,
+  Animated,
 } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -26,6 +28,7 @@ import { useCall } from "../../../contexts/CallContext";
 import {
   collection,
   addDoc,
+  setDoc,
   serverTimestamp,
   doc,
   getDoc,
@@ -43,11 +46,15 @@ import GroupInfoDrawer from "../../../components/group_chat/GroupInfoDrawer";
 import UserProfileModal from "../../../components/UserProfileModal";
 import { BlurView } from "expo-blur";
 import { sendGroupChatMessageNotification } from "../../../lib/sendAppNotification";
+import { DEFAULT_WALLPAPER_ASSET, getWallpaperSource } from "../../../contexts/ChatSettingsContext";
+import WallpaperThemePreviewModal from "../../../components/chat/WallpaperThemePreviewModal";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { LinearGradient } from "expo-linear-gradient";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const DEFAULT_GROUP_AVATAR = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=200";
-const DARK_WAVE_WALLPAPER = "https://i.ibb.co/C0f9vH9/dark-wave-bg.png";
+const DARK_WAVE_WALLPAPER = DEFAULT_WALLPAPER_ASSET;
 
 const DEFAULT_CHECKLIST_ITEMS = [
   "Travel Adapter",
@@ -95,6 +102,7 @@ export default function GroupChatroom() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
 
   // Reaction & Context Menu Modal (Image 1)
   const [reactionMsg, setReactionMsg] = useState<any | null>(null);
@@ -104,44 +112,162 @@ export default function GroupChatroom() {
   const [callModalVisible, setCallModalVisible] = useState(false);
   const [pendingCallType, setPendingCallType] = useState<"audio" | "video">("audio");
 
+  // Group-specific Custom Wallpaper, Bubble Color & Dimming (Single Chat Feature!)
+  const [localGroupWallpaper, setLocalGroupWallpaper] = useState<string | null>(null);
+  const [localGroupBubbleColor, setLocalGroupBubbleColor] = useState<string | null>(null);
+  const [localGroupWallpaperDim, setLocalGroupWallpaperDim] = useState<number>(0);
+  const [showWallpaperModal, setShowWallpaperModal] = useState(false);
+
+  useEffect(() => {
+    if (!groupKey) return;
+    AsyncStorage.getItem(`@bunkmates_custom_chat_wallpaper_${groupKey}`).then((saved) => {
+      if (saved) setLocalGroupWallpaper(saved);
+    });
+    AsyncStorage.getItem(`@bunkmates_custom_chat_bubble_color_${groupKey}`).then((c) => {
+      if (c) setLocalGroupBubbleColor(c);
+    });
+    AsyncStorage.getItem(`@bunkmates_custom_chat_wallpaper_dim_${groupKey}`).then((d) => {
+      if (d) setLocalGroupWallpaperDim(parseFloat(d) || 0);
+    });
+  }, [groupKey]);
+
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const isAtBottomRef = useRef(true);
+  const isInitialLoadRef = useRef(true);
+
+  // ── DUAL-DEVICE ADAPTIVE KEYBOARD DETECTION (WhatsApp-style) ──
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [rootHeight, setRootHeight] = useState(0);
+  const initialRootHeight = useRef(0);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 60);
+      }
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardHeight(0);
+      }
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const isOsResized =
+    Platform.OS === "android" &&
+    initialRootHeight.current > 0 &&
+    initialRootHeight.current - rootHeight > 100;
+
+  const androidKeyboardPadding =
+    Platform.OS === "android" && keyboardHeight > 0 && !isOsResized
+      ? keyboardHeight
+      : 0;
 
   // ═══════════════════════════════════════════════════════════════
-  // 1. FETCH GROUP & MEMBERS DATA
+  // 1. FETCH GROUP & MEMBERS DATA (with Offline Cache Support)
   // ═══════════════════════════════════════════════════════════════
   useEffect(() => {
     if (!groupKey) return;
 
-    const groupDocRef = doc(db, "groupChats", groupKey);
-    const unsub = onSnapshot(groupDocRef, async (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setGroupData(data);
-
-        // Fetch Creator Profile
-        if (data.createdBy) {
-          try {
-            const cSnap = await getDoc(doc(db, "users", data.createdBy));
-            if (cSnap.exists()) {
-              setCreatedByUser(cSnap.data());
-            }
-          } catch (e) {}
-        }
-
-        // Fetch Member Profiles
-        if (Array.isArray(data.members) && data.members.length > 0) {
-          try {
-            const memberDocs = await Promise.all(
-              data.members.slice(0, 20).map((uid: string) => getDoc(doc(db, "users", uid)))
-            );
-            const resolved = memberDocs
-              .map((d, i) => (d.exists() ? { uid: data.members[i], ...d.data() } : null))
-              .filter(Boolean);
-            setMemberUsers(resolved);
-          } catch (e) {}
-        }
+    // 1. Instantly hydrate from local offline cache
+    AsyncStorage.getItem(`@bunkmates_group_meta_${groupKey}`).then((cached) => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed?.groupData) setGroupData((prev: any) => prev || parsed.groupData);
+          if (Array.isArray(parsed?.memberUsers) && parsed.memberUsers.length > 0) {
+            setMemberUsers((prev: any) => (prev.length > 0 ? prev : parsed.memberUsers));
+          }
+          if (parsed?.createdByUser) setCreatedByUser((prev: any) => prev || parsed.createdByUser);
+        } catch (e) {}
       }
     });
+
+    // 2. Real-time Firestore sync with fallback to groups & trips collections
+    const handleDocSnapshot = async (data: any) => {
+      setGroupData(data);
+
+      let fetchedCreator: any = null;
+      let fetchedMembers: any[] = [];
+
+      // Fetch Creator Profile
+      if (data.createdBy) {
+        try {
+          const cSnap = await getDoc(doc(db, "users", data.createdBy));
+          if (cSnap.exists()) {
+            fetchedCreator = cSnap.data();
+            setCreatedByUser(fetchedCreator);
+          }
+        } catch (e) {}
+      }
+
+      // Fetch Member Profiles
+      if (Array.isArray(data.members) && data.members.length > 0) {
+        try {
+          const rawMemberUids = data.members
+            .map((m: any) => (typeof m === "string" ? m : m?.uid || m?.id || ""))
+            .filter(Boolean);
+
+          const memberDocs = await Promise.all(
+            rawMemberUids.slice(0, 25).map((uid: string) => getDoc(doc(db, "users", uid)))
+          );
+          fetchedMembers = memberDocs
+            .map((d, i) => (d.exists() ? { uid: rawMemberUids[i], ...d.data() } : null))
+            .filter(Boolean);
+          setMemberUsers(fetchedMembers);
+        } catch (e) {}
+      }
+
+      AsyncStorage.setItem(
+        `@bunkmates_group_meta_${groupKey}`,
+        JSON.stringify({
+          groupData: data,
+          memberUsers: fetchedMembers,
+          createdByUser: fetchedCreator,
+        })
+      ).catch(() => {});
+    };
+
+    const groupDocRef = doc(db, "groupChats", groupKey);
+    const unsub = onSnapshot(
+      groupDocRef,
+      async (snap) => {
+        if (snap.exists()) {
+          handleDocSnapshot({ id: snap.id, ...snap.data() });
+        } else {
+          // Check groups collection
+          const gSnap = await getDoc(doc(db, "groups", groupKey)).catch(() => null);
+          if (gSnap && gSnap.exists()) {
+            handleDocSnapshot({ id: gSnap.id, ...gSnap.data() });
+          } else {
+            // Check trips collection
+            const tSnap = await getDoc(doc(db, "trips", groupKey)).catch(() => null);
+            if (tSnap && tSnap.exists()) {
+              const tData = tSnap.data();
+              handleDocSnapshot({
+                id: tSnap.id,
+                ...tData,
+                name: tData.name || tData.tripName || "Trip Group",
+                iconURL: tData.iconURL || tData.groupChatIcon || tData.coverImage || null,
+              });
+            }
+          }
+        }
+      },
+      (err) => {
+        console.log("Group meta offline fallback:", err.message);
+      }
+    );
 
     return () => unsub();
   }, [groupKey]);
@@ -149,9 +275,17 @@ export default function GroupChatroom() {
   // Scroll to bottom on new messages
   useEffect(() => {
     if (messages.length > 0) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      flatListRef.current?.scrollToEnd({ animated: false });
+      const t1 = setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }, 60);
+      const t2 = setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }, 250);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
     }
   }, [messages.length]);
 
@@ -218,6 +352,8 @@ export default function GroupChatroom() {
     if (!input.trim() && !pendingImage && !customPayload) return;
     if (!groupKey || !user) return;
 
+    if (uploading) return;
+
     const textToSend = input.trim();
     setInput("");
     setReplyTo(null);
@@ -233,6 +369,8 @@ export default function GroupChatroom() {
       Alert.alert("Permission Denied", "Only admins can send messages in this group.");
       return;
     }
+
+    setUploading(true);
 
     try {
       const msgObj = customPayload || {
@@ -250,9 +388,25 @@ export default function GroupChatroom() {
 
       setPendingImage(null);
 
-      // Dual collection write for Web & Mobile synchronization
-      await addDoc(collection(db, "groupChat", groupKey, "messages"), msgObj);
-      await addDoc(collection(db, "groupChats", groupKey, "messages"), msgObj);
+      // Single deterministic write to primary groupChats, mirroring to groupChat with identical docId
+      const newMsgDoc = await addDoc(collection(db, "groupChats", groupKey, "messages"), msgObj);
+      await setDoc(doc(db, "groupChat", groupKey, "messages", newMsgDoc.id), msgObj).catch(() => {});
+
+      // Update group doc metadata for immediate sync across devices and chats list
+      const metaUpdate = {
+        lastMessage: msgObj.text || (pendingImage ? "📷 Photo" : "Sent a message"),
+        lastTimestamp: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        date: serverTimestamp(),
+      };
+      updateDoc(doc(db, "groupChats", groupKey), metaUpdate).catch(() => {});
+      updateDoc(doc(db, "groupChat", groupKey), metaUpdate).catch(() => {});
+      updateDoc(doc(db, "trips", groupKey), metaUpdate).catch(() => {});
+      updateDoc(doc(db, "groups", groupKey), metaUpdate).catch(() => {});
+
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 50);
 
       // Send group push notification & write to notifications collection
       const targetMemberUids = Array.isArray(groupData?.members)
@@ -273,6 +427,8 @@ export default function GroupChatroom() {
     } catch (error) {
       console.error("Error sending group message:", error);
       Alert.alert("Error", "Failed to send message");
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -424,8 +580,33 @@ export default function GroupChatroom() {
     });
   };
 
-  // Camera / Gallery Image Picker
+  // Camera capture directly from device camera (Inserted in Plus option)
+  const takeCameraPhoto = async () => {
+    setAttachMenuOpen(false);
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert("Permission Required", "Please allow camera access to capture photos.");
+        return;
+      }
+
+      const res = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        quality: 0.7,
+      });
+
+      if (!res.canceled && res.assets && res.assets[0]?.uri) {
+        setPendingImage(res.assets[0].uri);
+      }
+    } catch (e) {
+      console.log("Camera capture error:", e);
+    }
+  };
+
+  // Gallery Image Picker
   const pickImage = async () => {
+    setAttachMenuOpen(false);
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
@@ -706,7 +887,11 @@ export default function GroupChatroom() {
             setReactionMsg(item);
             setShowMoreEmojis(false);
           }}
-          style={[s.msgBubble, isOwn ? s.msgBubbleOwn : s.msgBubbleOther]}
+          style={[
+            s.msgBubble,
+            isOwn ? s.msgBubbleOwn : s.msgBubbleOther,
+            isOwn && !!localGroupBubbleColor ? { backgroundColor: localGroupBubbleColor } : null,
+          ]}
         >
           {/* Sender Name for incoming group messages (Image 2) */}
           {!isOwn && (
@@ -725,17 +910,23 @@ export default function GroupChatroom() {
 
           {/* Attached Image */}
           {item.imageUrl && (
-            <ExpoImage
-              source={{ uri: item.imageUrl }}
-              style={s.msgAttachedImage}
-              contentFit="cover"
-            />
+            <Pressable
+              onPress={() => setFullScreenImage(item.imageUrl)}
+              style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }]}
+            >
+              <ExpoImage
+                source={{ uri: item.imageUrl }}
+                style={s.msgAttachedImage}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+              />
+            </Pressable>
           )}
 
           {/* Message Text */}
           {item.text ? <Text style={s.msgText}>{item.text}</Text> : null}
 
-          {/* Timestamp Row */}
+          {/* Timestamp Row (High-contrast micro pill) */}
           <View style={s.msgMetaRow}>
             <Text style={s.msgTimestamp}>
               {item.timestamp?.seconds
@@ -748,9 +939,9 @@ export default function GroupChatroom() {
             {isOwn && (
               <Ionicons
                 name="checkmark-done"
-                size={14}
-                color="#00e6b0"
-                style={{ marginLeft: 4 }}
+                size={13}
+                color="#ffffff"
+                style={{ marginLeft: 3 }}
               />
             )}
           </View>
@@ -774,58 +965,109 @@ export default function GroupChatroom() {
     );
   }
 
+  const headerTopPad = Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 6 : insets.top + 6;
+  const HEADER_TOTAL_HEIGHT = headerTopPad + 52;
+  const backgroundSource = getWallpaperSource(localGroupWallpaper || DARK_WAVE_WALLPAPER);
+
   return (
     <ImageBackground
-      source={{ uri: DARK_WAVE_WALLPAPER }}
+      source={backgroundSource}
       style={s.safeContainer}
       resizeMode="cover"
+      blurRadius={(showGroupInfo || showProfileModal) ? (Platform.OS === "android" ? 35 : 25) : 0}
     >
-      <SafeAreaViewContext style={{ flex: 1 }} edges={["top", "left", "right"]}>
-        <StatusBar barStyle="light-content" backgroundColor="#0b0f14" translucent />
+      {/* Dynamic Wallpaper Brightness Dimming Overlay */}
+      {localGroupWallpaperDim > 0 && (
+        <View
+          style={[
+            StyleSheet.absoluteFillObject,
+            { backgroundColor: `rgba(0, 0, 0, ${localGroupWallpaperDim})` },
+          ]}
+          pointerEvents="none"
+        />
+      )}
 
-        {/* ── TOP HEADER (With Call & Video Call buttons) ── */}
-        <View style={s.headerBar}>
-          {/* Back Button -> Navigates to Chat Page */}
-          <Pressable onPress={handleBack} style={s.headerCircleBtn} hitSlop={10}>
-            <Ionicons name="arrow-back" size={20} color="#ffffff" />
-          </Pressable>
+      <SafeAreaViewContext
+        style={{ flex: 1 }}
+        edges={["top", "left", "right"]}
+        onLayout={(e) => {
+          const h = e.nativeEvent.layout.height;
+          if (initialRootHeight.current === 0 && h > 0) {
+            initialRootHeight.current = h;
+          }
+          setRootHeight(h);
+        }}
+      >
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
 
-          {/* Group Avatar & Titles -> Tapping opens Group Info Drawer */}
-          <Pressable onPress={() => setShowGroupInfo(true)} style={s.headerCenterPressable}>
-            <ExpoImage
-              source={{ uri: groupData?.iconURL || DEFAULT_GROUP_AVATAR }}
-              style={s.headerGroupAvatar}
-              contentFit="cover"
-            />
-            <View style={{ flex: 1 }}>
-              <Text style={s.headerGroupTitle} numberOfLines={1}>
-                {groupData?.name || "Bunk1"}
-              </Text>
-              <Text style={s.headerGroupSubtitle} numberOfLines={1}>
-                {memberNamesSubtitle}
-              </Text>
+        {/* TOP GRADIENT FADE: Single Chat Style */}
+        {!showGroupInfo && !showProfileModal && (
+          <LinearGradient
+            colors={[
+              "rgba(11, 20, 27, 0.98)",
+              "rgba(11, 20, 27, 0.90)",
+              "rgba(11, 20, 27, 0.65)",
+              "rgba(11, 20, 27, 0.30)",
+              "rgba(11, 20, 27, 0.08)",
+              "transparent",
+            ]}
+            locations={[0, 0.38, 0.62, 0.80, 0.92, 1]}
+            pointerEvents="none"
+            style={[
+              s.topGradientFade,
+              { height: HEADER_TOTAL_HEIGHT + 36 },
+            ]}
+          />
+        )}
+
+        {/* ── TOP FLOATING HEADER (Single Chat Style: ONLY Video & Audio Call options) ── */}
+        {!showGroupInfo && !showProfileModal && (
+          <View style={[s.headerFloatingWrap, { paddingTop: headerTopPad }]}>
+            <View style={s.headerInnerRow}>
+              {/* Back Button */}
+              <Pressable onPress={handleBack} style={s.circleBtn} hitSlop={10}>
+                <Ionicons name="arrow-back" size={20} color="#ffffff" />
+              </Pressable>
+
+              {/* Group Pill (Avatar, Name, Subtitle) */}
+              <Pressable onPress={() => setShowGroupInfo(true)} style={s.userPill}>
+                <ExpoImage
+                  source={{ uri: groupData?.iconURL || DEFAULT_GROUP_AVATAR }}
+                  style={s.avatar}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.userName} numberOfLines={1}>
+                    {groupData?.name || "Bunk1"}
+                  </Text>
+                  <Text style={s.userHandle} numberOfLines={1}>
+                    {memberNamesSubtitle}
+                  </Text>
+                </View>
+              </Pressable>
+
+              {/* ONLY TWO OPTIONS: Video Call & Audio Call */}
+              <View style={s.headerActions}>
+                <Pressable
+                  style={s.circleBtn}
+                  onPress={() => handleInitiateGroupCall("video")}
+                  hitSlop={8}
+                >
+                  <Ionicons name="videocam" size={18} color="#ffffff" />
+                </Pressable>
+
+                <Pressable
+                  style={s.circleBtn}
+                  onPress={() => handleInitiateGroupCall("audio")}
+                  hitSlop={8}
+                >
+                  <Ionicons name="call" size={17} color="#ffffff" />
+                </Pressable>
+              </View>
             </View>
-          </Pressable>
-
-          {/* Call & Video Call Buttons (Single Chat Concept) */}
-          <View style={{ flexDirection: "row", gap: 6 }}>
-            <Pressable
-              style={s.headerCircleBtn}
-              onPress={() => handleInitiateGroupCall("audio")}
-              hitSlop={8}
-            >
-              <Ionicons name="call" size={18} color="#ffffff" />
-            </Pressable>
-
-            <Pressable
-              style={s.headerCircleBtn}
-              onPress={() => handleInitiateGroupCall("video")}
-              hitSlop={8}
-            >
-              <Ionicons name="videocam" size={18} color="#ffffff" />
-            </Pressable>
           </View>
-        </View>
+        )}
 
         {/* ── MESSAGES LIST ── */}
         <KeyboardAvoidingView
@@ -839,77 +1081,152 @@ export default function GroupChatroom() {
             renderItem={renderMessage}
             keyExtractor={(item) => item.id}
             ListHeaderComponent={renderListHeader}
-            contentContainerStyle={[s.messagesScrollContent, { paddingBottom: 20 }]}
+            style={(showGroupInfo || showProfileModal) ? { opacity: 0 } : undefined}
+            contentContainerStyle={[
+              s.messagesScrollContent,
+              { paddingTop: HEADER_TOTAL_HEIGHT + 10, paddingBottom: 28 },
+            ]}
             showsVerticalScrollIndicator={false}
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            onScroll={(e) => {
+              const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+              const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+              isAtBottomRef.current = distanceFromBottom < 80;
+              setShowScrollDown(distanceFromBottom > 200);
+            }}
+            scrollEventThrottle={16}
+            onLayout={() => {
+              if (isInitialLoadRef.current && messages && messages.length > 0) {
+                flatListRef.current?.scrollToEnd({ animated: false });
+              }
+            }}
+            onContentSizeChange={() => {
+              if (isInitialLoadRef.current || isAtBottomRef.current) {
+                flatListRef.current?.scrollToEnd({ animated: false });
+                isInitialLoadRef.current = false;
+              }
+            }}
           />
 
-          {/* Replying Preview Bar */}
-          {replyTo && (
-            <View style={s.replyPreviewBar}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.replyPreviewSender}>
-                  Replying to {replyTo.senderName || "Traveler"}
-                </Text>
-                <Text style={s.replyPreviewText} numberOfLines={1}>
-                  {replyTo.text || "📷 Attachment"}
-                </Text>
-              </View>
-              <Pressable onPress={() => setReplyTo(null)} hitSlop={10}>
-                <Ionicons name="close" size={20} color="rgba(255,255,255,0.7)" />
-              </Pressable>
-            </View>
-          )}
-
-          {/* Pending Image Preview */}
-          {pendingImage && (
-            <View style={s.pendingImageBar}>
-              <ExpoImage source={{ uri: pendingImage }} style={s.pendingThumb} />
-              <Pressable onPress={() => setPendingImage(null)} style={s.cancelPendingBtn}>
-                <Ionicons name="close" size={16} color="#fff" />
-              </Pressable>
-            </View>
-          )}
-
-          {/* ── BOTTOM CHAT BAR (Image 1 & 2) ── */}
-          <View style={[s.bottomBarContainer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-            {/* Plus Actions Button */}
+          {/* Floating WhatsApp-Style Scroll to Bottom Button */}
+          {showScrollDown && !showGroupInfo && !showProfileModal && (
             <Pressable
-              onPress={() => setAttachMenuOpen(true)}
-              style={s.attachPlusBtn}
-              hitSlop={8}
-            >
-              <Feather name="plus" size={20} color="#ffffff" />
-            </Pressable>
-
-            {/* Text Input */}
-            <TextInput
-              placeholder="Type a message..."
-              placeholderTextColor="rgba(255, 255, 255, 0.45)"
-              value={input}
-              onChangeText={setInput}
-              style={s.chatInput}
-              multiline
-            />
-
-            {/* Camera Button */}
-            <Pressable onPress={pickImage} style={s.cameraBtn} hitSlop={8}>
-              <Ionicons name="camera-outline" size={24} color="rgba(255, 255, 255, 0.75)" />
-            </Pressable>
-
-            {/* Circular White Send Button with black arrow */}
-            <Pressable
-              onPress={() => sendMessage()}
-              disabled={!input.trim() && !pendingImage}
               style={[
-                s.whiteSendBtn,
-                (!input.trim() && !pendingImage) && { opacity: 0.6 },
+                s.scrollToBottomBtn,
+                androidKeyboardPadding > 0 && { bottom: 80 + androidKeyboardPadding },
               ]}
-              hitSlop={8}
+              onPress={() => {
+                isAtBottomRef.current = true;
+                flatListRef.current?.scrollToEnd({ animated: true });
+              }}
             >
-              <Ionicons name="send" size={18} color="#000000" style={{ marginLeft: 2 }} />
+              <Ionicons name="chevron-down" size={20} color="#ffffff" />
             </Pressable>
-          </View>
+          )}
+
+          {/* BOTTOM GRADIENT FADE: Single Chat Style */}
+          {!showGroupInfo && !showProfileModal && (
+            <LinearGradient
+              colors={[
+                "transparent",
+                "rgba(11, 20, 27, 0.08)",
+                "rgba(11, 20, 27, 0.35)",
+                "rgba(11, 20, 27, 0.70)",
+                "rgba(11, 20, 27, 0.90)",
+                "rgba(11, 20, 27, 0.98)",
+              ]}
+              locations={[0, 0.15, 0.35, 0.60, 0.82, 1]}
+              pointerEvents="none"
+              style={[
+                s.bottomGradientFade,
+                {
+                  height:
+                    115 +
+                    Math.max(insets.bottom, 8) +
+                    (androidKeyboardPadding > 0 ? androidKeyboardPadding : 0),
+                },
+              ]}
+            />
+          )}
+
+          {/* ── BOTTOM FLOATING INPUT BAR (Single Chat Style: No camera icon) ── */}
+          {!showGroupInfo && !showProfileModal && (
+            <Animated.View style={{ marginBottom: androidKeyboardPadding }}>
+              <View
+                style={[
+                  s.bottomBarFloatingWrap,
+                  { paddingBottom: Math.max(insets.bottom, 8) + 6 },
+                ]}
+              >
+                {/* Replying Preview Bar */}
+                {replyTo && (
+                  <View style={s.replyPreviewBar}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.replyPreviewSender}>
+                        Replying to {replyTo.senderId === user?.uid ? "yourself" : replyTo.senderName || "Traveler"}
+                      </Text>
+                      <Text style={s.replyPreviewText} numberOfLines={1}>
+                        {replyTo.text || (replyTo.imageUrl ? "📷 Photo" : "Attachment")}
+                      </Text>
+                    </View>
+                    <Pressable onPress={() => setReplyTo(null)} hitSlop={10}>
+                      <Ionicons name="close" size={20} color="#aaaaaa" />
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* Pending Image Preview */}
+                {pendingImage && (
+                  <View style={s.pendingImageBar}>
+                    <ExpoImage source={{ uri: pendingImage }} style={s.pendingThumb} cachePolicy="memory-disk" />
+                    <Pressable onPress={() => setPendingImage(null)} style={s.cancelPendingBtn}>
+                      <Ionicons name="close" size={16} color="#ffffff" />
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* Input Row: Plus Circle + Pill Container + Send Circle */}
+                <View style={s.inputArea}>
+                  <Pressable
+                    onPress={() => setAttachMenuOpen(true)}
+                    style={s.circleBtn}
+                    hitSlop={8}
+                  >
+                    <Feather name="plus" size={20} color="#ffffff" />
+                  </Pressable>
+
+                  <View style={s.inputContainer}>
+                    <TextInput
+                      placeholder="Type your message..."
+                      placeholderTextColor="#777777"
+                      value={input}
+                      onChangeText={setInput}
+                      style={s.textInput}
+                      multiline
+                    />
+                  </View>
+
+                  <Pressable
+                    onPress={() => sendMessage()}
+                    disabled={!input.trim() && !pendingImage}
+                    style={[
+                      s.sendButtonCircle,
+                      (input.trim() || pendingImage)
+                        ? { backgroundColor: "#ffffff" }
+                        : { backgroundColor: "#3e444c", opacity: 0.65 },
+                    ]}
+                    hitSlop={8}
+                  >
+                    <Ionicons
+                      name="send"
+                      size={18}
+                      color={(input.trim() || pendingImage) ? "#000000" : "rgba(255, 255, 255, 0.7)"}
+                      style={{ marginLeft: 2 }}
+                    />
+                  </Pressable>
+                </View>
+              </View>
+            </Animated.View>
+          )}
         </KeyboardAvoidingView>
 
         {/* ═══════════════════════════════════════════════════════════
@@ -1071,6 +1388,29 @@ export default function GroupChatroom() {
             <View style={[s.attachMenuSheet, { paddingBottom: insets.bottom + 20 }]}>
               <Text style={s.attachMenuHeading}>Share with Group</Text>
 
+              {/* 1. Camera Option (Inserted in Plus Option as requested!) */}
+              <Pressable onPress={takeCameraPhoto} style={s.attachMenuItem}>
+                <View style={[s.attachIconBox, { backgroundColor: "rgba(239, 68, 68, 0.15)" }]}>
+                  <Ionicons name="camera-outline" size={22} color="#ef4444" />
+                </View>
+                <View>
+                  <Text style={s.attachItemTitle}>Camera</Text>
+                  <Text style={s.attachItemSub}>Take a photo with your camera</Text>
+                </View>
+              </Pressable>
+
+              {/* 2. Photo / Gallery Option */}
+              <Pressable onPress={pickImage} style={s.attachMenuItem}>
+                <View style={[s.attachIconBox, { backgroundColor: "rgba(56, 189, 248, 0.15)" }]}>
+                  <Ionicons name="image-outline" size={22} color="#38bdf8" />
+                </View>
+                <View>
+                  <Text style={s.attachItemTitle}>Photo / Gallery</Text>
+                  <Text style={s.attachItemSub}>Share trip memories and pictures</Text>
+                </View>
+              </Pressable>
+
+              {/* 3. Group Timeline */}
               <Pressable onPress={handleSendTimeline} style={s.attachMenuItem}>
                 <View style={[s.attachIconBox, { backgroundColor: "rgba(255, 179, 0, 0.15)" }]}>
                   <Ionicons name="calendar-outline" size={22} color="#ffb300" />
@@ -1081,6 +1421,7 @@ export default function GroupChatroom() {
                 </View>
               </Pressable>
 
+              {/* 4. Trip Checklist */}
               <Pressable onPress={handleSendChecklist} style={s.attachMenuItem}>
                 <View style={[s.attachIconBox, { backgroundColor: "rgba(0, 230, 118, 0.15)" }]}>
                   <Ionicons name="checkbox-outline" size={22} color="#00e676" />
@@ -1091,13 +1432,19 @@ export default function GroupChatroom() {
                 </View>
               </Pressable>
 
-              <Pressable onPress={pickImage} style={s.attachMenuItem}>
-                <View style={[s.attachIconBox, { backgroundColor: "rgba(56, 189, 248, 0.15)" }]}>
-                  <Ionicons name="image-outline" size={22} color="#38bdf8" />
+              <Pressable
+                onPress={() => {
+                  setAttachMenuOpen(false);
+                  setShowWallpaperModal(true);
+                }}
+                style={s.attachMenuItem}
+              >
+                <View style={[s.attachIconBox, { backgroundColor: "rgba(255, 255, 255, 0.12)" }]}>
+                  <Ionicons name="color-palette-outline" size={22} color="#ffffff" />
                 </View>
                 <View>
-                  <Text style={s.attachItemTitle}>Photo / Gallery</Text>
-                  <Text style={s.attachItemSub}>Share trip memories and pictures</Text>
+                  <Text style={s.attachItemTitle}>Chat Wallpaper & Theme</Text>
+                  <Text style={s.attachItemSub}>Customize background, brightness & bubbles</Text>
                 </View>
               </Pressable>
             </View>
@@ -1111,6 +1458,8 @@ export default function GroupChatroom() {
           groupId={groupKey}
           currentUser={user}
           memberInfo={memberUsers.reduce((acc, m) => ({ ...acc, [m.uid]: m }), {})}
+          onOpenWallpaperTheme={() => setShowWallpaperModal(true)}
+          wallpaperSource={backgroundSource}
         />
 
         {/* ── USER PROFILE MODAL ── */}
@@ -1123,6 +1472,58 @@ export default function GroupChatroom() {
             router.push(`/chat/${id}` as any);
           }}
         />
+
+        {/* ── WALLPAPER & THEME CUSTOMIZER MODAL (Single Chat Feature!) ── */}
+        <WallpaperThemePreviewModal
+          visible={showWallpaperModal}
+          onClose={() => setShowWallpaperModal(false)}
+          chatId={groupKey}
+          friendName={groupData?.name || "Group"}
+          initialWallpaperUri={localGroupWallpaper}
+          onApply={(newWp, bubbleColor, dimLevel) => {
+            setLocalGroupWallpaper(newWp);
+            setLocalGroupBubbleColor(bubbleColor);
+            if (dimLevel !== undefined) setLocalGroupWallpaperDim(dimLevel);
+          }}
+        />
+
+        {/* ── FULLSCREEN IMAGE VIEWER (WhatsApp Style) ── */}
+        <Modal
+          visible={!!fullScreenImage}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setFullScreenImage(null)}
+        >
+          <View style={{ flex: 1, backgroundColor: "#000000", justifyContent: "center", alignItems: "center" }}>
+            <StatusBar barStyle="light-content" backgroundColor="#000000" />
+            <Pressable
+              onPress={() => setFullScreenImage(null)}
+              style={{
+                position: "absolute",
+                top: Math.max(insets.top, 20) + 10,
+                right: 20,
+                zIndex: 50,
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: "rgba(30, 30, 30, 0.8)",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              hitSlop={12}
+            >
+              <Ionicons name="close" size={26} color="#ffffff" />
+            </Pressable>
+            {fullScreenImage && (
+              <ExpoImage
+                source={{ uri: fullScreenImage }}
+                style={{ width: SCREEN_WIDTH, height: "85%" }}
+                contentFit="contain"
+                cachePolicy="memory-disk"
+              />
+            )}
+          </View>
+        </Modal>
       </SafeAreaViewContext>
     </ImageBackground>
   );
@@ -1142,46 +1543,90 @@ const s = StyleSheet.create({
     justifyContent: "center",
   },
 
-  // Top Header (Images 1 & 2)
-  headerBar: {
+  // Top & Bottom Gradient Fades (Single Chat Style)
+  topGradientFade: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 15,
+  },
+  bottomGradientFade: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 15,
+  },
+
+  // Top Floating Header (Single Chat Style)
+  headerFloatingWrap: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    backgroundColor: "transparent",
+  },
+  headerInnerRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255, 255, 255, 0.08)",
-    backgroundColor: "rgba(11, 15, 20, 0.92)",
-    gap: 10,
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingBottom: 6,
   },
-  headerCircleBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerCenterPressable: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  headerGroupAvatar: {
+  circleBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#1c1c1e",
+    backgroundColor: "#1c2329",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
-  headerGroupTitle: {
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  userPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#1c2329",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 25,
+    flexShrink: 1,
+    flex: 1,
+    marginHorizontal: 8,
+    gap: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  userName: {
     color: "#ffffff",
-    fontSize: 17,
-    fontWeight: "700",
+    fontWeight: "bold",
+    fontSize: 13.5,
   },
-  headerGroupSubtitle: {
-    color: "rgba(255, 255, 255, 0.6)",
-    fontSize: 12,
-    marginTop: 2,
+  userHandle: {
+    color: "#888888",
+    fontSize: 11,
   },
 
   // ── Top Group Intro Card (Image 1) ──
@@ -1265,23 +1710,32 @@ const s = StyleSheet.create({
     paddingHorizontal: 10,
   },
 
-  // Date Divider Pill (Image 1 & 2: 23/7/2026)
+  // Date Divider Pill (Image 1 & 2: 23/7/2026 - High Contrast Capsule Pill)
   dateDividerContainer: {
     alignItems: "center",
     marginVertical: 14,
   },
   dateDividerPill: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: "#1e222b",
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: "rgba(14, 18, 26, 0.85)",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
+    borderColor: "rgba(255, 255, 255, 0.16)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 3,
   },
   dateDividerText: {
     color: "#ffffff",
-    fontSize: 12.5,
-    fontWeight: "600",
+    fontSize: 11.5,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+    textShadowColor: "rgba(0, 0, 0, 0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 
   // System Notification (Image 3)
@@ -1355,11 +1809,23 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
+    alignSelf: "flex-end",
     marginTop: 4,
+    backgroundColor: "rgba(10, 14, 22, 0.65)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 7,
+    borderWidth: 0.5,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    gap: 3,
   },
   msgTimestamp: {
-    color: "rgba(255, 255, 255, 0.45)",
+    color: "#ffffff",
     fontSize: 10,
+    fontWeight: "600",
+    textShadowColor: "rgba(0, 0, 0, 0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 
   // Reply Box inside bubble
@@ -1581,42 +2047,73 @@ const s = StyleSheet.create({
     marginTop: 2,
   },
 
-  // Bottom Input Bar (Images 1 & 2)
-  bottomBarContainer: {
+  // Floating Bottom Input Bar (Single Chat Style)
+  bottomBarFloatingWrap: {
+    backgroundColor: "transparent",
+    paddingHorizontal: 10,
+    zIndex: 20,
+  },
+  inputArea: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
+    paddingHorizontal: 2,
     paddingTop: 8,
-    backgroundColor: "rgba(11, 15, 20, 0.95)",
-    gap: 10,
+    gap: 8,
+    backgroundColor: "transparent",
   },
-  attachPlusBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  chatInput: {
+  inputContainer: {
     flex: 1,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: "#1c2329",
+    borderRadius: 25,
     paddingHorizontal: 16,
+    paddingVertical: 6,
+    minHeight: 44,
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  textInput: {
     color: "#ffffff",
     fontSize: 14.5,
+    maxHeight: 100,
+    paddingTop: Platform.OS === "android" ? 0 : 2,
   },
-  cameraBtn: {
-    padding: 6,
-  },
-  whiteSendBtn: {
+  sendButtonCircle: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#ffffff",
+    backgroundColor: "#3e444c",
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  scrollToBottomBtn: {
+    position: "absolute",
+    right: 16,
+    bottom: 80,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#1c2329",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    elevation: 8,
+    zIndex: 99,
   },
 
   // Pending Image Bar

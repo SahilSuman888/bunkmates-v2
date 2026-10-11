@@ -137,8 +137,6 @@ export async function registerForPushNotifications(
      * Save token in Firestore.
      */
     await updateDoc(doc(db, "users", uid), {
-      expoPushToken,
-      expoPushTokenUpdatedAt: new Date(),
       pushNotificationsEnabled: true,
       pushPlatform: Platform.OS,
     });

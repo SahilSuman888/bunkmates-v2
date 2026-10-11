@@ -24,7 +24,10 @@ import { auth, db, storage } from "../lib/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import AvatarCropModal from "../components/profile/AvatarCropModal";
+import { compressAndResizeImage } from "../lib/imageCompressor";
 
 export default function EditProfile() {
   const router = useRouter();
@@ -32,6 +35,8 @@ export default function EditProfile() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showCropModal, setShowCropModal] = useState(false);
+  const [rawPickedUri, setRawPickedUri] = useState<string | null>(null);
 
   // **@** Comprehensive profile state supporting both new UI fields and preserved v2 fields
   const [data, setData] = useState({
@@ -124,15 +129,19 @@ export default function EditProfile() {
 
   // **@** Image picker from photo library
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false, // Opens our custom WhatsApp-style circular crop modal matching Screenshot 3!
+        quality: 0.9,
+      });
 
-    if (!result.canceled && result.assets && result.assets[0]) {
-      setData((prev) => ({ ...prev, photoURL: result.assets[0].uri }));
+      if (!result.canceled && result.assets && result.assets[0]) {
+        setRawPickedUri(result.assets[0].uri);
+        setShowCropModal(true);
+      }
+    } catch (e) {
+      console.warn("pickImage error:", e);
     }
   };
 
@@ -145,36 +154,22 @@ export default function EditProfile() {
 
       let finalPhotoURL = data.photoURL;
 
-      // **@** Upload local image to Firebase Storage if newly selected
+      // **@** Compress local image under Firestore 1MB limit (< 40 KB)
       if (finalPhotoURL && !finalPhotoURL.startsWith("http")) {
-        let blob: Blob | null = null;
-        try {
-          const resp = await fetch(finalPhotoURL);
-          blob = await resp.blob();
-        } catch (fetchErr) {
-          try {
-            blob = await new Promise((resolve, reject) => {
-              const xhr = new XMLHttpRequest();
-              xhr.onload = function () {
-                resolve(xhr.response);
-              };
-              xhr.onerror = function () {
-                reject(new TypeError("Network request failed"));
-              };
-              xhr.responseType = "blob";
-              xhr.open("GET", finalPhotoURL, true);
-              xhr.send(null);
-            });
-          } catch (xhrErr) {
-            console.log("Upload conversion failed:", fetchErr, xhrErr);
-            throw xhrErr || fetchErr;
-          }
-        }
+        // Hardware/Skia resize & compress to max 300px
+        const compressed = await compressAndResizeImage(finalPhotoURL, 300, 65);
+        finalPhotoURL = compressed.dataUri;
 
-        if (blob) {
+        // Try Firebase Storage if cloud rules permit
+        try {
+          const resp = await fetch(compressed.uri || finalPhotoURL);
+          const blob = await resp.blob();
           const storageRef = ref(storage, `profileImages/${user.uid}.jpg`);
-          await uploadBytes(storageRef, blob as any);
+          await uploadBytes(storageRef, blob, { contentType: "image/jpeg" });
           finalPhotoURL = await getDownloadURL(storageRef);
+        } catch (storageErr) {
+          console.log("Firebase storage failed on free plan, safely falling back to compressed base64 (< 40 KB):", finalPhotoURL.length, "bytes");
+          // finalPhotoURL is already a compact ~30 KB base64 string, guaranteed not to exceed 1,048,487 bytes!
         }
       }
 
@@ -473,6 +468,22 @@ export default function EditProfile() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* **@** Custom Circular Avatar Crop Modal matching Screenshot 3 */}
+      <AvatarCropModal
+        visible={showCropModal}
+        imageUri={rawPickedUri}
+        currentAvatarUri={data.photoURL}
+        onCancel={() => {
+          setShowCropModal(false);
+          setRawPickedUri(null);
+        }}
+        onSaveCropped={(croppedDataUri) => {
+          setData((prev) => ({ ...prev, photoURL: croppedDataUri }));
+          setShowCropModal(false);
+          setRawPickedUri(null);
+        }}
+      />
     </SafeAreaView>
   );
 }

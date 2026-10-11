@@ -11,6 +11,8 @@ import {
   ActivityIndicator,
   Dimensions,
   StatusBar,
+  Switch,
+  Platform,
 } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import { SafeAreaView as SafeAreaViewContext, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -29,8 +31,12 @@ import {
 import { db } from "../../lib/firebase";
 import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as Haptics from "expo-haptics";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
 import { useCall } from "../../contexts/CallContext";
+import { DEFAULT_WALLPAPER_ASSET } from "../../contexts/ChatSettingsContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -43,6 +49,8 @@ interface GroupInfoDrawerProps {
   groupId: string | null;
   currentUser: any;
   memberInfo?: { [key: string]: any };
+  onOpenWallpaperTheme?: () => void;
+  wallpaperSource?: any;
 }
 
 export default function GroupInfoDrawer({
@@ -51,6 +59,8 @@ export default function GroupInfoDrawer({
   groupId,
   currentUser,
   memberInfo = {},
+  onOpenWallpaperTheme,
+  wallpaperSource,
 }: GroupInfoDrawerProps) {
   const insets = useSafeAreaInsets();
   const { startCall } = useCall();
@@ -84,6 +94,9 @@ export default function GroupInfoDrawer({
   const [searchLoading, setSearchLoading] = useState(false);
   const [selectedUsersToAdd, setSelectedUsersToAdd] = useState<string[]>([]);
 
+  const [tripData, setTripData] = useState<any>(null);
+  const [isFavouriteGroup, setIsFavouriteGroup] = useState(false);
+
   // ═══════════════════════════════════════════════════════════════
   // 1. FETCH GROUP & MEMBERS
   // ═══════════════════════════════════════════════════════════════
@@ -110,6 +123,15 @@ export default function GroupInfoDrawer({
           } catch (e) {}
         }
 
+        // Fetch Trip Data (for Trip Cover Image and details)
+        const targetTripId = data.tripId || groupId;
+        if (targetTripId) {
+          try {
+            const tDoc = await getDoc(doc(db, "trips", targetTripId));
+            if (tDoc.exists()) setTripData({ id: tDoc.id, ...tDoc.data() });
+          } catch (e) {}
+        }
+
         // Member Profiles
         if (Array.isArray(data.members) && data.members.length > 0) {
           const dict: { [key: string]: any } = {};
@@ -132,6 +154,67 @@ export default function GroupInfoDrawer({
 
     return () => unsub();
   }, [groupId, visible]);
+
+  // Sync Favourite Group status with Firestore & AsyncStorage
+  useEffect(() => {
+    if (!groupId || !currentUser?.uid) return;
+
+    AsyncStorage.getItem(`@bunkmates_favourite_chats_${currentUser.uid}`).then((cached) => {
+      if (cached) {
+        try {
+          const list: string[] = JSON.parse(cached);
+          setIsFavouriteGroup(list.includes(groupId));
+        } catch (e) {}
+      }
+    });
+
+    const unsub = onSnapshot(doc(db, "users", currentUser.uid), (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        const fList: string[] = d.favouriteChatIds || [];
+        setIsFavouriteGroup(fList.includes(groupId));
+      }
+    });
+
+    return () => unsub();
+  }, [groupId, currentUser?.uid]);
+
+  const handleToggleFavouriteGroup = async (val: boolean) => {
+    if (!groupId || !currentUser?.uid) return;
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (e) {}
+
+    setIsFavouriteGroup(val);
+
+    try {
+      const userDocRef = doc(db, "users", currentUser.uid);
+      const cached = await AsyncStorage.getItem(`@bunkmates_favourite_chats_${currentUser.uid}`);
+      let parsed: string[] = cached ? JSON.parse(cached) : [];
+
+      if (val) {
+        await updateDoc(userDocRef, {
+          favouriteChatIds: arrayUnion(groupId),
+        });
+        if (!parsed.includes(groupId)) parsed.push(groupId);
+        await AsyncStorage.setItem(
+          `@bunkmates_favourite_chats_${currentUser.uid}`,
+          JSON.stringify(parsed)
+        );
+      } else {
+        await updateDoc(userDocRef, {
+          favouriteChatIds: arrayRemove(groupId),
+        });
+        parsed = parsed.filter((id) => id !== groupId);
+        await AsyncStorage.setItem(
+          `@bunkmates_favourite_chats_${currentUser.uid}`,
+          JSON.stringify(parsed)
+        );
+      }
+    } catch (err) {
+      console.error("Error toggling favourite group:", err);
+    }
+  };
 
   const isUserAdmin = useMemo(() => {
     return (
@@ -366,99 +449,221 @@ export default function GroupInfoDrawer({
     );
   }, [membersList, memberSearchTerm]);
 
+  const tripCoverImage =
+    tripData?.coverImage ||
+    tripData?.image ||
+    tripData?.photoURL ||
+    groupInfo?.tripCover ||
+    groupInfo?.coverImage ||
+    groupInfo?.iconURL ||
+    SCENIC_BANNER;
+
   return (
-    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
-      <SafeAreaViewContext style={s.safeContainer} edges={["top", "left", "right"]}>
-        <StatusBar barStyle="light-content" backgroundColor="#000000" />
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent={true}
+      statusBarTranslucent={true}
+      navigationBarTranslucent={true}
+      onRequestClose={onClose}
+    >
+      <View style={s.modalRoot}>
+        {/* ── 1. BACKGROUND CHAT WALLPAPER WITH REAL BLUR (Guarantees perfect blur on Android & iOS!) ── */}
+        <ExpoImage
+          source={wallpaperSource || DEFAULT_WALLPAPER_ASSET}
+          style={StyleSheet.absoluteFillObject}
+          contentFit="cover"
+          blurRadius={Platform.OS === "android" ? 35 : 25}
+        />
 
-        {/* ═══════════════════════════════════════════════════════════
-           MAIN GROUP INFO SCREEN (Images 2 & 3)
-           ═══════════════════════════════════════════════════════════ */}
-        {/* Header: [ ← ] Group Info */}
-        <View style={s.topHeaderRow}>
-          <Pressable onPress={onClose} style={s.backBtn} hitSlop={10}>
-            <Ionicons name="arrow-back" size={24} color="#ffffff" />
-          </Pressable>
-          <Text style={s.topHeaderTitle}>Group Info</Text>
-        </View>
+        {/* ── 2. FULL BACKGROUND FROSTED BLUR ── */}
+        <BlurView
+          intensity={Platform.OS === "ios" ? 85 : 100}
+          tint="dark"
+          style={StyleSheet.absoluteFillObject}
+          pointerEvents="none"
+        />
 
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={[s.scrollBody, { paddingBottom: insets.bottom + 40 }]}
-        >
-          {/* Big Circular Group Avatar (Image 2 & 3) */}
-          <View style={s.avatarCenterContainer}>
-            <ExpoImage
-              source={{ uri: groupInfo?.iconURL || DEFAULT_GROUP_AVATAR }}
-              style={s.bigGroupAvatar}
-              contentFit="cover"
-            />
-            <Text style={s.groupNameHeading}>{groupInfo?.name || "Bunk1"}</Text>
+        {/* ── 3. ADAPTIVE DARK-GLASS SCRIM ── */}
+        <View
+          style={[
+            StyleSheet.absoluteFillObject,
+            { backgroundColor: "rgba(10, 14, 22, 0.82)" },
+          ]}
+          pointerEvents="none"
+        />
+
+        <SafeAreaViewContext style={s.safeContainer} edges={["top", "left", "right"]}>
+          <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
+
+          {/* ═══════════════════════════════════════════════════════════
+             MAIN GROUP INFO SCREEN
+             ═══════════════════════════════════════════════════════════ */}
+          {/* Header: [ ← ] Group Info   [ ⭐ Favourite ] */}
+          <View style={s.topHeaderRow}>
+            <Pressable onPress={onClose} style={s.backBtn} hitSlop={10}>
+              <Ionicons name="arrow-back" size={22} color="#ffffff" />
+            </Pressable>
+            <Text style={s.topHeaderTitle}>Group Info</Text>
+
+            {/* Favorite Star Icon in Header */}
+            <Pressable
+              onPress={() => handleToggleFavouriteGroup(!isFavouriteGroup)}
+              style={s.headerStarBtn}
+              hitSlop={10}
+            >
+              <Ionicons
+                name={isFavouriteGroup ? "star" : "star-outline"}
+                size={22}
+                color={isFavouriteGroup ? "#f59e0b" : "#ffffff"}
+              />
+            </Pressable>
           </View>
 
-          {/* Group Description Card */}
-          <View style={s.descCard}>
-            <Text style={s.descText}>
-              {groupInfo?.description || "Group for Trip from Jaipur to Dehradun"}
-            </Text>
-            <Text style={s.createdNotice}>
-              Created by <Text style={{ fontWeight: "700" }}>{createdByUser?.name || "Mohit Sharma"}</Text>
-            </Text>
-          </View>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[s.scrollBody, { paddingBottom: insets.bottom + 40 }]}
+          >
+            {/* Big Circular Group Avatar */}
+            <View style={s.avatarCenterContainer}>
+              <View style={s.avatarGlowContainer}>
+                <ExpoImage
+                  source={{ uri: groupInfo?.iconURL || DEFAULT_GROUP_AVATAR }}
+                  style={s.bigGroupAvatar}
+                  contentFit="cover"
+                />
+              </View>
+              <Text style={s.groupNameHeading}>{groupInfo?.name || "Bunk1"}</Text>
+            </View>
 
-          {/* ── TRIP TIMELINE CARD (Exact match to Images 2 & 3) ── */}
-          <View style={s.timelineBannerCard}>
-            <ExpoImage
-              source={{ uri: SCENIC_BANNER }}
-              style={StyleSheet.absoluteFillObject}
-              contentFit="cover"
-            />
-            <View style={s.timelineOverlay}>
-              <Text style={s.timelineGroupName}>{groupInfo?.name || "Bunk1"}</Text>
-              <Text style={s.timelineRoute}>📍 Jaipur → Dehradun</Text>
+            {/* Group Description Card */}
+            <View style={s.descCard}>
+              <Text style={s.descText}>
+                {groupInfo?.description || "Group for Trip from Jaipur to Dehradun"}
+              </Text>
+              <Text style={s.createdNotice}>
+                Created by <Text style={{ fontWeight: "700", color: "#ffffff" }}>{createdByUser?.name || "Mohit Sharma"}</Text>
+              </Text>
+            </View>
 
-              <Text style={s.timelineProgressLabel}>Timeline Progress: 6 / 10 days</Text>
-              {/* Progress Bar */}
-              <View style={s.progressBarTrack}>
-                <View style={[s.progressBarFill, { width: "60%" }]} />
+            {/* ── TRIP TIMELINE CARD WITH BLURRED TRIP COVER PHOTO (User Request) ── */}
+            <View style={s.timelineBannerCard}>
+              <ExpoImage
+                source={{ uri: tripCoverImage }}
+                style={StyleSheet.absoluteFillObject}
+                contentFit="cover"
+                blurRadius={Platform.OS === "android" ? 16 : 12}
+              />
+              {/* Glass Gradient Scrim on blurred photo */}
+              <LinearGradient
+                colors={["rgba(10, 15, 26, 0.40)", "rgba(10, 15, 26, 0.85)"]}
+                style={StyleSheet.absoluteFillObject}
+              />
+              <View style={s.timelineOverlay}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                  <Text style={s.timelineGroupName} numberOfLines={1}>{groupInfo?.name || tripData?.name || "Bunk1"}</Text>
+                  <View style={s.tripTag}>
+                    <Text style={s.tripTagText}>Trip</Text>
+                  </View>
+                </View>
+                <Text style={s.timelineRoute} numberOfLines={1}>
+                  📍 {tripData?.destination || tripData?.route || "Jaipur → Dehradun"}
+                </Text>
+
+                <View style={s.timelineProgressRow}>
+                  <Text style={s.timelineProgressLabel}>
+                    Timeline Progress: {tripData?.progressDays || "6"} / {tripData?.totalDays || "10"} days
+                  </Text>
+                  <Text style={s.timelinePercentText}>{tripData?.progressPercent || 60}%</Text>
+                </View>
+                {/* Progress Bar */}
+                <View style={s.progressBarTrack}>
+                  <View style={[s.progressBarFill, { width: `${tripData?.progressPercent || 60}%` }]} />
+                </View>
               </View>
             </View>
-          </View>
 
-          {/* Action Buttons: Edit Group Info | Group Settings */}
-          <Pressable
-            onPress={() => setEditingGroupInfo(true)}
-            style={s.actionRowButton}
-            hitSlop={8}
-          >
-            <Feather name="edit-3" size={18} color="#ffffff" style={{ marginRight: 12 }} />
-            <Text style={s.actionRowText}>Edit Group Info</Text>
-          </Pressable>
+            {/* ── MARK AS FAVOURITE GROUP CARD (User Request) ── */}
+            <View style={s.favouriteCardRow}>
+              <View style={[s.favouriteIconCircle, isFavouriteGroup && { backgroundColor: "rgba(245, 158, 11, 0.18)" }]}>
+                <Ionicons
+                  name={isFavouriteGroup ? "star" : "star-outline"}
+                  size={20}
+                  color={isFavouriteGroup ? "#f59e0b" : "rgba(255, 255, 255, 0.7)"}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.favouriteTitle}>Mark as Favourite Group</Text>
+                <Text style={s.favouriteSubtitle}>Pin to Favourites tab for quick access</Text>
+              </View>
+              <Switch
+                value={isFavouriteGroup}
+                onValueChange={handleToggleFavouriteGroup}
+                trackColor={{ false: "#2a2d36", true: "#f59e0b" }}
+                thumbColor="#ffffff"
+              />
+            </View>
 
-          <Pressable
-            onPress={() => setSettingsOpen(true)}
-            style={s.actionRowButton}
-            hitSlop={8}
-          >
-            <Ionicons name="settings-outline" size={20} color="#ffffff" style={{ marginRight: 12 }} />
-            <Text style={s.actionRowText}>Group Settings</Text>
-          </Pressable>
-
-          {/* Members Section (Images 2 & 3) */}
-          <View style={s.membersSection}>
-            <Text style={s.membersSectionHeading}>{membersList.length} Members</Text>
-
-            {/* Add Members Button */}
+            {/* Action Buttons: Edit Group Info | Group Settings */}
             <Pressable
-              onPress={() => setAddMembersOpen(true)}
-              style={s.addMemberRow}
+              onPress={() => setEditingGroupInfo(true)}
+              style={s.actionRowButton}
               hitSlop={8}
             >
-              <View style={s.addMemberCircle}>
-                <Feather name="plus" size={20} color="#ffffff" />
+              <View style={s.actionRowLeft}>
+                <Feather name="edit-3" size={18} color="#ffffff" style={{ marginRight: 12 }} />
+                <Text style={s.actionRowText}>Edit Group Info</Text>
               </View>
-              <Text style={s.addMemberText}>Add Members</Text>
+              <Feather name="chevron-right" size={18} color="rgba(255, 255, 255, 0.4)" />
             </Pressable>
+
+            <Pressable
+              onPress={() => setSettingsOpen(true)}
+              style={s.actionRowButton}
+              hitSlop={8}
+            >
+              <View style={s.actionRowLeft}>
+                <Ionicons name="settings-outline" size={20} color="#ffffff" style={{ marginRight: 12 }} />
+                <Text style={s.actionRowText}>Group Settings</Text>
+              </View>
+              <Feather name="chevron-right" size={18} color="rgba(255, 255, 255, 0.4)" />
+            </Pressable>
+
+            {onOpenWallpaperTheme && (
+              <Pressable
+                onPress={() => {
+                  onClose();
+                  onOpenWallpaperTheme();
+                }}
+                style={s.actionRowButton}
+                hitSlop={8}
+              >
+                <View style={s.actionRowLeft}>
+                  <Ionicons name="color-palette-outline" size={20} color="#ffffff" style={{ marginRight: 12 }} />
+                  <Text style={s.actionRowText}>Customize Wallpaper & Theme</Text>
+                </View>
+                <Feather name="chevron-right" size={18} color="rgba(255, 255, 255, 0.4)" />
+              </Pressable>
+            )}
+
+            {/* Members Section (Images 2 & 3) */}
+            <View style={s.membersSection}>
+              <Text style={s.membersSectionHeading}>{membersList.length} Members</Text>
+
+              {/* Add Members Button */}
+              <Pressable
+                onPress={() => setAddMembersOpen(true)}
+                style={s.addMemberRow}
+                hitSlop={8}
+              >
+                <View style={s.addMemberLeft}>
+                  <View style={s.addMemberCircle}>
+                    <Feather name="plus" size={18} color="#000000" />
+                  </View>
+                  <Text style={s.addMemberText}>Add Members</Text>
+                </View>
+                <Feather name="chevron-right" size={18} color="rgba(255, 255, 255, 0.4)" />
+              </Pressable>
 
             {/* Members List */}
             {membersList.map((member: any) => {
@@ -631,164 +836,166 @@ export default function GroupInfoDrawer({
           transparent={false}
           onRequestClose={() => setSettingsOpen(false)}
         >
-          <SafeAreaViewContext style={s.safeContainer} edges={["top", "left", "right"]}>
-            <View style={s.topHeaderRow}>
-              <Pressable onPress={() => setSettingsOpen(false)} style={s.backBtn} hitSlop={10}>
-                <Ionicons name="arrow-back" size={24} color="#ffffff" />
-              </Pressable>
-              <Text style={s.topHeaderTitle}>Group Settings</Text>
-            </View>
-
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={[s.scrollBody, { paddingBottom: insets.bottom + 40 }]}
-            >
-              {/* Permissions Section */}
-              <Text style={s.settingsSectionHeading}>Permissions</Text>
-
-              {/* 1. Who can edit group info? */}
-              <Text style={s.permissionQuestion}>Who can edit group info?</Text>
-              <View style={s.permissionToggleRow}>
-                <Pressable
-                  onPress={() => {
-                    setEditAccess("admins");
-                    handleUpdatePermission("editAccess", "admins");
-                  }}
-                  style={[s.permToggleBtn, editAccess === "admins" && s.permToggleBtnActive]}
-                >
-                  <Text style={[s.permToggleText, editAccess === "admins" && s.permToggleTextActive]}>
-                    Admins Only
-                  </Text>
+          <View style={{ flex: 1, backgroundColor: "#0b0f14" }}>
+            <SafeAreaViewContext style={{ flex: 1 }} edges={["top", "left", "right"]}>
+              <View style={s.topHeaderRow}>
+                <Pressable onPress={() => setSettingsOpen(false)} style={s.backBtn} hitSlop={10}>
+                  <Ionicons name="arrow-back" size={24} color="#ffffff" />
                 </Pressable>
-
-                <Pressable
-                  onPress={() => {
-                    setEditAccess("all");
-                    handleUpdatePermission("editAccess", "all");
-                  }}
-                  style={[s.permToggleBtn, editAccess === "all" && s.permToggleBtnActive]}
-                >
-                  <Text style={[s.permToggleText, editAccess === "all" && s.permToggleTextActive]}>
-                    All Members
-                  </Text>
-                </Pressable>
+                <Text style={s.topHeaderTitle}>Group Settings</Text>
               </View>
 
-              {/* 2. Who can add members? */}
-              <Text style={s.permissionQuestion}>Who can add members?</Text>
-              <View style={s.permissionToggleRow}>
-                <Pressable
-                  onPress={() => {
-                    setAddAccess("admins");
-                    handleUpdatePermission("inviteAccess", "admins");
-                  }}
-                  style={[s.permToggleBtn, addAccess === "admins" && s.permToggleBtnActive]}
-                >
-                  <Text style={[s.permToggleText, addAccess === "admins" && s.permToggleTextActive]}>
-                    Admins Only
-                  </Text>
-                </Pressable>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={[s.scrollBody, { paddingBottom: insets.bottom + 40 }]}
+              >
+                {/* Permissions Section */}
+                <Text style={s.settingsSectionHeading}>Permissions</Text>
 
-                <Pressable
-                  onPress={() => {
-                    setAddAccess("all");
-                    handleUpdatePermission("inviteAccess", "all");
-                  }}
-                  style={[s.permToggleBtn, addAccess === "all" && s.permToggleBtnActive]}
-                >
-                  <Text style={[s.permToggleText, addAccess === "all" && s.permToggleTextActive]}>
-                    All Members
-                  </Text>
-                </Pressable>
-              </View>
+                {/* 1. Who can edit group info? */}
+                <Text style={s.permissionQuestion}>Who can edit group info?</Text>
+                <View style={s.permissionToggleRow}>
+                  <Pressable
+                    onPress={() => {
+                      setEditAccess("admins");
+                      handleUpdatePermission("editAccess", "admins");
+                    }}
+                    style={[s.permToggleBtn, editAccess === "admins" && s.permToggleBtnActive]}
+                  >
+                    <Text style={[s.permToggleText, editAccess === "admins" && s.permToggleTextActive]}>
+                      Admins Only
+                    </Text>
+                  </Pressable>
 
-              {/* 3. Who can send messages? */}
-              <Text style={s.permissionQuestion}>Who can send messages?</Text>
-              <View style={s.permissionToggleRow}>
-                <Pressable
-                  onPress={() => {
-                    setSendAccess("admins");
-                    handleUpdatePermission("sendAccess", "admins");
-                  }}
-                  style={[s.permToggleBtn, sendAccess === "admins" && s.permToggleBtnActive]}
-                >
-                  <Text style={[s.permToggleText, sendAccess === "admins" && s.permToggleTextActive]}>
-                    Admins Only
-                  </Text>
-                </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      setEditAccess("all");
+                      handleUpdatePermission("editAccess", "all");
+                    }}
+                    style={[s.permToggleBtn, editAccess === "all" && s.permToggleBtnActive]}
+                  >
+                    <Text style={[s.permToggleText, editAccess === "all" && s.permToggleTextActive]}>
+                      All Members
+                    </Text>
+                  </Pressable>
+                </View>
 
-                <Pressable
-                  onPress={() => {
-                    setSendAccess("all");
-                    handleUpdatePermission("sendAccess", "all");
-                  }}
-                  style={[s.permToggleBtn, sendAccess === "all" && s.permToggleBtnActive]}
-                >
-                  <Text style={[s.permToggleText, sendAccess === "all" && s.permToggleTextActive]}>
-                    All Members
-                  </Text>
-                </Pressable>
-              </View>
+                {/* 2. Who can add members? */}
+                <Text style={s.permissionQuestion}>Who can add members?</Text>
+                <View style={s.permissionToggleRow}>
+                  <Pressable
+                    onPress={() => {
+                      setAddAccess("admins");
+                      handleUpdatePermission("inviteAccess", "admins");
+                    }}
+                    style={[s.permToggleBtn, addAccess === "admins" && s.permToggleBtnActive]}
+                  >
+                    <Text style={[s.permToggleText, addAccess === "admins" && s.permToggleTextActive]}>
+                      Admins Only
+                    </Text>
+                  </Pressable>
 
-              {/* Members & Admins Section */}
-              <View style={s.membersAdminsHeaderRow}>
-                <Text style={s.settingsSectionHeading}>Members & Admins</Text>
-              </View>
+                  <Pressable
+                    onPress={() => {
+                      setAddAccess("all");
+                      handleUpdatePermission("inviteAccess", "all");
+                    }}
+                    style={[s.permToggleBtn, addAccess === "all" && s.permToggleBtnActive]}
+                  >
+                    <Text style={[s.permToggleText, addAccess === "all" && s.permToggleTextActive]}>
+                      All Members
+                    </Text>
+                  </Pressable>
+                </View>
 
-              {/* Search Bar */}
-              <View style={s.memberSearchBox}>
-                <Feather name="search" size={16} color="#7f8c9b" style={{ marginRight: 8 }} />
-                <TextInput
-                  placeholder="Search"
-                  placeholderTextColor="#7f8c9b"
-                  value={memberSearchTerm}
-                  onChangeText={setMemberSearchTerm}
-                  style={s.memberSearchInput}
-                />
-              </View>
+                {/* 3. Who can send messages? */}
+                <Text style={s.permissionQuestion}>Who can send messages?</Text>
+                <View style={s.permissionToggleRow}>
+                  <Pressable
+                    onPress={() => {
+                      setSendAccess("admins");
+                      handleUpdatePermission("sendAccess", "admins");
+                    }}
+                    style={[s.permToggleBtn, sendAccess === "admins" && s.permToggleBtnActive]}
+                  >
+                    <Text style={[s.permToggleText, sendAccess === "admins" && s.permToggleTextActive]}>
+                      Admins Only
+                    </Text>
+                  </Pressable>
 
-              {/* Members & Roles List */}
-              {filteredMembersList.map((member: any) => {
-                const isCreator = member.uid === groupInfo?.createdBy;
-                const isAdmin = isCreator || (groupInfo?.admins || []).includes(member.uid);
-                const roleLabel = isCreator ? "Owner" : isAdmin ? "Admin" : "Member";
+                  <Pressable
+                    onPress={() => {
+                      setSendAccess("all");
+                      handleUpdatePermission("sendAccess", "all");
+                    }}
+                    style={[s.permToggleBtn, sendAccess === "all" && s.permToggleBtnActive]}
+                  >
+                    <Text style={[s.permToggleText, sendAccess === "all" && s.permToggleTextActive]}>
+                      All Members
+                    </Text>
+                  </Pressable>
+                </View>
 
-                return (
-                  <View key={member.uid} style={s.memberRoleRow}>
-                    <ExpoImage
-                      source={{ uri: member.photoURL || DEFAULT_GROUP_AVATAR }}
-                      style={s.memberAvatar}
-                      contentFit="cover"
-                    />
+                {/* Members & Admins Section */}
+                <View style={s.membersAdminsHeaderRow}>
+                  <Text style={s.settingsSectionHeading}>Members & Admins</Text>
+                </View>
 
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.memberName}>{member.name || member.displayName || "Traveler"}</Text>
-                      <Text style={s.memberHandle}>@{member.username || "user"}</Text>
-                    </View>
+                {/* Search Bar */}
+                <View style={s.memberSearchBox}>
+                  <Feather name="search" size={16} color="#7f8c9b" style={{ marginRight: 8 }} />
+                  <TextInput
+                    placeholder="Search"
+                    placeholderTextColor="#7f8c9b"
+                    value={memberSearchTerm}
+                    onChangeText={setMemberSearchTerm}
+                    style={s.memberSearchInput}
+                  />
+                </View>
 
-                    {/* Role Dropdown Pill */}
-                    {isCreator ? (
-                      <View style={s.ownerRoleBadge}>
-                        <Text style={s.ownerRoleText}>Owner</Text>
+                {/* Members & Roles List */}
+                {filteredMembersList.map((member: any) => {
+                  const isCreator = member.uid === groupInfo?.createdBy;
+                  const isAdmin = isCreator || (groupInfo?.admins || []).includes(member.uid);
+                  const roleLabel = isCreator ? "Owner" : isAdmin ? "Admin" : "Member";
+
+                  return (
+                    <View key={member.uid} style={s.memberRoleRow}>
+                      <ExpoImage
+                        source={{ uri: member.photoURL || DEFAULT_GROUP_AVATAR }}
+                        style={s.memberAvatar}
+                        contentFit="cover"
+                      />
+
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.memberName}>{member.name || member.displayName || "Traveler"}</Text>
+                        <Text style={s.memberHandle}>@{member.username || "user"}</Text>
                       </View>
-                    ) : (
-                      <Pressable
-                        onPress={() => handleChangeMemberRole(member.uid, roleLabel)}
-                        style={s.roleDropdownPill}
-                        disabled={!isUserAdmin}
-                        hitSlop={8}
-                      >
-                        <Text style={s.roleDropdownText}>{roleLabel}</Text>
-                        {isUserAdmin && (
-                          <Ionicons name="chevron-down" size={14} color="rgba(255, 255, 255, 0.7)" />
-                        )}
-                      </Pressable>
-                    )}
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </SafeAreaViewContext>
+
+                      {/* Role Dropdown Pill */}
+                      {isCreator ? (
+                        <View style={s.ownerRoleBadge}>
+                          <Text style={s.ownerRoleText}>Owner</Text>
+                        </View>
+                      ) : (
+                        <Pressable
+                          onPress={() => handleChangeMemberRole(member.uid, roleLabel)}
+                          style={s.roleDropdownPill}
+                          disabled={!isUserAdmin}
+                          hitSlop={8}
+                        >
+                          <Text style={s.roleDropdownText}>{roleLabel}</Text>
+                          {isUserAdmin && (
+                            <Ionicons name="chevron-down" size={14} color="rgba(255, 255, 255, 0.7)" />
+                          )}
+                        </Pressable>
+                      )}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </SafeAreaViewContext>
+          </View>
         </Modal>
 
         {/* ═══════════════════════════════════════════════════════════
@@ -800,78 +1007,84 @@ export default function GroupInfoDrawer({
           transparent={false}
           onRequestClose={() => setAddMembersOpen(false)}
         >
-          <SafeAreaViewContext style={s.safeContainer} edges={["top", "left", "right"]}>
-            <View style={s.topHeaderRow}>
-              <Pressable onPress={() => setAddMembersOpen(false)} style={s.backBtn} hitSlop={10}>
-                <Ionicons name="arrow-back" size={24} color="#ffffff" />
-              </Pressable>
-              <Text style={s.topHeaderTitle}>Add Members</Text>
-            </View>
-
-            <View style={{ paddingHorizontal: 16, paddingTop: 10 }}>
-              <View style={s.memberSearchBox}>
-                <Feather name="search" size={16} color="#7f8c9b" style={{ marginRight: 8 }} />
-                <TextInput
-                  placeholder="Search by username or name..."
-                  placeholderTextColor="#7f8c9b"
-                  value={searchUserQuery}
-                  onChangeText={setSearchUserQuery}
-                  style={s.memberSearchInput}
-                />
-              </View>
-            </View>
-
-            <ScrollView contentContainerStyle={{ padding: 16 }}>
-              {searchLoading && <ActivityIndicator size="small" color="#fff" style={{ marginVertical: 10 }} />}
-
-              {searchResults.map((usr) => {
-                const isSelected = selectedUsersToAdd.includes(usr.uid);
-                return (
-                  <Pressable
-                    key={usr.uid}
-                    onPress={() =>
-                      setSelectedUsersToAdd((prev) =>
-                        isSelected ? prev.filter((id) => id !== usr.uid) : [...prev, usr.uid]
-                      )
-                    }
-                    style={s.memberItemRow}
-                  >
-                    <ExpoImage
-                      source={{ uri: usr.photoURL || DEFAULT_GROUP_AVATAR }}
-                      style={s.memberAvatar}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.memberName}>{usr.name || usr.displayName || usr.username}</Text>
-                      <Text style={s.memberHandle}>@{usr.username || "user"}</Text>
-                    </View>
-                    <Ionicons
-                      name={isSelected ? "checkmark-circle" : "add-circle-outline"}
-                      size={24}
-                      color={isSelected ? "#00e676" : "rgba(255,255,255,0.4)"}
-                    />
-                  </Pressable>
-                );
-              })}
-
-              {selectedUsersToAdd.length > 0 && (
-                <Pressable onPress={handleAddSelectedUsers} style={s.confirmAddBtn}>
-                  <Text style={s.confirmAddText}>Add {selectedUsersToAdd.length} Member(s)</Text>
+          <View style={{ flex: 1, backgroundColor: "#0b0f14" }}>
+            <SafeAreaViewContext style={{ flex: 1 }} edges={["top", "left", "right"]}>
+              <View style={s.topHeaderRow}>
+                <Pressable onPress={() => setAddMembersOpen(false)} style={s.backBtn} hitSlop={10}>
+                  <Ionicons name="arrow-back" size={24} color="#ffffff" />
                 </Pressable>
-              )}
-            </ScrollView>
-          </SafeAreaViewContext>
+                <Text style={s.topHeaderTitle}>Add Members</Text>
+              </View>
+
+              <View style={{ paddingHorizontal: 16, paddingTop: 10 }}>
+                <View style={s.memberSearchBox}>
+                  <Feather name="search" size={16} color="#7f8c9b" style={{ marginRight: 8 }} />
+                  <TextInput
+                    placeholder="Search by username or name..."
+                    placeholderTextColor="#7f8c9b"
+                    value={searchUserQuery}
+                    onChangeText={setSearchUserQuery}
+                    style={s.memberSearchInput}
+                  />
+                </View>
+              </View>
+
+              <ScrollView contentContainerStyle={{ padding: 16 }}>
+                {searchLoading && <ActivityIndicator size="small" color="#fff" style={{ marginVertical: 10 }} />}
+
+                {searchResults.map((usr) => {
+                  const isSelected = selectedUsersToAdd.includes(usr.uid);
+                  return (
+                    <Pressable
+                      key={usr.uid}
+                      onPress={() =>
+                        setSelectedUsersToAdd((prev) =>
+                          isSelected ? prev.filter((id) => id !== usr.uid) : [...prev, usr.uid]
+                        )
+                      }
+                      style={s.memberItemRow}
+                    >
+                      <ExpoImage
+                        source={{ uri: usr.photoURL || DEFAULT_GROUP_AVATAR }}
+                        style={s.memberAvatar}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.memberName}>{usr.name || usr.displayName || usr.username}</Text>
+                        <Text style={s.memberHandle}>@{usr.username || "user"}</Text>
+                      </View>
+                      <Ionicons
+                        name={isSelected ? "checkmark-circle" : "add-circle-outline"}
+                        size={24}
+                        color={isSelected ? "#00e676" : "rgba(255,255,255,0.4)"}
+                      />
+                    </Pressable>
+                  );
+                })}
+
+                {selectedUsersToAdd.length > 0 && (
+                  <Pressable onPress={handleAddSelectedUsers} style={s.confirmAddBtn}>
+                    <Text style={s.confirmAddText}>Add {selectedUsersToAdd.length} Member(s)</Text>
+                  </Pressable>
+                )}
+              </ScrollView>
+            </SafeAreaViewContext>
+          </View>
         </Modal>
       </SafeAreaViewContext>
-    </Modal>
+    </View>
+  </Modal>
   );
 }
 
 /* ──────── STYLES (Matching Images 2, 3, 4, 5) ──────── */
 
 const s = StyleSheet.create({
+  modalRoot: {
+    flex: 1,
+  },
   safeContainer: {
     flex: 1,
-    backgroundColor: "#0a0a0c",
+    backgroundColor: "transparent",
   },
   topHeaderRow: {
     flexDirection: "row",
@@ -883,12 +1096,18 @@ const s = StyleSheet.create({
     gap: 14,
   },
   backBtn: {
-    padding: 2,
+    padding: 4,
   },
   topHeaderTitle: {
     fontSize: 20,
     fontWeight: "800",
     color: "#ffffff",
+  },
+  headerStarBtn: {
+    padding: 8,
+    marginLeft: "auto",
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
   },
   scrollBody: {
     paddingHorizontal: 16,
@@ -900,12 +1119,17 @@ const s = StyleSheet.create({
     alignItems: "center",
     marginBottom: 18,
   },
+  avatarGlowContainer: {
+    borderRadius: 56,
+    padding: 3,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
   bigGroupAvatar: {
     width: 104,
     height: 104,
     borderRadius: 52,
     borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.15)",
+    borderColor: "rgba(255, 255, 255, 0.18)",
     backgroundColor: "#222",
   },
   groupNameHeading: {
@@ -913,21 +1137,22 @@ const s = StyleSheet.create({
     fontWeight: "800",
     color: "#ffffff",
     marginTop: 14,
+    letterSpacing: -0.3,
   },
 
   // Description Card (Image 2)
   descCard: {
     borderRadius: 18,
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
     padding: 16,
-    marginBottom: 16,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
+    borderColor: "rgba(255, 255, 255, 0.07)",
   },
   descText: {
-    color: "rgba(255, 255, 255, 0.8)",
+    color: "rgba(255, 255, 255, 0.85)",
     fontSize: 14,
-    lineHeight: 20,
+    lineHeight: 21,
   },
   createdNotice: {
     color: "rgba(255, 255, 255, 0.5)",
@@ -935,37 +1160,61 @@ const s = StyleSheet.create({
     marginTop: 10,
   },
 
-  // Trip Timeline Banner Card (Images 2 & 3)
+  // Trip Timeline Banner Card (Images 2 & 3 - User Request with blurred trip photo)
   timelineBannerCard: {
-    height: 130,
+    height: 144,
     borderRadius: 22,
     overflow: "hidden",
-    marginBottom: 16,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderColor: "rgba(255, 255, 255, 0.15)",
     position: "relative",
   },
   timelineOverlay: {
     flex: 1,
-    backgroundColor: "rgba(10, 15, 30, 0.55)",
     padding: 16,
-    justifyContent: "center",
+    justifyContent: "space-between",
   },
   timelineGroupName: {
     fontSize: 22,
     fontWeight: "800",
     color: "#ffffff",
+    letterSpacing: -0.3,
+  },
+  tripTag: {
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+  },
+  tripTagText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
   timelineRoute: {
     fontSize: 13.5,
     fontWeight: "600",
-    color: "rgba(255, 255, 255, 0.85)",
-    marginTop: 4,
+    color: "rgba(255, 255, 255, 0.9)",
+    marginTop: 2,
+  },
+  timelineProgressRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 8,
   },
   timelineProgressLabel: {
     fontSize: 12,
-    color: "rgba(255, 255, 255, 0.7)",
-    marginTop: 12,
+    color: "rgba(255, 255, 255, 0.8)",
+    fontWeight: "500",
+  },
+  timelinePercentText: {
+    fontSize: 12,
+    color: "#ffffff",
+    fontWeight: "700",
   },
   progressBarTrack: {
     height: 5,
@@ -980,17 +1229,54 @@ const s = StyleSheet.create({
     borderRadius: 2.5,
   },
 
+  // Favourite Card (User Request)
+  favouriteCardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  favouriteIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  favouriteTitle: {
+    color: "#ffffff",
+    fontSize: 14.5,
+    fontWeight: "700",
+  },
+  favouriteSubtitle: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 11.5,
+    marginTop: 2,
+  },
+
   // Action Buttons (Images 2 & 3)
   actionRowButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
     borderRadius: 16,
     paddingVertical: 14,
     paddingHorizontal: 16,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
+    borderColor: "rgba(255, 255, 255, 0.07)",
+  },
+  actionRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   actionRowText: {
     color: "#ffffff",
@@ -1017,10 +1303,15 @@ const s = StyleSheet.create({
   addMemberRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     backgroundColor: "rgba(255, 255, 255, 0.06)",
     borderRadius: 16,
     padding: 12,
     marginBottom: 16,
+  },
+  addMemberLeft: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
   addMemberCircle: {

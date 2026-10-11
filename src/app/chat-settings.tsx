@@ -30,7 +30,7 @@ const ITEM_PADDING = 8;
 const NUM_COLUMNS = 3;
 const ITEM_SIZE = (width - ITEM_PADDING * 2 - 20) / NUM_COLUMNS; // subtract some margin
 
-import { wallpaperList } from "../contexts/ChatSettingsContext";
+import { wallpaperList, DEFAULT_WALLPAPER_ASSET } from "../contexts/ChatSettingsContext";
 
 const wallpapers = wallpaperList; // alias for convenience
 
@@ -66,9 +66,14 @@ export default function ChatSettings() {
       }}
     >
       {item.id === "default" ? (
-        <View style={[styles.wallpaperImage, styles.defaultWallpaper]}>
-          <Feather name="check" size={24} color="#fff" />
-          <Text style={styles.defaultLabel}>Default</Text>
+        <View style={styles.wallpaperImage}>
+          <Image
+            source={DEFAULT_WALLPAPER_ASSET}
+            style={[StyleSheet.absoluteFillObject, { borderRadius: 8 }]}
+          />
+          <View style={[styles.defaultWallpaper, { backgroundColor: "rgba(0,0,0,0.4)" }]}>
+            <Text style={styles.defaultLabel}>Default</Text>
+          </View>
         </View>
       ) : (
         <Image

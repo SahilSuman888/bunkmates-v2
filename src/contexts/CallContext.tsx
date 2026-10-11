@@ -38,6 +38,8 @@ import {
   sendCallPushAndFirestoreNotification,
   sendMissedCallPushAndFirestoreNotification,
 } from "../lib/sendAppNotification";
+import { sendOneSignalPush } from "../lib/onesignal";
+import { isExpoGo } from "../lib/safeNotifications";
 import AudioRouteManager from "../lib/incallManager";
 import callForegroundService from "../lib/callForegroundService";
 
@@ -49,6 +51,7 @@ export type CallStatus =
   | "accepted"
   | "declined"
   | "ended"
+  | "missed"
   | "reconnecting";
 
 export type AudioRoute = "earpiece" | "speaker" | "bluetooth";
@@ -269,6 +272,8 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     []
   );
 
+  const incomingRingingTimerRef = useRef<any>(null);
+
   // 1. Listen for Incoming Calls (both 1:1 calls where receiverId === user.uid and group calls where memberIds contains user.uid)
   useEffect(() => {
     if (!user?.uid) return;
@@ -284,13 +289,91 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
 
     const handleSnapshot = (snapshot: any) => {
       let incomingData: ActiveCallData | null = null;
+      const nowMs = Date.now();
 
       snapshot.forEach((docSnap: any) => {
         const data = docSnap.data();
         // Ignore calls initiated by this user
         if (data.callerId === user.uid) return;
 
-        if (data.status === "calling" || data.status === "accepted") {
+        // Parse creation time & age
+        const callCreatedMs = data.createdAt?.toMillis
+          ? data.createdAt.toMillis()
+          : data.createdAt?.seconds
+          ? data.createdAt.seconds * 1000
+          : typeof data.createdAt === "number"
+          ? data.createdAt
+          : 0;
+
+        const ageMs = callCreatedMs > 0 ? Math.max(0, nowMs - callCreatedMs) : 0;
+        // A call is ONLY actively ringing if it was created within the last 35 seconds
+        const isStillRinging = callCreatedMs > 0 && ageMs < 35000;
+
+        // If a call was left in 'calling' state but is older than 35s, it is expired/missed!
+        if (data.status === "calling" && !isStillRinging) {
+          // Auto-mark as missed in Firestore so it doesn't linger forever
+          updateDoc(doc(db, "calls", docSnap.id), {
+            status: "missed",
+            endedAt: serverTimestamp(),
+          }).catch(() => {});
+
+          if (!data.callLogged) {
+            updateDoc(doc(db, "calls", docSnap.id), { callLogged: true }).catch(() => {});
+            recordCallLog(
+              {
+                id: docSnap.id,
+                callerId: data.callerId,
+                callerName: data.callerName || "BunkMate",
+                callerAvatar:
+                  data.callerAvatar || "https://i.pravatar.cc/150",
+                callerHandle: data.callerHandle || "traveler",
+                receiverId: data.receiverId,
+                receiverName: data.receiverName || "BunkMate",
+                receiverAvatar:
+                  data.receiverAvatar || "https://i.pravatar.cc/150",
+                receiverHandle: data.receiverHandle || "traveler",
+                callType: data.callType || "audio",
+                status: "missed",
+                isIncoming: true,
+                createdAt: data.createdAt,
+                acceptedAt: null,
+                isGroupCall: data.isGroupCall || false,
+                groupName: data.groupName || undefined,
+                groupMembers: data.groupMembers || [],
+              },
+              "missed",
+              0
+            );
+
+            // Also record in in-app notifications collection so it appears in the Notification Panel
+            addDoc(collection(db, "notifications"), {
+              uid: user.uid,
+              type: "missed_call",
+              title: data.callerName || "BunkMate",
+              content: `Missed ${data.callType === "video" ? "video" : "voice"} call`,
+              message: `Missed ${data.callType === "video" ? "video" : "voice"} call`,
+              senderId: data.callerId,
+              senderName: data.callerName || "BunkMate",
+              pic: data.callerAvatar || "https://i.pravatar.cc/150",
+              seen: false,
+              read: false,
+              timestamp: data.createdAt || serverTimestamp(),
+              callType: data.callType || "audio",
+            }).catch(() => {});
+
+            // Show system missed call notification
+            showMissedCallNotification(
+              data.callerName || "BunkMate",
+              data.callType || "audio",
+              data.callerId,
+              data.callerAvatar
+            );
+          }
+          return; // NEVER show incoming ringing UI for this expired call!
+        }
+
+        // Only FRESH, actively ringing calls or currently accepted calls can trigger UI
+        if ((data.status === "calling" && isStillRinging) || data.status === "accepted") {
           if (
             !currentCallIdRef.current ||
             currentCallIdRef.current === docSnap.id
@@ -325,19 +408,65 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         setActiveCall(incomingData);
 
         if ((incomingData as ActiveCallData).status === "calling") {
-          // Play phone's native ringtone out of the loudspeaker and show local notification
+          // Play phone's native ringtone out of the loudspeaker (in native builds, OneSignal handles notification)
           AudioRouteManager.startRingtone();
-          showLocalIncomingCallNotification(
-            (incomingData as ActiveCallData).callerName,
-            (incomingData as ActiveCallData).callType,
-            (incomingData as ActiveCallData).id
-          );
+          if (isExpoGo) {
+            showLocalIncomingCallNotification(
+              (incomingData as ActiveCallData).callerName,
+              (incomingData as ActiveCallData).callType,
+              (incomingData as ActiveCallData).id
+            );
+          }
+
+          // Callee-side auto-timeout (35s minus elapsed time, minimum 5s)
+          if (incomingRingingTimerRef.current) {
+            clearTimeout(incomingRingingTimerRef.current);
+          }
+          const callCreatedMs = (incomingData as any).createdAt?.toMillis
+            ? (incomingData as any).createdAt.toMillis()
+            : (incomingData as any).createdAt?.seconds
+            ? (incomingData as any).createdAt.seconds * 1000
+            : typeof (incomingData as any).createdAt === "number"
+            ? (incomingData as any).createdAt
+            : 0;
+          const elapsedMs = callCreatedMs > 0 ? Math.max(0, Date.now() - callCreatedMs) : 0;
+          const remainingRingingTime = Math.max(5000, 35000 - elapsedMs);
+
+          incomingRingingTimerRef.current = setTimeout(async () => {
+            if (
+              activeCallRef.current?.status === "calling" &&
+              activeCallRef.current?.id === (incomingData as ActiveCallData).id
+            ) {
+              AudioRouteManager.stopRingtone();
+              cancelCallNotification((incomingData as ActiveCallData).id);
+              showMissedCallNotification(
+                (incomingData as ActiveCallData).callerName,
+                (incomingData as ActiveCallData).callType
+              );
+              recordCallLog(activeCallRef.current, "missed", 0);
+              try {
+                await updateDoc(doc(db, "calls", (incomingData as ActiveCallData).id), {
+                  status: "missed",
+                  endedAt: serverTimestamp(),
+                  callLogged: true,
+                });
+              } catch (e) {}
+              currentCallIdRef.current = null;
+              setActiveCall(null);
+            }
+          }, remainingRingingTime);
         } else if ((incomingData as ActiveCallData).status === "accepted") {
+          if (incomingRingingTimerRef.current) {
+            clearTimeout(incomingRingingTimerRef.current);
+          }
           AudioRouteManager.stopRingtone();
           cancelCallNotification();
         }
       } else if (activeCall?.isIncoming) {
         // Incoming call was cancelled or missed by caller
+        if (incomingRingingTimerRef.current) {
+          clearTimeout(incomingRingingTimerRef.current);
+        }
         AudioRouteManager.stopRingtone();
         cancelCallNotification();
         if (activeCall.status === "calling") {
@@ -368,6 +497,9 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     return () => {
       unsub1();
       unsub2();
+      if (incomingRingingTimerRef.current) {
+        clearTimeout(incomingRingingTimerRef.current);
+      }
       AudioRouteManager.stopRingtone();
     };
   }, [user?.uid, activeCall?.isIncoming, recordCallLog]);
@@ -382,7 +514,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
 
       if (data.status === "accepted") {
         AudioRouteManager.stopRingtone();
-        cancelCallNotification();
+        cancelCallNotification(activeCall.id);
         if (callTimeoutTimerRef.current) {
           clearTimeout(callTimeoutTimerRef.current);
           callTimeoutTimerRef.current = null;
@@ -399,7 +531,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         setConnectionQuality("good");
       } else if (data.status === "declined") {
         AudioRouteManager.stopRingtone();
-        cancelCallNotification();
+        cancelCallNotification(activeCall.id);
         if (callTimeoutTimerRef.current) {
           clearTimeout(callTimeoutTimerRef.current);
           callTimeoutTimerRef.current = null;
@@ -424,7 +556,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         setRemoteStream(null);
       } else if (data.status === "ended") {
         AudioRouteManager.stopRingtone();
-        cancelCallNotification();
+        cancelCallNotification(activeCall.id);
         if (callTimeoutTimerRef.current) {
           clearTimeout(callTimeoutTimerRef.current);
           callTimeoutTimerRef.current = null;
@@ -737,7 +869,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
           if (activeCallRef.current?.status === "calling") {
             console.log("[CallContext] Call timed out after 35s — no answer");
             AudioRouteManager.stopRingtone();
-            cancelCallNotification();
+            cancelCallNotification(callDocId);
 
             try {
               await updateDoc(doc(db, "calls", callDocId), {
@@ -787,7 +919,7 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     if (!activeCall?.id) return;
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     AudioRouteManager.stopRingtone();
-    cancelCallNotification();
+    cancelCallNotification(activeCall.id);
     await requestPermissions();
 
     const isVideoCall = activeCall.callType === "video";
@@ -946,7 +1078,8 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
     async (reason?: string) => {
       triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
       AudioRouteManager.stopRingtone();
-      cancelCallNotification();
+      const callToDeclineId = activeCall?.id || currentCallIdRef.current || "";
+      cancelCallNotification(callToDeclineId);
 
       if (rtcRef.current) {
         rtcRef.current.endCall();
@@ -956,6 +1089,17 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
       callForegroundService.stop();
 
       if (activeCall?.id) {
+        const otherUserId = activeCall.isIncoming ? activeCall.callerId : activeCall.receiverId;
+        if (otherUserId) {
+          sendOneSignalPush({
+            externalUserIds: [otherUserId],
+            headings: { en: "Call Declined" },
+            contents: { en: "Call declined" },
+            data: { type: "call_ended", callId: activeCall.id },
+            priority: 10,
+          }).catch(() => {});
+        }
+
         try {
           await updateDoc(doc(db, "calls", activeCall.id), {
             status: "declined",
@@ -982,9 +1126,10 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
   const endCall = useCallback(async () => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
     AudioRouteManager.stopRingtone();
-    cancelCallNotification();
+    const currentActive = activeCallRef.current || activeCall;
+    const callToEndId = currentActive?.id || currentCallIdRef.current || "";
+    cancelCallNotification(callToEndId);
 
-    const currentActive = activeCallRef.current;
     const finalSecs = callDurationRef.current;
 
     if (currentActive) {
@@ -993,6 +1138,17 @@ export const CallProvider = ({ children }: { children: ReactNode }) => {
         finalSecs > 0 ? "completed" : "missed",
         finalSecs
       );
+
+      const otherUserId = currentActive.isIncoming ? currentActive.callerId : currentActive.receiverId;
+      if (otherUserId) {
+        sendOneSignalPush({
+          externalUserIds: [otherUserId],
+          headings: { en: "Call Ended" },
+          contents: { en: "Call ended" },
+          data: { type: "call_ended", callId: currentActive.id },
+          priority: 10,
+        }).catch(() => {});
+      }
 
       // If caller hangs up before receiver answers, send Missed Call notification to receiver
       if (currentActive.status === "calling" && !currentActive.isIncoming) {

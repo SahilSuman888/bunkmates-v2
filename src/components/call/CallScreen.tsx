@@ -657,11 +657,20 @@ export default function CallScreen() {
           {/* Tile 1: You */}
           <View style={styles.groupVideoTile}>
             {!isVideoOff ? (
-              <CameraView
-                style={StyleSheet.absoluteFill}
-                facing={facing}
-                mirror={facing === "front"}
-              />
+              localStream && RTCView ? (
+                <RTCView
+                  streamURL={localStream.toURL()}
+                  style={StyleSheet.absoluteFill}
+                  objectFit="cover"
+                  mirror={facing === "front"}
+                  zOrder={1}
+                />
+              ) : (
+                <View style={styles.videoOffTileCenter}>
+                  <Image source={{ uri: currentUserAvatar }} style={styles.tileAvatarOff} />
+                  <ActivityIndicator size="small" color="#00e6b0" style={{ marginTop: 6 }} />
+                </View>
+              )
             ) : (
               <View style={styles.videoOffTileCenter}>
                 <Image source={{ uri: currentUserAvatar }} style={styles.tileAvatarOff} />
@@ -765,7 +774,16 @@ export default function CallScreen() {
                   </Text>
                 </View>
               ) : (
-                <CameraView style={StyleSheet.absoluteFill} facing={facing} mirror={facing === "front"} />
+                <View style={styles.videoOffFullscreen}>
+                  <Image
+                    source={{ uri: currentUserAvatar }}
+                    style={styles.fullscreenAvatarOff}
+                  />
+                  <ActivityIndicator size="small" color="#00e6b0" style={{ marginTop: 8 }} />
+                  <Text style={styles.fullscreenAvatarOffText}>
+                    Connecting your camera...
+                  </Text>
+                </View>
               )
             ) : hasRemoteVideo && RTCView ? (
               <RTCView
@@ -1717,6 +1735,8 @@ const styles = StyleSheet.create({
   },
   pipContainer: {
     position: "absolute",
+    top: 0,
+    left: 0,
     width: 118,
     height: 168,
     borderRadius: 24,
@@ -1724,8 +1744,8 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "rgba(0, 230, 176, 0.55)",
     backgroundColor: "rgba(10, 14, 20, 0.9)",
-    zIndex: 35,
-    elevation: 14,
+    zIndex: 9999,
+    elevation: 9999,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.55,

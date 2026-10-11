@@ -56,6 +56,9 @@ export async function sendChatMessageNotification({
       timestamp: serverTimestamp(),
       route: `/chat/${senderId}`,
       chatId,
+      skipExpoPush: true,
+      viaOneSignal: true,
+      pushSent: true,
     });
   } catch (err) {
     console.warn("[Notification] Firestore notification error:", err);
@@ -120,6 +123,9 @@ export async function sendGroupChatMessageNotification({
         timestamp: serverTimestamp(),
         route: `/group-chatroom/${groupId}`,
         groupId,
+        skipExpoPush: true,
+        viaOneSignal: true,
+        pushSent: true,
       });
     } catch (err) {
       console.warn("[Notification] Firestore group notification error:", err);
@@ -201,6 +207,9 @@ export async function sendCallPushAndFirestoreNotification({
         timestamp: serverTimestamp(),
         callId,
         callType,
+        skipExpoPush: true,
+        viaOneSignal: true,
+        pushSent: true,
       });
     } catch (err) {
       console.warn("[Notification] Firestore call notification error:", err);
@@ -269,6 +278,9 @@ export async function sendMissedCallPushAndFirestoreNotification({
       read: false,
       timestamp: serverTimestamp(),
       callType,
+      skipExpoPush: true,
+      viaOneSignal: true,
+      pushSent: true,
     });
   } catch (err) {
     console.warn("[Notification] Firestore missed call notification error:", err);

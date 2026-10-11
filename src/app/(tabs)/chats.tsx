@@ -12,9 +12,10 @@ import {
   Dimensions,
   Modal,
   RefreshControl,
+  AppState,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { Image as ExpoImage } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -28,18 +29,26 @@ import NotificationBell from "../../components/NotificationBell";
 import UserProfileModal from "../../components/UserProfileModal";
 import AddFriendModal from "../../components/chat/AddFriendModal";
 import CreateGroupModal from "../../components/chat/CreateGroupModal";
+import PrivatePinModal from "../../components/chat/PrivatePinModal";
+import PrivateLockSuccessModal from "../../components/chat/PrivateLockSuccessModal";
+import StartCallModal from "../../components/chat/StartCallModal";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   collection,
   query,
   where,
   onSnapshot,
   limit,
+  doc,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
 } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
-type ChatFilterScope = "All" | "Direct" | "Groups" | "Unread" | "Calls";
+type ChatFilterScope = "All" | "Unread" | "Group" | "Favourites" | "Private" | "Calls";
 
 export default function ChatsScreen() {
   const insets = useSafeAreaInsets();
@@ -48,6 +57,14 @@ export default function ChatsScreen() {
   const { startCall } = useCall();
 
   const [activeScope, setActiveScope] = useState<ChatFilterScope>("All");
+  const [isPrivateUnlocked, setIsPrivateUnlocked] = useState(false);
+  const [pinModalVisible, setPinModalVisible] = useState(false);
+  const [pinModalActionTitle, setPinModalActionTitle] = useState("Private Chats Locked");
+  const [pendingChatActionToLock, setPendingChatActionToLock] = useState<any | null>(null);
+
+  const [privateChatIds, setPrivateChatIds] = useState<string[]>([]);
+  const [favouriteChatIds, setFavouriteChatIds] = useState<string[]>([]);
+  const [onlineUsersMap, setOnlineUsersMap] = useState<Record<string, boolean>>({});
   const [callHistory, setCallHistory] = useState<any[]>([]);
   const [callHistoryLoading, setCallHistoryLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -55,6 +72,26 @@ export default function ChatsScreen() {
 
   // Quick Action Menu on a chat
   const [selectedChatAction, setSelectedChatAction] = useState<any | null>(null);
+
+  // Auto-lock private chats when switching tabs or backgrounding
+  useFocusEffect(
+    React.useCallback(() => {
+      return () => {
+        setIsPrivateUnlocked(false);
+        setActiveScope((curr) => (curr === "Private" ? "All" : curr));
+      };
+    }, [])
+  );
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState !== "active") {
+        setIsPrivateUnlocked(false);
+        setActiveScope((curr) => (curr === "Private" ? "All" : curr));
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   const { chats = [], loading: chatsLoading } =
     useUserChats(user?.uid || null) || {};
@@ -71,6 +108,11 @@ export default function ChatsScreen() {
   const [addFriendModalVisible, setAddFriendModalVisible] = useState(false);
   const [createGroupModalVisible, setCreateGroupModalVisible] = useState(false);
   const [composeMenuVisible, setComposeMenuVisible] = useState(false);
+  const [startCallModalVisible, setStartCallModalVisible] = useState(false);
+  const [startCallDefaultType, setStartCallDefaultType] = useState<"audio" | "video">("audio");
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
+  const [successModalType, setSuccessModalType] = useState<"locked" | "unlocked">("locked");
+  const [successModalChatName, setSuccessModalChatName] = useState("");
 
   // ═══════════════════════════════════════════════════════════
   // 1. FETCH CALLS
@@ -173,7 +215,227 @@ export default function ChatsScreen() {
   };
 
   // ═══════════════════════════════════════════════════════════
-  // 2. CONVERSATIONS & FILTERING
+  // 2. PRIVACY & FAVOURITES PERSISTENCE
+  // ═══════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    // 1. Immediately hydrate from AsyncStorage for instant rendering
+    AsyncStorage.getItem(`@bunkmates_private_chats_${user.uid}`).then((cached) => {
+      if (cached) {
+        try {
+          const list: string[] = JSON.parse(cached);
+          if (Array.isArray(list)) setPrivateChatIds(list);
+        } catch (e) {}
+      }
+    });
+
+    AsyncStorage.getItem(`@bunkmates_favourite_chats_${user.uid}`).then((cached) => {
+      if (cached) {
+        try {
+          const list: string[] = JSON.parse(cached);
+          if (Array.isArray(list)) setFavouriteChatIds(list);
+        } catch (e) {}
+      }
+    });
+
+    // 2. Real-time Firestore sync on current user's profile
+    const unsubUser = onSnapshot(doc(db, "users", user.uid), (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        const pList: string[] = d.privateChatIds || [];
+        const fList: string[] = d.favouriteChatIds || [];
+        setPrivateChatIds(pList);
+        setFavouriteChatIds(fList);
+        AsyncStorage.setItem(`@bunkmates_private_chats_${user.uid}`, JSON.stringify(pList)).catch(() => {});
+        AsyncStorage.setItem(`@bunkmates_favourite_chats_${user.uid}`, JSON.stringify(fList)).catch(() => {});
+      }
+    });
+
+    return () => unsubUser();
+  }, [user?.uid]);
+
+  // ═══════════════════════════════════════════════════════════
+  // 3. GENUINE REALTIME ONLINE USERS LISTENER
+  // ═══════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const qUsers = query(collection(db, "users"));
+    const unsub = onSnapshot(
+      qUsers,
+      (snapshot) => {
+        const map: Record<string, boolean> = {};
+        const now = Date.now();
+
+        snapshot.forEach((docSnap) => {
+          if (docSnap.id === user.uid) return; // Exclude current user
+          const data = docSnap.data();
+          const lastSeenMs = data.lastSeen?.toMillis ? data.lastSeen.toMillis() : 0;
+          // Genuine online check: explicitly online or active within last 5 minutes
+          const isRecent = lastSeenMs > 0 && now - lastSeenMs < 5 * 60 * 1000;
+          const isOnline = data.isOnline === true || data.online === true || isRecent;
+
+          if (isOnline) {
+            map[docSnap.id] = true;
+          }
+        });
+
+        setOnlineUsersMap(map);
+      },
+      (err) => {
+        console.warn("[Chats] Error listening to online users:", err);
+      }
+    );
+
+    return () => unsub();
+  }, [user?.uid]);
+
+  // Privacy & Favourite Checkers
+  const isItemPrivate = (item: any) => {
+    if (!item) return false;
+    const peerUid =
+      item.rawItem?.uid ||
+      (item.id.includes("_")
+        ? item.id.split("_").find((x: string) => x !== user?.uid)
+        : item.id);
+    return (
+      privateChatIds.includes(item.id) ||
+      (peerUid ? privateChatIds.includes(peerUid) : false)
+    );
+  };
+
+  const isItemFavourite = (item: any) => {
+    if (!item) return false;
+    const peerUid =
+      item.rawItem?.uid ||
+      (item.id.includes("_")
+        ? item.id.split("_").find((x: string) => x !== user?.uid)
+        : item.id);
+    return (
+      favouriteChatIds.includes(item.id) ||
+      (peerUid ? favouriteChatIds.includes(peerUid) : false)
+    );
+  };
+
+  const handlePinSuccess = () => {
+    if (pendingChatActionToLock) {
+      executeTogglePrivateChat(pendingChatActionToLock);
+      setPendingChatActionToLock(null);
+    } else {
+      setIsPrivateUnlocked(true);
+      setActiveScope("Private");
+    }
+  };
+
+  const handleTogglePrivateChat = (item: any) => {
+    if (!user?.uid || !item) return;
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (e) {}
+
+    const isCurrentlyPrivate = isItemPrivate(item);
+    setPendingChatActionToLock(item);
+    setPinModalActionTitle(
+      isCurrentlyPrivate ? `Unlock '${item.title}'` : `Lock '${item.title}'`
+    );
+    setSelectedChatAction(null);
+    setPinModalVisible(true);
+  };
+
+  const executeTogglePrivateChat = async (item: any) => {
+    if (!user?.uid || !item) return;
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (e) {}
+
+    const peerUid =
+      item.rawItem?.uid ||
+      (item.id.includes("_")
+        ? item.id.split("_").find((x: string) => x !== user?.uid)
+        : item.id);
+    const chatId = item.id;
+    const isCurrentlyPrivate = isItemPrivate(item);
+
+    const userRef = doc(db, "users", user.uid);
+    try {
+      if (isCurrentlyPrivate) {
+        const updated = privateChatIds.filter((id) => id !== chatId && id !== peerUid);
+        setPrivateChatIds(updated);
+        await updateDoc(userRef, {
+          privateChatIds: arrayRemove(chatId, peerUid),
+        });
+        await AsyncStorage.setItem(
+          `@bunkmates_private_chats_${user.uid}`,
+          JSON.stringify(updated)
+        );
+        setSuccessModalType("unlocked");
+        setSuccessModalChatName(item.title || "Chat");
+        setSuccessModalVisible(true);
+      } else {
+        const updated = [...privateChatIds, chatId, peerUid].filter(Boolean);
+        setPrivateChatIds(updated);
+        await updateDoc(userRef, {
+          privateChatIds: arrayUnion(chatId, peerUid),
+        });
+        await AsyncStorage.setItem(
+          `@bunkmates_private_chats_${user.uid}`,
+          JSON.stringify(updated)
+        );
+        setSuccessModalType("locked");
+        setSuccessModalChatName(item.title || "Chat");
+        setSuccessModalVisible(true);
+      }
+    } catch (err) {
+      console.error("Error toggling private chat:", err);
+    }
+  };
+
+  const handleToggleFavouriteChat = async (item: any) => {
+    if (!user?.uid || !item) return;
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (e) {}
+
+    const peerUid =
+      item.rawItem?.uid ||
+      (item.id.includes("_")
+        ? item.id.split("_").find((x: string) => x !== user?.uid)
+        : item.id);
+    const chatId = item.id;
+    const isCurrentlyFav = isItemFavourite(item);
+
+    const userRef = doc(db, "users", user.uid);
+    try {
+      if (isCurrentlyFav) {
+        const updated = favouriteChatIds.filter((id) => id !== chatId && id !== peerUid);
+        setFavouriteChatIds(updated);
+        await updateDoc(userRef, {
+          favouriteChatIds: arrayRemove(chatId, peerUid),
+        });
+        await AsyncStorage.setItem(
+          `@bunkmates_favourite_chats_${user.uid}`,
+          JSON.stringify(updated)
+        );
+      } else {
+        const updated = [...favouriteChatIds, chatId, peerUid].filter(Boolean);
+        setFavouriteChatIds(updated);
+        await updateDoc(userRef, {
+          favouriteChatIds: arrayUnion(chatId, peerUid),
+        });
+        await AsyncStorage.setItem(
+          `@bunkmates_favourite_chats_${user.uid}`,
+          JSON.stringify(updated)
+        );
+      }
+    } catch (err) {
+      console.error("Error toggling favourite chat:", err);
+    }
+    setSelectedChatAction(null);
+  };
+
+  // ═══════════════════════════════════════════════════════════
+  // 4. CONVERSATIONS & FILTERING (Removing Broken Dummy Chats)
   // ═══════════════════════════════════════════════════════════
   const filteredChats = useMemo(() => {
     return chats.filter((chat: any) =>
@@ -187,122 +449,194 @@ export default function ChatsScreen() {
     );
   }, [groups, searchQuery]);
 
-  const combinedList = useMemo(() => {
-    const normalizedChats = (filteredChats || []).map((c: any) => ({
-      id: c.id,
-      type: "chat" as const,
-      title: c.name || c.displayName || "BunkMate Traveler",
-      subtitle: c.lastMessage || "No messages yet",
-      avatar: c.avatar || c.photoURL || "https://i.pravatar.cc/150?img=11",
-      timestamp: c.lastTimestamp || c.updatedAt || 0,
-      unreadCount: c.unreadCount || 0,
-      badge: null,
-      rawItem: c,
-    }));
+  const getTimestampMs = (t: any): number => {
+    if (!t) return 0;
+    if (typeof t === "number") return t < 10000000000 ? t * 1000 : t;
+    if (typeof t?.toMillis === "function") return t.toMillis();
+    if (typeof t?.toDate === "function") return t.toDate().getTime();
+    if (typeof t?.seconds === "number") return t.seconds * 1000;
+    if (typeof t === "string") {
+      const parsed = new Date(t).getTime();
+      return isNaN(parsed) ? 0 : parsed;
+    }
+    if (t instanceof Date) return t.getTime();
+    return 0;
+  };
 
-    const normalizedGroups = (filteredGroups || []).map((g: any) => ({
+  const normalizedChats = useMemo(() => {
+    // Exclude invalid/broken dummy chats with no messages or unknown names
+    const validChats = (filteredChats || []).filter((c: any) => {
+      if (!c || !c.id) return false;
+      const isDummy =
+        (!c.name || c.name === "Unknown User") &&
+        (!c.lastMessage || c.lastMessage === "No messages yet");
+      return !isDummy;
+    });
+
+    // Deduplicate by peer UID keeping the most recent chat
+    const chatByPeer = new Map<string, any>();
+    for (const c of validChats) {
+      const anyC = c as any;
+      const peerUid: string =
+        anyC.uid ||
+        (c.id.includes("_")
+          ? c.id.split("_").find((x: string) => x !== user?.uid) || c.id
+          : c.id);
+      const existing = chatByPeer.get(peerUid);
+      const cTime = getTimestampMs(anyC.lastTimestamp || anyC.timestamp || anyC.date);
+
+      if (!existing || getTimestampMs(existing.timestamp) < cTime) {
+        chatByPeer.set(peerUid, {
+          id: c.id,
+          type: "chat" as const,
+          title: c.name || anyC.displayName || "Traveler",
+          subtitle: c.lastMessage || "",
+          avatar:
+            c.avatar ||
+            anyC.photoURL ||
+            `https://ui-avatars.com/api/?name=${encodeURIComponent(
+              c.name || "Traveler"
+            )}&background=1f2937&color=fff`,
+          timestamp: cTime,
+          unreadCount: c.unreadCount || 0,
+          badge: null,
+          rawItem: c,
+        });
+      }
+    }
+
+    return Array.from(chatByPeer.values());
+  }, [filteredChats, user?.uid]);
+
+  const normalizedGroups = useMemo(() => {
+    const validGroups = (filteredGroups || []).filter((g: any) => !!g && !!g.id);
+
+    return validGroups.map((g: any) => ({
       id: g.id,
       type: "group" as const,
-      title: g.name || "Trip Group Chat",
-      subtitle: g.lastMessage || "No messages yet",
-      avatar: g.iconURL || "https://i.pravatar.cc/150?img=32",
-      timestamp: g.lastTimestamp || g.updatedAt || 0,
-      unreadCount: g.unreadCounts?.current || 0,
-      badge: g.name?.includes("Dev") ? "Dev Beta" : null,
+      title: g.name || g.tripName || "Trip Group",
+      subtitle: g.lastMessage && g.lastMessage !== "No messages yet" ? g.lastMessage : "Group conversation",
+      avatar: g.iconURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(g.name || "Group")}&background=3b82f6&color=fff`,
+      timestamp: getTimestampMs(g.lastTimestamp || g.updatedAt || g.createdAt || 0),
+      unreadCount: typeof g.unreadCount === "number" ? g.unreadCount : g.unreadCounts?.current || 0,
+      badge: null,
       rawItem: g,
     }));
+  }, [filteredGroups]);
 
-    return [...normalizedChats, ...normalizedGroups].sort(
-      (a, b) =>
-        (b.timestamp?.seconds || b.timestamp || 0) -
-        (a.timestamp?.seconds || a.timestamp || 0)
+  const combinedList = useMemo(() => {
+    // Sort all single chats and group chats together so newest message is ALWAYS index 0 (top)
+    const list = [...normalizedChats, ...normalizedGroups].sort(
+      (a, b) => (b.timestamp || 0) - (a.timestamp || 0)
     );
-  }, [filteredChats, filteredGroups]);
 
-  // Filter based on activeScope
-  const displayedList = useMemo(() => {
-    if (activeScope === "Direct") {
-      return combinedList.filter((item) => item.type === "chat");
-    }
-    if (activeScope === "Groups") {
-      return combinedList.filter((item) => item.type === "group");
-    }
-    if (activeScope === "Unread") {
-      return combinedList.filter((item) => item.unreadCount > 0);
-    }
-    return combinedList;
-  }, [combinedList, activeScope]);
-
-  const filteredCallHistory = useMemo(() => {
-    return callHistory.filter((call: any) => {
-      const isOutgoing = call.callerId === user?.uid;
-      const peerName = isOutgoing ? call.receiverName : call.callerName;
-      const peerHandle = isOutgoing ? call.receiverHandle : call.callerHandle;
-      const queryStr = searchQuery.toLowerCase().trim();
-
-      return (
-        (peerName || "").toLowerCase().includes(queryStr) ||
-        (peerHandle || "").toLowerCase().includes(queryStr) ||
-        (call.callType || "").toLowerCase().includes(queryStr)
-      );
+    // Guaranteed deduplication: DO NOT allow chat keys to collide with group keys!
+    const seen = new Set<string>();
+    return list.filter((item) => {
+      const key = `${item.type}_${item.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
-  }, [callHistory, searchQuery, user?.uid]);
+  }, [normalizedChats, normalizedGroups]);
+
+  // Filter based on activeScope (All, Unread, Group, Favourites, Private)
+  const displayedList = useMemo(() => {
+    // 1. Private tab shows ONLY private chats
+    if (activeScope === "Private") {
+      return combinedList.filter((item) => isItemPrivate(item));
+    }
+
+    // 2. All other tabs EXCLUDE private chats (WhatsApp locked chats behavior!)
+    const nonPrivateList = combinedList.filter((item) => !isItemPrivate(item));
+
+    if (activeScope === "Unread") {
+      return nonPrivateList.filter((item) => item.unreadCount > 0);
+    }
+    if (activeScope === "Group") {
+      return nonPrivateList.filter((item) => item.type === "group");
+    }
+    if (activeScope === "Favourites") {
+      return nonPrivateList.filter((item) => isItemFavourite(item));
+    }
+
+    // "All" tab: non-private chats & groups
+    return nonPrivateList;
+  }, [combinedList, activeScope, privateChatIds, favouriteChatIds]);
 
   const totalUnreadCount = useMemo(() => {
-    return combinedList.reduce((acc, c) => acc + (c.unreadCount > 0 ? 1 : 0), 0);
-  }, [combinedList]);
+    return combinedList.filter((c) => !isItemPrivate(c) && c.unreadCount > 0).length;
+  }, [combinedList, privateChatIds]);
 
-  // ═══════════════════════════════════════════════════════════
-  // 1b. REALTIME ONLINE USERS LISTENER (Firestore users collection)
-  // ═══════════════════════════════════════════════════════════
-  const [realtimeOnlineUsers, setRealtimeOnlineUsers] = useState<any[]>([]);
+  const groupCountBadge = useMemo(() => {
+    return combinedList.filter((item) => !isItemPrivate(item) && item.type === "group").length;
+  }, [combinedList, privateChatIds]);
 
-  useEffect(() => {
-    if (!user?.uid) return;
+  const favouriteCountBadge = useMemo(() => {
+    return combinedList.filter((item) => !isItemPrivate(item) && isItemFavourite(item)).length;
+  }, [combinedList, privateChatIds, favouriteChatIds]);
 
-    const qUsers = query(collection(db, "users"), limit(60));
-    const unsub = onSnapshot(
-      qUsers,
-      (snapshot) => {
-        const list: any[] = [];
-        const now = Date.now();
+  const privateCountBadge = useMemo(() => {
+    return combinedList.filter((item) => isItemPrivate(item)).length;
+  }, [combinedList, privateChatIds]);
 
-        snapshot.forEach((docSnap) => {
-          if (docSnap.id === user.uid) return; // Exclude current user
+  // Group Call History WhatsApp style: multiple calls with the same person are grouped
+  // showing the count e.g. "Sahil Suman (5)" rather than multiple repetitive rows
+  const groupedCallHistory = useMemo(() => {
+    if (!callHistory || callHistory.length === 0) return [];
 
-          const data = docSnap.data();
-          const lastSeenMs = data.lastSeen?.toMillis ? data.lastSeen.toMillis() : 0;
-          const isRecent = lastSeenMs > 0 && now - lastSeenMs < 10 * 60 * 1000;
+    const groups: any[] = [];
+    let current: any = null;
 
-          const isUserOnline = data.online === true || data.isOnline === true || isRecent;
+    for (const call of callHistory) {
+      const isOutgoing = call.callerId === user?.uid;
+      const peerUid = isOutgoing ? call.receiverId : call.callerId;
+      const peerName = isOutgoing
+        ? call.receiverName || "BunkMate"
+        : call.callerName || "BunkMate";
+      const peerAvatar = isOutgoing ? call.receiverAvatar : call.callerAvatar;
+      const peerHandle = isOutgoing ? call.receiverHandle : call.callerHandle;
+      const isMissed = call.status === "missed" || call.status === "declined";
+      const isVideo = call.callType === "video";
 
-          if (isUserOnline) {
-            const rawName = data.displayName || data.name || data.username || "Traveler";
-            const photo =
-              data.photoURL ||
-              data.avatar ||
-              `https://ui-avatars.com/api/?name=${encodeURIComponent(rawName)}&background=10b981&color=fff`;
-
-            list.push({
-              id: docSnap.id,
-              uid: docSnap.id,
-              name: rawName.split(" ")[0],
-              fullName: rawName,
-              avatar: photo,
-              online: true,
-            });
-          }
-        });
-
-        setRealtimeOnlineUsers(list);
-      },
-      (err) => {
-        console.warn("[Chats] Error listening to online users:", err);
+      // Group consecutive calls with the same contact
+      if (current && current.peerUid === peerUid) {
+        current.count += 1;
+        current.calls.push(call);
+        if (call.computedDuration) {
+          current.totalDuration += call.computedDuration;
+        }
+      } else {
+        current = {
+          id: call.id,
+          peerUid,
+          peerName,
+          peerAvatar,
+          peerHandle,
+          isOutgoing,
+          isMissed,
+          isVideo,
+          callType: call.callType || "audio",
+          status: call.status,
+          createdAt: call.createdAt || call.timestamp,
+          timestamp: call.timestamp || call.createdAt,
+          computedDuration: call.computedDuration || 0,
+          totalDuration: call.computedDuration || 0,
+          count: 1,
+          calls: [call],
+          latestCall: call,
+        };
+        groups.push(current);
       }
-    );
+    }
 
-    return () => unsub();
-  }, [user?.uid]);
+    if (!searchQuery.trim()) return groups;
+
+    const q = searchQuery.toLowerCase().trim();
+    return groups.filter((g) =>
+      (g.peerName || "").toLowerCase().includes(q)
+    );
+  }, [callHistory, user?.uid, searchQuery]);
 
   // ═══════════════════════════════════════════════════════════
   // 3. ACTION HANDLERS
@@ -353,20 +687,29 @@ export default function ChatsScreen() {
     });
   };
 
-  const loading = authLoading || chatsLoading || groupsLoading || requestsLoading;
+  const hasCachedItems = combinedList.length > 0 || (activeScope === "Calls" && groupedCallHistory.length > 0);
+  const showBlockingLoader = authLoading ? true : (!hasCachedItems && (chatsLoading || groupsLoading));
 
   return (
     <View style={s.screenContainer}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
-      {/* ── TOP HEADER (Clean, Professional, Profile Removed) ── */}
+      {/* ── TOP HEADER (Clean, Professional, WhatsApp Reference) ── */}
       <View style={[s.topHeader, { paddingTop: insets.top + 8 }]}>
         <View>
           <Text style={s.headerTitleText}>Chats</Text>
           <Text style={s.headerSubtitleText}>
-            {activeScope === "Calls"
-              ? `${callHistory.length} calls logged`
-              : `${combinedList.length} chats ${totalUnreadCount > 0 ? `• ${totalUnreadCount} unread` : ""}`}
+            {activeScope === "Private"
+              ? `${displayedList.length} locked chats`
+              : activeScope === "Favourites"
+              ? `${displayedList.length} favourite chats`
+              : activeScope === "Group"
+              ? `${displayedList.length} groups`
+              : activeScope === "Unread"
+              ? `${displayedList.length} unread chats`
+              : activeScope === "Calls"
+              ? `${groupedCallHistory.length} ${groupedCallHistory.length === 1 ? "call" : "calls"}`
+              : `${displayedList.length} ${displayedList.length === 1 ? "chat" : "chats"}${totalUnreadCount > 0 ? ` • ${totalUnreadCount} unread` : ""}`}
           </Text>
         </View>
 
@@ -408,11 +751,7 @@ export default function ChatsScreen() {
         <View style={s.searchFieldBox}>
           <Feather name="search" size={17} color="#7e8594" style={{ marginRight: 10 }} />
           <TextInput
-            placeholder={
-              activeScope === "Calls"
-                ? "Search call records..."
-                : "Search bunkmates, groups, chats..."
-            }
+            placeholder="Search bunkmates, groups, chats..."
             placeholderTextColor="#6b7280"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -434,7 +773,7 @@ export default function ChatsScreen() {
         </View>
       </View>
 
-      {/* ── HORIZONTAL CATEGORY CHIPS (All, Direct, Groups, Unread, Calls) ── */}
+      {/* ── HORIZONTAL CATEGORY CHIPS: Exactly All, Unread, Group, Favourites, Private, Calls ── */}
       <View style={s.scopeChipsContainer}>
         <ScrollView
           horizontal
@@ -443,11 +782,12 @@ export default function ChatsScreen() {
         >
           {(
             [
-              { key: "All", label: "All", count: combinedList.length },
-              { key: "Direct", label: "Direct", count: chats.length },
-              { key: "Groups", label: "Groups", count: groups.length },
+              { key: "All", label: "All", count: 0 },
               { key: "Unread", label: "Unread", count: totalUnreadCount },
-              { key: "Calls", label: "Calls", count: callHistory.length },
+              { key: "Group", label: "Group", count: groupCountBadge },
+              { key: "Favourites", label: "Favourites", count: favouriteCountBadge },
+              { key: "Private", label: "Private", count: privateCountBadge },
+              { key: "Calls", label: "Calls", count: groupedCallHistory.length },
             ] as const
           ).map((scope) => {
             const isSelected = activeScope === scope.key;
@@ -458,11 +798,21 @@ export default function ChatsScreen() {
                   try {
                     Haptics.selectionAsync();
                   } catch (e) {}
+                  if (scope.key === "Private") {
+                    if (!isPrivateUnlocked) {
+                      setPendingChatActionToLock(null);
+                      setPinModalActionTitle("Private Chats Locked");
+                      setPinModalVisible(true);
+                      return;
+                    }
+                  } else {
+                    setIsPrivateUnlocked(false);
+                  }
                   setActiveScope(scope.key);
                 }}
                 style={[s.scopeChip, isSelected && s.scopeChipSelected]}
               >
-                {scope.key === "Groups" && (
+                {scope.key === "Group" && (
                   <Ionicons
                     name="people"
                     size={13}
@@ -470,11 +820,27 @@ export default function ChatsScreen() {
                     style={{ marginRight: 5 }}
                   />
                 )}
+                {scope.key === "Favourites" && (
+                  <Ionicons
+                    name="star"
+                    size={12}
+                    color={isSelected ? "#000000" : "#ffffff"}
+                    style={{ marginRight: 5 }}
+                  />
+                )}
+                {scope.key === "Private" && (
+                  <Ionicons
+                    name="lock-closed"
+                    size={12}
+                    color={isSelected ? "#000000" : "#ffffff"}
+                    style={{ marginRight: 5 }}
+                  />
+                )}
                 {scope.key === "Calls" && (
                   <Ionicons
                     name="call"
                     size={12}
-                    color={isSelected ? "#000000" : "rgba(255, 255, 255, 0.6)"}
+                    color={isSelected ? "#000000" : "#ffffff"}
                     style={{ marginRight: 5 }}
                   />
                 )}
@@ -505,7 +871,7 @@ export default function ChatsScreen() {
       </View>
 
       {/* ── MAIN SCROLL FEED ── */}
-      {loading ? (
+      {showBlockingLoader ? (
         <View style={s.centerBox}>
           <ActivityIndicator size="large" color="#ffffff" />
         </View>
@@ -525,228 +891,257 @@ export default function ChatsScreen() {
             />
           }
         >
-          {/* Active Bunkmates Tray (Only shows if REAL online users exist, no dummy data) */}
-          {activeScope !== "Calls" &&
-            activeScope !== "Groups" &&
-            !searchQuery &&
-            realtimeOnlineUsers.length > 0 && (
-              <View style={s.activeBunkmatesSection}>
-                <View style={s.activeSectionHeader}>
-                  <Text style={s.activeSectionTitle}>Active Bunkmates</Text>
-                  <Text style={s.activeSectionCount}>
-                    {realtimeOnlineUsers.length} online
-                  </Text>
-                </View>
-
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={s.activeTrayScroll}
-                >
-                  {/* + New Chat Shortcut */}
-                  <Pressable
-                    style={s.activeTrayItem}
-                    onPress={() => setAddFriendModalVisible(true)}
-                  >
-                    <View style={s.activeTrayAddCircle}>
-                      <Feather name="plus" size={20} color="#00e6b0" />
-                    </View>
-                    <Text style={s.activeTrayName}>New</Text>
-                  </Pressable>
-
-                  {/* Real Online Companions */}
-                  {realtimeOnlineUsers.map((comp) => (
-                    <Pressable
-                      key={comp.uid}
-                      style={s.activeTrayItem}
-                      onPress={() => router.push(`/chat/${comp.uid}` as any)}
-                    >
-                      <View style={s.activeTrayAvatarRing}>
-                        <ExpoImage
-                          source={{ uri: comp.avatar }}
-                          style={s.activeTrayAvatarImg}
-                          contentFit="cover"
-                        />
-                        <View style={s.activeTrayOnlineDot} />
-                      </View>
-                      <Text style={s.activeTrayName} numberOfLines={1}>
-                        {comp.name}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
+          {/* ═══════════════════════════════════════════════════════════
+             UNIFIED WHATSAPP-STYLE LIST (No separated floating card boxes)
+             ═══════════════════════════════════════════════════════════ */}
+          {activeScope === "Private" && (
+            <View style={s.privateBannerRow}>
+              <View style={s.privateBannerLeft}>
+                <Ionicons name="shield-checkmark" size={15} color="#ffffff" />
+                <Text style={s.privateBannerText}>Private Chats Unlocked</Text>
               </View>
-            )}
+              <Pressable
+                onPress={() => {
+                  try {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  } catch (e) {}
+                  setIsPrivateUnlocked(false);
+                  setActiveScope("All");
+                }}
+                style={s.lockNowBtn}
+              >
+                <Ionicons name="lock-closed" size={12} color="#000000" style={{ marginRight: 4 }} />
+                <Text style={s.lockNowBtnText}>Lock Now</Text>
+              </Pressable>
+            </View>
+          )}
 
           {/* ═══════════════════════════════════════════════════════════
-             1. CALLS FEED (When Calls tab is active)
+             CALLS TAB FEED (WhatsApp Reference in White & Black Accent)
              ═══════════════════════════════════════════════════════════ */}
           {activeScope === "Calls" ? (
-            callHistoryLoading ? (
-              <View style={s.centerBox}>
-                <ActivityIndicator size="small" color="#ffffff" />
-                <Text style={s.emptySubText}>Fetching calls...</Text>
+            <View style={s.callsContainer}>
+              {/* Top Quick Actions Cards (Voice Call, Video Call, Group Call) */}
+              <View style={s.callQuickActionsRow}>
+                <Pressable
+                  style={s.callActionCard}
+                  onPress={() => {
+                    try {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    } catch (e) {}
+                    setStartCallDefaultType("audio");
+                    setStartCallModalVisible(true);
+                  }}
+                >
+                  <View style={s.callActionIconCircle}>
+                    <Ionicons name="call" size={18} color="#ffffff" />
+                  </View>
+                  <Text style={s.callActionCardTitle}>Voice Call</Text>
+                  <Text style={s.callActionCardSub}>Single bunkmate</Text>
+                </Pressable>
+
+                <Pressable
+                  style={s.callActionCard}
+                  onPress={() => {
+                    try {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    } catch (e) {}
+                    setStartCallDefaultType("video");
+                    setStartCallModalVisible(true);
+                  }}
+                >
+                  <View style={s.callActionIconCircle}>
+                    <Ionicons name="videocam" size={18} color="#ffffff" />
+                  </View>
+                  <Text style={s.callActionCardTitle}>Video Call</Text>
+                  <Text style={s.callActionCardSub}>HD Face to Face</Text>
+                </Pressable>
+
+                <Pressable
+                  style={s.callActionCard}
+                  onPress={() => {
+                    try {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    } catch (e) {}
+                    setCreateGroupModalVisible(true);
+                  }}
+                >
+                  <View style={s.callActionIconCircle}>
+                    <Ionicons name="people" size={18} color="#ffffff" />
+                  </View>
+                  <Text style={s.callActionCardTitle}>Group Call</Text>
+                  <Text style={s.callActionCardSub}>Travel crew</Text>
+                </Pressable>
               </View>
-            ) : filteredCallHistory.length > 0 ? (
-              <View style={s.cardsStack}>
-                {filteredCallHistory.map((call: any) => {
-                  const isOutgoing = call.callerId === user?.uid;
-                  const peerUid = isOutgoing ? call.receiverId : call.callerId;
-                  const peerName = isOutgoing
-                    ? call.receiverName || "BunkMate"
-                    : call.callerName || "BunkMate";
-                  const peerAvatar = isOutgoing
-                    ? call.receiverAvatar
-                    : call.callerAvatar;
-                  const peerHandle = isOutgoing
-                    ? call.receiverHandle
-                    : call.callerHandle;
 
-                  const isVideo = call.callType === "video";
-                  const isMissed =
-                    call.status === "declined" ||
-                    (call.status === "ended" && !call.computedDuration);
+              {/* Section Header: Recent Calls */}
+              <View style={s.callsSectionHeader}>
+                <Text style={s.callsSectionTitle}>Recent</Text>
+                {groupedCallHistory.length > 0 && (
+                  <View style={s.callsBadgeCount}>
+                    <Text style={s.callsBadgeCountText}>{groupedCallHistory.length}</Text>
+                  </View>
+                )}
+              </View>
 
-                  const callTime = call.createdAt || call.timestamp || call.endedAt;
+              {/* Recent Call Items Grouped WhatsApp Style */}
+              {groupedCallHistory.length > 0 ? (
+                <View style={s.callsListFeed}>
+                  {groupedCallHistory.map((callItem: any) => {
+                    const isOutgoing = callItem.isOutgoing;
+                    const isMissed = callItem.isMissed;
+                    const isVideo = callItem.isVideo;
+                    const peerName = callItem.peerName || "BunkMate";
+                    const peerAvatar = callItem.peerAvatar;
+                    const peerUid = callItem.peerUid;
+                    const callCount = callItem.count || 1;
 
-                  return (
-                    <View key={call.id} style={s.modernCard}>
+                    return (
                       <Pressable
-                        onPress={() => handleAvatarPress(peerUid)}
-                        style={s.avatarContainer}
+                        key={callItem.id}
+                        style={({ pressed }) => [
+                          s.callRowItem,
+                          pressed && s.chatListRowPressed,
+                        ]}
+                        onPress={() => handleCallBack(callItem.latestCall || callItem)}
                       >
-                        <ExpoImage
-                          source={{
-                            uri:
-                              peerAvatar ||
-                              "https://i.pravatar.cc/150?img=12",
-                          }}
-                          style={s.avatarImage}
-                          contentFit="cover"
-                        />
-                        <View
-                          style={[
-                            s.callTypeBadge,
-                            isVideo ? s.callTypeBadgeVideo : s.callTypeBadgeAudio,
-                          ]}
+                        <Pressable
+                          onPress={(e) => handleAvatarPress(peerUid, e)}
+                          style={s.avatarContainer}
+                        >
+                          <ExpoImage
+                            source={{
+                              uri:
+                                peerAvatar ||
+                                "https://i.pravatar.cc/150?img=12",
+                            }}
+                            style={s.avatarImage}
+                            contentFit="cover"
+                            cachePolicy="memory-disk"
+                          />
+                        </Pressable>
+
+                        <View style={s.callRowMiddle}>
+                          <Text
+                            style={[
+                              s.callRowName,
+                              isMissed && s.callRowNameMissed,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {peerName}
+                            {callCount > 1 ? ` (${callCount})` : ""}
+                          </Text>
+
+                          <View style={s.callRowMetaLine}>
+                            {isMissed ? (
+                              <Ionicons
+                                name="call"
+                                size={12}
+                                color="#ef4444"
+                                style={{ marginRight: 5 }}
+                              />
+                            ) : isOutgoing ? (
+                              <Ionicons
+                                name="arrow-up"
+                                size={12}
+                                color="#ffffff"
+                                style={{
+                                  marginRight: 5,
+                                  transform: [{ rotate: "45deg" }],
+                                }}
+                              />
+                            ) : (
+                              <Ionicons
+                                name="arrow-down"
+                                size={12}
+                                color="#ffffff"
+                                style={{
+                                  marginRight: 5,
+                                  transform: [{ rotate: "45deg" }],
+                                }}
+                              />
+                            )}
+
+                            <Text
+                              style={[
+                                s.callRowMetaText,
+                                isMissed && { color: "#ef4444" },
+                              ]}
+                            >
+                              {isMissed
+                                ? `Missed ${isVideo ? "video" : "voice"} call`
+                                : isOutgoing
+                                ? "Outgoing"
+                                : "Incoming"}
+                              {" • "}
+                              {formatTime(
+                                callItem.createdAt || callItem.timestamp
+                              )}
+                              {callItem.totalDuration > 0
+                                ? ` (${formatDuration(
+                                    callItem.totalDuration
+                                  )})`
+                                : ""}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <Pressable
+                          style={s.callRowActionBtn}
+                          onPress={() =>
+                            handleCallBack(
+                              callItem.latestCall || callItem,
+                              isVideo ? "video" : "audio"
+                            )
+                          }
+                          hitSlop={10}
                         >
                           <Ionicons
                             name={isVideo ? "videocam" : "call"}
-                            size={9}
-                            color="#000000"
+                            size={18}
+                            color="#ffffff"
                           />
-                        </View>
+                        </Pressable>
                       </Pressable>
+                    );
+                  })}
+                </View>
+              ) : (
+                <EmptyView
+                  icon="phone-call"
+                  title="No Recent Calls"
+                  subtitle="Stay in touch with your travel bunkmates via crisp voice and video calls"
+                  actionLabel="Start a Call"
+                  onAction={() => {
+                    setStartCallDefaultType("audio");
+                    setStartCallModalVisible(true);
+                  }}
+                />
+              )}
+            </View>
+          ) : displayedList.length > 0 ? (
+            <View style={s.chatListContainer}>
+              {displayedList.map((item: any, index: number) => {
+                const isGroup = item.type === "group";
+                const isUnread = item.unreadCount > 0;
+                const peerUid =
+                  item.rawItem?.uid ||
+                  (item.id.includes("_")
+                    ? item.id.split("_").find((x: string) => x !== user?.uid)
+                    : item.id);
+                const isPeerOnline =
+                  !isGroup &&
+                  (onlineUsersMap[peerUid] === true ||
+                    item.rawItem?.online === true ||
+                    item.rawItem?.isOnline === true);
 
-                      <View style={s.cardBodyMiddle}>
-                        <View style={s.cardHeadlineRow}>
-                          <Text style={s.cardHeadlineTitle} numberOfLines={1}>
-                            {peerName}
-                          </Text>
-                          {peerHandle && (
-                            <Text style={s.cardHandleSub} numberOfLines={1}>
-                              @{peerHandle}
-                            </Text>
-                          )}
-                        </View>
+                const isFav = isItemFavourite(item);
+                const isPriv = isItemPrivate(item);
 
-                        <View style={s.callDetailRow}>
-                          <Ionicons
-                            name={
-                              isMissed
-                                ? "arrow-down"
-                                : isOutgoing
-                                ? "arrow-up"
-                                : "arrow-down"
-                            }
-                            size={12}
-                            color={
-                              isMissed
-                                ? "#ff5252"
-                                : isOutgoing
-                                ? "#00e676"
-                                : "#29b6f6"
-                            }
-                            style={{ marginRight: 4 }}
-                          />
-                          <Text
-                            style={[
-                              s.callDetailLabel,
-                              isMissed && { color: "#ff5252", fontWeight: "700" },
-                            ]}
-                          >
-                            {isMissed
-                              ? isOutgoing
-                                ? "Unanswered"
-                                : "Missed Call"
-                              : isOutgoing
-                              ? "Outgoing"
-                              : "Incoming"}
-                          </Text>
-
-                          {call.computedDuration > 0 && (
-                            <Text style={s.callBullet}>•</Text>
-                          )}
-                          {call.computedDuration > 0 && (
-                            <Text style={s.callDurationText}>
-                              {formatDuration(call.computedDuration)}
-                            </Text>
-                          )}
-                        </View>
-                      </View>
-
-                      <View style={s.cardTrailingCol}>
-                        <Text style={s.timeStringText}>{formatTime(callTime)}</Text>
-                        <View style={s.callbackBtnGroup}>
-                          <Pressable
-                            style={s.callbackActionCircle}
-                            onPress={() => handleCallBack(call, "audio")}
-                            hitSlop={6}
-                          >
-                            <Ionicons name="call" size={13} color="#ffffff" />
-                          </Pressable>
-                          <Pressable
-                            style={s.callbackActionCircle}
-                            onPress={() => handleCallBack(call, "video")}
-                            hitSlop={6}
-                          >
-                            <Ionicons name="videocam" size={13} color="#ffffff" />
-                          </Pressable>
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            ) : (
-              <EmptyView
-                icon="phone-off"
-                title="No call records yet"
-                subtitle="Voice and video calls with bunkmates will appear here"
-              />
-            )
-          ) : (
-            /* ═══════════════════════════════════════════════════════════
-               2. CHATS FEED (Direct & Group Conversations)
-               ═══════════════════════════════════════════════════════════ */
-            displayedList.length > 0 ? (
-              <View style={s.cardsStack}>
-                {displayedList.map((item: any) => {
-                  const isGroup = item.type === "group";
-                  const isUnread = item.unreadCount > 0;
-                  const peerUid =
-                    item.rawItem?.uid ||
-                    (item.id.includes("_")
-                      ? item.id.split("_").find((x: string) => x !== user?.uid)
-                      : item.id);
-                  const isPeerOnline =
-                    !isGroup &&
-                    (realtimeOnlineUsers.some((u) => u.uid === peerUid) ||
-                      item.rawItem?.online);
-
-                  return (
+                return (
+                  <View key={`${item.type}-${item.id}`}>
                     <Pressable
-                      key={`${item.type}-${item.id}`}
                       onPress={() => {
                         try {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -762,12 +1157,11 @@ export default function ChatsScreen() {
                         setSelectedChatAction(item);
                       }}
                       style={({ pressed }) => [
-                        s.modernCard,
-                        isUnread && s.modernCardUnread,
-                        pressed && s.modernCardPressed,
+                        s.chatListRow,
+                        pressed && s.chatListRowPressed,
                       ]}
                     >
-                      {/* Avatar with status */}
+                      {/* Avatar with Genuine Realtime Online Green Dot */}
                       <Pressable
                         onPress={(e) =>
                           !isGroup
@@ -780,6 +1174,7 @@ export default function ChatsScreen() {
                           source={{ uri: item.avatar }}
                           style={s.avatarImage}
                           contentFit="cover"
+                          cachePolicy="memory-disk"
                         />
                         {isGroup ? (
                           <View style={s.avatarBadgeGroup}>
@@ -790,7 +1185,7 @@ export default function ChatsScreen() {
                         ) : null}
                       </Pressable>
 
-                      {/* Middle Texts */}
+                      {/* Middle: Title, Badges & Last Message Snippet */}
                       <View style={s.cardBodyMiddle}>
                         <View style={s.cardHeadlineRow}>
                           <Text
@@ -803,6 +1198,24 @@ export default function ChatsScreen() {
                             {item.title}
                           </Text>
 
+                          {isFav && (
+                            <Ionicons
+                              name="star"
+                              size={12}
+                              color="#f59e0b"
+                              style={{ marginLeft: 5 }}
+                            />
+                          )}
+
+                          {isPriv && (
+                            <Ionicons
+                              name="lock-closed"
+                              size={12}
+                              color="#10b981"
+                              style={{ marginLeft: 5 }}
+                            />
+                          )}
+
                           {isGroup && (
                             <View style={s.groupChipBadge}>
                               <Text style={s.groupChipText}>Group</Text>
@@ -811,19 +1224,31 @@ export default function ChatsScreen() {
                         </View>
 
                         <View style={s.cardMessageSnippetRow}>
-                          {/* Prefix icon */}
-                          {item.subtitle?.includes("📹") || item.subtitle?.includes("Video") ? (
+                          {/* Media / Call indicators in snippet */}
+                          {item.subtitle?.includes("📷") || item.subtitle?.includes("Photo") || item.subtitle?.includes("Image") ? (
                             <Ionicons
-                              name="videocam-outline"
+                              name="camera-outline"
+                              size={14}
+                              color="#9ca3af"
+                              style={{ marginRight: 4 }}
+                            />
+                          ) : item.subtitle?.includes("📹") || item.subtitle?.includes("Video") ? (
+                            <Ionicons
+                              name="videocam"
                               size={14}
                               color="#38bdf8"
                               style={{ marginRight: 4 }}
                             />
-                          ) : item.subtitle?.includes("📞") || item.subtitle?.includes("Voice") ? (
+                          ) : item.subtitle?.includes("📞") || item.subtitle?.includes("Voice") || item.subtitle?.includes("call") ? (
                             <Ionicons
-                              name="call-outline"
-                              size={14}
-                              color="#38bdf8"
+                              name="call"
+                              size={13}
+                              color={
+                                item.subtitle?.includes("Missed") ||
+                                item.subtitle?.includes("Declined")
+                                  ? "#ff5252"
+                                  : "#38bdf8"
+                              }
                               style={{ marginRight: 4 }}
                             />
                           ) : null}
@@ -835,14 +1260,19 @@ export default function ChatsScreen() {
                             ]}
                             numberOfLines={1}
                           >
-                            {item.subtitle}
+                            {item.subtitle || "Tap to chat"}
                           </Text>
                         </View>
                       </View>
 
-                      {/* Right Timestamp & Unread */}
+                      {/* Right: Timestamp & Unread Badge / Pin */}
                       <View style={s.cardTrailingCol}>
-                        <Text style={[s.timeStringText, isUnread && s.timeStringTextUnread]}>
+                        <Text
+                          style={[
+                            s.timeStringText,
+                            isUnread && s.timeStringTextUnread,
+                          ]}
+                        >
                           {formatTime(item.timestamp)}
                         </Text>
 
@@ -852,53 +1282,74 @@ export default function ChatsScreen() {
                               {item.unreadCount}
                             </Text>
                           </View>
-                        ) : (
+                        ) : isFav ? (
                           <Ionicons
-                            name="chevron-forward"
-                            size={14}
-                            color="rgba(255, 255, 255, 0.2)"
+                            name="pin"
+                            size={12}
+                            color="rgba(255, 255, 255, 0.3)"
                             style={{ marginTop: 6 }}
                           />
-                        )}
+                        ) : null}
                       </View>
                     </Pressable>
-                  );
+                  </View>
+                );
                 })}
               </View>
-            ) : (
-              <EmptyView
-                icon="message-square"
-                title={
-                  searchQuery
-                    ? `No chats match "${searchQuery}"`
-                    : activeScope === "Unread"
-                    ? "All caught up! No unread messages"
-                    : activeScope === "Groups"
-                    ? "No group chats found"
-                    : "No conversations yet"
-                }
-                subtitle={
-                  activeScope === "Groups"
-                    ? "Create a travel group to coordinate trips together"
-                    : "Connect with bunkmates and start a new conversation"
-                }
-                actionLabel={
-                  activeScope === "Groups" ? "Create Group" : "Start New Chat"
-                }
-                onAction={() => {
-                  if (activeScope === "Groups") {
-                    setCreateGroupModalVisible(true);
-                  } else {
-                    setAddFriendModalVisible(true);
-                  }
-                }}
-              />
-            )
+          ) : (
+            <EmptyView
+              icon={
+                activeScope === "Private"
+                  ? "shield"
+                  : activeScope === "Favourites"
+                  ? "star"
+                  : activeScope === "Unread"
+                  ? "check-circle"
+                  : activeScope === "Group"
+                  ? "users"
+                  : "message-square"
+              }
+              title={
+                searchQuery
+                  ? `No chats match "${searchQuery}"`
+                  : activeScope === "Private"
+                  ? "No Private Chats Yet"
+                  : activeScope === "Favourites"
+                  ? "No Favourites Yet"
+                  : activeScope === "Unread"
+                  ? "All caught up! No unread messages"
+                  : activeScope === "Group"
+                  ? "No group chats found"
+                  : "No conversations yet"
+              }
+              subtitle={
+                activeScope === "Private"
+                  ? "Lock any chat from user profile to securely hide it here"
+                  : activeScope === "Favourites"
+                  ? "Star any conversation from user profile for quick access here"
+                  : activeScope === "Group"
+                  ? "Create a travel group to coordinate trips together"
+                  : "Connect with bunkmates and start a new conversation"
+              }
+              actionLabel={
+                activeScope === "Group"
+                  ? "Create Group"
+                  : activeScope === "All"
+                  ? "Start New Chat"
+                  : undefined
+              }
+              onAction={
+                activeScope === "Group"
+                  ? () => setCreateGroupModalVisible(true)
+                  : activeScope === "All"
+                  ? () => setAddFriendModalVisible(true)
+                  : undefined
+              }
+            />
           )}
         </ScrollView>
       )}
-
-      {/* ── FLOATING ACTION BUTTON (FAB) ── */}
+{/* ── FLOATING ACTION BUTTON (FAB) ── */}
       <View
         style={[s.floatingFabAnchor, { bottom: insets.bottom + 85 }]}
         pointerEvents="box-none"
@@ -908,12 +1359,17 @@ export default function ChatsScreen() {
             try {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             } catch (e) {}
-            setComposeMenuVisible(true);
+            if (activeScope !== "Calls") {
+              setActiveScope("Calls");
+            } else {
+              setStartCallDefaultType("audio");
+              setStartCallModalVisible(true);
+            }
           }}
           style={s.fabButtonSquare}
           hitSlop={8}
         >
-          <Feather name="edit-3" size={21} color="#ffffff" />
+          <Ionicons name="call" size={22} color="#000000" />
         </Pressable>
       </View>
 
@@ -1010,6 +1466,82 @@ export default function ChatsScreen() {
               <Text style={s.sheetActionTitle}>Open Conversation</Text>
             </Pressable>
 
+            {/* Lock / Unlock Chat (Private) */}
+            <Pressable
+              style={s.sheetActionItem}
+              onPress={() => handleTogglePrivateChat(selectedChatAction)}
+            >
+              <View
+                style={[
+                  s.sheetIconBox,
+                  {
+                    backgroundColor: isItemPrivate(selectedChatAction)
+                      ? "rgba(239, 68, 68, 0.15)"
+                      : "rgba(16, 185, 129, 0.15)",
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={
+                    isItemPrivate(selectedChatAction)
+                      ? "lock-open-outline"
+                      : "lock-closed-outline"
+                  }
+                  size={20}
+                  color={
+                    isItemPrivate(selectedChatAction) ? "#ef4444" : "#10b981"
+                  }
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.sheetActionTitle}>
+                  {isItemPrivate(selectedChatAction)
+                    ? "Unlock Chat"
+                    : "Lock Chat (Set as Private)"}
+                </Text>
+                <Text style={s.sheetActionDesc}>
+                  {isItemPrivate(selectedChatAction)
+                    ? "Restore to main chat feed"
+                    : "Hide from All feed, only viewable in Private tab"}
+                </Text>
+              </View>
+            </Pressable>
+
+            {/* Add / Remove Favourite */}
+            <Pressable
+              style={s.sheetActionItem}
+              onPress={() => handleToggleFavouriteChat(selectedChatAction)}
+            >
+              <View
+                style={[
+                  s.sheetIconBox,
+                  { backgroundColor: "rgba(245, 158, 11, 0.15)" },
+                ]}
+              >
+                <Ionicons
+                  name={
+                    isItemFavourite(selectedChatAction)
+                      ? "star"
+                      : "star-outline"
+                  }
+                  size={20}
+                  color="#f59e0b"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.sheetActionTitle}>
+                  {isItemFavourite(selectedChatAction)
+                    ? "Remove from Favourites"
+                    : "Mark as Favourite"}
+                </Text>
+                <Text style={s.sheetActionDesc}>
+                  {isItemFavourite(selectedChatAction)
+                    ? "Remove from Favourites tab"
+                    : "Pin to Favourites tab for quick access"}
+                </Text>
+              </View>
+            </Pressable>
+
             <Pressable
               style={s.sheetActionItem}
               onPress={() => handleStartCallFromChat(selectedChatAction, "audio")}
@@ -1062,6 +1594,41 @@ export default function ChatsScreen() {
         onClose={() => setCreateGroupModalVisible(false)}
         onGroupCreated={(groupId) => {
           router.push(`/(tabs)/group-chatroom/${groupId}` as any);
+        }}
+      />
+
+      {/* ── 6-DIGIT PRIVATE PIN MODAL ── */}
+      <PrivatePinModal
+        visible={pinModalVisible}
+        onClose={() => setPinModalVisible(false)}
+        onSuccess={handlePinSuccess}
+        actionTitle={pinModalActionTitle}
+        mode="auto"
+      />
+
+      {/* ── START CALL MODAL ── */}
+      <StartCallModal
+        visible={startCallModalVisible}
+        onClose={() => setStartCallModalVisible(false)}
+        bunkmates={normalizedChats}
+        groups={normalizedGroups}
+        onStartSingleCall={(item, type) => {
+          handleStartCallFromChat(item, type);
+        }}
+        onStartGroupCall={(grp) => {
+          router.push(`/(tabs)/group-chatroom/${grp.id}` as any);
+        }}
+        defaultCallType={startCallDefaultType}
+      />
+
+      {/* ── STYLISH LOCK SUCCESS DIALOG WITH SWIPE RIGHT INSTRUCTION ── */}
+      <PrivateLockSuccessModal
+        visible={successModalVisible}
+        onClose={() => setSuccessModalVisible(false)}
+        type={successModalType}
+        chatName={successModalChatName}
+        onViewPrivateTab={() => {
+          setActiveScope("Private");
         }}
       />
     </View>
@@ -1353,9 +1920,57 @@ const s = StyleSheet.create({
     textAlign: "center",
   },
 
-  // 5. Cards Stack
+  // 5. WhatsApp-Style List Styles
   mainListScroll: {
-    paddingTop: 2,
+    paddingTop: 4,
+  },
+  chatListContainer: {
+    backgroundColor: "transparent",
+  },
+  chatListRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: "transparent",
+  },
+  chatListRowPressed: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+  },
+  privateBannerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  privateBannerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  privateBannerText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  lockNowBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  lockNowBtnText: {
+    color: "#000000",
+    fontSize: 12,
+    fontWeight: "800",
   },
   cardsStack: {
     gap: 10,
@@ -1400,18 +2015,18 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1.5,
-    borderColor: "#0d0f14",
+    borderColor: "#000000",
   },
   avatarBadgeOnline: {
     position: "absolute",
     bottom: 0,
     right: 0,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: "#00e676",
-    borderWidth: 2,
-    borderColor: "#0d0f14",
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#10b981",
+    borderWidth: 2.5,
+    borderColor: "#000000",
   },
   callTypeBadge: {
     position: "absolute",
@@ -1519,7 +2134,7 @@ const s = StyleSheet.create({
     fontWeight: "500",
   },
   timeStringTextUnread: {
-    color: "#ffffff",
+    color: "#10b981",
     fontWeight: "700",
   },
   unreadNumberBadge: {
@@ -1527,10 +2142,10 @@ const s = StyleSheet.create({
     minWidth: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: "#ffffff",
+    backgroundColor: "#10b981",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 4,
+    paddingHorizontal: 5,
   },
   unreadNumberText: {
     color: "#000000",
@@ -1551,28 +2166,6 @@ const s = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.1)",
-  },
-
-  // 6. FAB Button (Matches Notes FAB)
-  floatingFabAnchor: {
-    position: "absolute",
-    right: 20,
-    zIndex: 99,
-  },
-  fabButtonSquare: {
-    width: 52,
-    height: 52,
-    borderRadius: 18,
-    backgroundColor: "#161922",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    elevation: 8,
   },
 
   // 7. Bottom Sheet
@@ -1680,5 +2273,139 @@ const s = StyleSheet.create({
     color: "#000000",
     fontSize: 13,
     fontWeight: "800",
+  },
+
+  // 9. Calls Tab Styles (WhatsApp Reference with White/Black Accent)
+  callsContainer: {
+    paddingHorizontal: 0,
+    paddingTop: 4,
+  },
+  callQuickActionsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 20,
+    paddingHorizontal: 2,
+  },
+  callActionCard: {
+    flex: 1,
+    backgroundColor: "#11141c",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    paddingVertical: 14,
+    paddingHorizontal: 6,
+    alignItems: "center",
+  },
+  callActionIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  callActionCardTitle: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 2,
+    textAlign: "center",
+  },
+  callActionCardSub: {
+    color: "rgba(255, 255, 255, 0.45)",
+    fontSize: 10,
+    fontWeight: "500",
+    textAlign: "center",
+  },
+  callsSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+    paddingHorizontal: 4,
+    gap: 8,
+  },
+  callsSectionTitle: {
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 13,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  callsBadgeCount: {
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 8,
+  },
+  callsBadgeCountText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  callsListFeed: {
+    backgroundColor: "transparent",
+  },
+  callRowItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 2,
+    backgroundColor: "transparent",
+  },
+  callRowMiddle: {
+    flex: 1,
+    marginLeft: 14,
+    marginRight: 10,
+  },
+  callRowName: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  callRowNameMissed: {
+    color: "#ef4444",
+  },
+  callRowMetaLine: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  callRowMetaText: {
+    color: "rgba(255, 255, 255, 0.55)",
+    fontSize: 12.5,
+    fontWeight: "500",
+  },
+  callRowActionBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // 10. FAB Anchor & White/Black Call Button
+  floatingFabAnchor: {
+    position: "absolute",
+    right: 20,
+    zIndex: 99,
+  },
+  fabButtonSquare: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    elevation: 8,
   },
 });

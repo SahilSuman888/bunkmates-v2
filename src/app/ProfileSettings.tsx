@@ -17,7 +17,6 @@ import {
   Dimensions,
   ImageBackground,
   Image, // **@** Added Image for modern avatar
-  InteractionManager, // **@** Defer heavy work until after nav animation
   Linking,
   Pressable,
   ScrollView,
@@ -338,9 +337,10 @@ export default function ProfileSettings() {
       return;
     }
 
-    // **@** Defer all Firestore work until after the navigation
-    // animation finishes so the transition feels instant.
-    const task = InteractionManager.runAfterInteractions(async () => {
+    // Defer Firestore work so initial navigation feels instant
+    let isCancelled = false;
+    const timer = setTimeout(async () => {
+      if (isCancelled) return;
       try {
         let profileData: ProfileData = {
           name:
@@ -423,9 +423,12 @@ export default function ProfileSettings() {
       } finally {
         setLoading(false);
       }
-    });
+    }, 40);
 
-    return () => task.cancel();
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
   }, [authLoading, user]);
 
   // **@** Trip count is fetched in a SEPARATE effect, further deferred,
@@ -434,9 +437,10 @@ export default function ProfileSettings() {
     if (authLoading || !user) return;
 
     // Small delay to ensure settings page has fully rendered first.
-    const timer = setTimeout(() => {
-      const task = InteractionManager.runAfterInteractions(async () => {
-        try {
+    let isCancelled = false;
+    const timer = setTimeout(async () => {
+      if (isCancelled) return;
+      try {
           const tripsSnap =
             await getDocs(
               collection(db, "trips")
@@ -461,7 +465,7 @@ export default function ProfileSettings() {
             }
           );
 
-          if (count > 0) {
+          if (count > 0 && !isCancelled) {
             setTripCount(count);
           }
         } catch (tripError) {
@@ -470,12 +474,12 @@ export default function ProfileSettings() {
             tripError
           );
         }
-      });
+    }, 60);
 
-      return () => task.cancel();
-    }, 500);
-
-    return () => clearTimeout(timer);
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
   }, [authLoading, user]);
 
   // Restore developer mode on this device, matching the web version's
@@ -958,7 +962,7 @@ export default function ProfileSettings() {
       title: "Help & Support",
       subtitle: "Guides, FAQs, 24/7 BunkMates bot",
       keywords: ["help", "support", "faq", "customer service", "guide", "problem", "ticket"],
-      icon: "chatbubble-question-outline",
+      icon: "help-circle-outline",
       onPress: () => {
         setIsSearching(false);
         router.push("/help" as any);
@@ -2785,7 +2789,7 @@ export default function ProfileSettings() {
           ]}
         >
           <SettingRow
-            icon="chatbubble-question-outline"
+            icon="help-circle-outline"
             title="Help & Support"
             subtitle="Guides, FAQs, 24/7 BunkMates bot"
             onPress={() => router.push("/help" as any)}

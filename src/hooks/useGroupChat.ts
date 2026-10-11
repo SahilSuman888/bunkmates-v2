@@ -6,11 +6,19 @@ import {
   onSnapshot,
   limit,
 } from "firebase/firestore";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { db } from "../lib/firebase";
 
+// In-memory cache for instant 0ms render when opening group chat
+const memoryGroupMsgs: Record<string, any[]> = {};
+
 export const useGroupChat = (groupId: string | null) => {
-  const [messages, setMessages] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [messages, setMessages] = useState<any[]>(
+    () => (groupId && memoryGroupMsgs[groupId]) || []
+  );
+  const [loading, setLoading] = useState<boolean>(
+    () => !(groupId && memoryGroupMsgs[groupId]?.length)
+  );
 
   useEffect(() => {
     if (!groupId) {
@@ -19,24 +27,77 @@ export const useGroupChat = (groupId: string | null) => {
       return;
     }
 
+    // 1. Immediately hydrate cached group messages for offline viewing
+    AsyncStorage.getItem(`@bunkmates_cached_group_msgs_${groupId}`).then((cached) => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            memoryGroupMsgs[groupId] = parsed;
+            setMessages((prev) => (prev.length > 0 ? prev : parsed));
+            setLoading(false);
+          }
+        } catch (e) {}
+      } else {
+        setLoading(false);
+      }
+    }).catch(() => {
+      setLoading(false);
+    });
+
     try {
       let webMsgs: any[] = [];
       let nativeMsgs: any[] = [];
 
       const mergeAndSet = () => {
-        const map = new Map<string, any>();
-        [...webMsgs, ...nativeMsgs].forEach((m) => {
-          map.set(m.id, m);
+        const idMap = new Map<string, any>();
+        [...nativeMsgs, ...webMsgs].forEach((m) => {
+          if (m && m.id) idMap.set(m.id, m);
         });
 
-        const sorted = Array.from(map.values()).sort((a, b) => {
-          const tA = a.timestamp?.seconds || a.timestamp?.toMillis?.() || a.createdAt?.seconds || 0;
-          const tB = b.timestamp?.seconds || b.timestamp?.toMillis?.() || b.createdAt?.seconds || 0;
+        // Content deduplication to eliminate past duplicate writes across collections
+        const contentSeen = new Set<string>();
+        const deduplicated: any[] = [];
+
+        // Sort by timestamp
+        const sortedAll = Array.from(idMap.values()).sort((a, b) => {
+          const tA =
+            a.timestamp?.seconds ||
+            a.timestamp?.toMillis?.() ||
+            a.createdAt?.seconds ||
+            0;
+          const tB =
+            b.timestamp?.seconds ||
+            b.timestamp?.toMillis?.() ||
+            b.createdAt?.seconds ||
+            0;
           return tA - tB;
         });
 
-        setMessages(sorted);
+        for (const m of sortedAll) {
+          const tSec =
+            m.timestamp?.seconds ||
+            Math.floor((m.timestamp?.toMillis?.() || 0) / 1000) ||
+            m.createdAt?.seconds ||
+            0;
+          // 4-second time window for duplicate dual-collection writes
+          const timeBucket = Math.floor(tSec / 4);
+          const fingerprint = `${m.senderId || ""}_${(m.text || "").trim()}_${m.imageUrl || ""}_${timeBucket}`;
+
+          if (contentSeen.has(fingerprint)) {
+            continue; // Skip duplicate message
+          }
+          contentSeen.add(fingerprint);
+          deduplicated.push(m);
+        }
+
+        memoryGroupMsgs[groupId] = deduplicated;
+        setMessages(deduplicated);
         setLoading(false);
+        AsyncStorage.setItem(
+          `@bunkmates_cached_group_msgs_${groupId}`,
+          JSON.stringify(deduplicated)
+        ).catch(() => {});
       };
 
       // 1. Listen to `groupChat/${groupId}/messages` (React Web path)

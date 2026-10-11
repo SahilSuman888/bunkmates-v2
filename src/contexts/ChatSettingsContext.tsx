@@ -4,22 +4,50 @@ import { Appearance } from "react-native";
 
 export type ChatTheme = "system" | "light" | "dark";
 
-// small collection of placeholder wallpapers, export so other screens can
-// reference the same URI mapping (chat settings picker + chat room).
+export const DEFAULT_WALLPAPER_ASSET = require("../../assets/images/chatbg/1.jpeg");
+
+// Curated local bundled wallpapers from assets/images/chatbg (instant offline rendering, zero network lag)
 export const wallpaperList = [
-  { id: "default", uri: "" },
-  { id: "space1", uri: "https://images.unsplash.com/photo-1503023345310-bd7c1de61c7d" },
-  { id: "mountain1", uri: "https://images.unsplash.com/photo-1501785888041-af3ef285b470" },
-  { id: "forest1", uri: "https://images.unsplash.com/photo-1506765515384-028b60a970df" },
-  { id: "desert1", uri: "https://images.unsplash.com/photo-1518810458646-6f7f93c606f5" },
-  { id: "ocean1", uri: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e" },
-  { id: "city1", uri: "https://images.unsplash.com/photo-1492528459143-9e8efeb3c23b" },
-  { id: "nebula1", uri: "https://images.unsplash.com/photo-1478720568477-152d9b164e26" },
-  { id: "redmountain", uri: "https://images.unsplash.com/photo-1549888834-0e916ee2bfdc" },
-  { id: "valley", uri: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438" },
-  { id: "moon", uri: "https://images.unsplash.com/photo-1529921879218-f5f994d8f07d" },
-  { id: "aurora", uri: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee" },
+  { id: "default", asset: require("../../assets/images/chatbg/dark.png"), uri: "", label: "Dark Waves" },
+  { id: "gargantua", asset: require("../../assets/images/chatbg/1.jpeg"), uri: "local:chatbg:1", label: "Gargantua" },
+  { id: "gundam", asset: require("../../assets/images/chatbg/2.jpeg"), uri: "local:chatbg:2", label: "Mecha Gundam" },
+  { id: "cybercity", asset: require("../../assets/images/chatbg/3.jpeg"), uri: "local:chatbg:3", label: "Cyber City" },
+  { id: "aesthetic", asset: require("../../assets/images/chatbg/4.jpeg"), uri: "local:chatbg:4", label: "Neon Dusk" },
+  { id: "solitary", asset: require("../../assets/images/chatbg/5.jpeg"), uri: "local:chatbg:5", label: "Solitary Star" },
+  { id: "abstract", asset: require("../../assets/images/chatbg/6.jpeg"), uri: "local:chatbg:6", label: "Dark Texture" },
+  { id: "drift", asset: require("../../assets/images/chatbg/7.jpeg"), uri: "local:chatbg:7", label: "Cosmic Drift" },
+  { id: "portal", asset: require("../../assets/images/chatbg/8.jpeg"), uri: "local:chatbg:8", label: "Neon Horizon" },
+  { id: "deepspace", asset: require("../../assets/images/chatbg/9.jpeg"), uri: "local:chatbg:9", label: "Deep Space" },
+  { id: "cyberwave", asset: require("../../assets/images/chatbg/10.jpeg"), uri: "local:chatbg:10", label: "Cyberwave" },
+  { id: "retrocity", asset: require("../../assets/images/chatbg/11.jpeg"), uri: "local:chatbg:11", label: "Retro City" },
+  { id: "aurora", asset: require("../../assets/images/chatbg/12.jpeg"), uri: "local:chatbg:12", label: "Midnight Aurora" },
+  { id: "eclipse", asset: require("../../assets/images/chatbg/13.jpeg"), uri: "local:chatbg:13", label: "Solar Eclipse" },
+  { id: "lightmesh", asset: require("../../assets/images/chatbg/light.png"), uri: "local:chatbg:light", label: "Clean Mesh" },
 ];
+
+export const getWallpaperSource = (wallpaperIdOrUri: string | null | undefined) => {
+  if (!wallpaperIdOrUri || wallpaperIdOrUri === "default") {
+    return DEFAULT_WALLPAPER_ASSET;
+  }
+  const str = String(wallpaperIdOrUri).trim();
+  if (
+    str.startsWith("http://") ||
+    str.startsWith("https://") ||
+    str.startsWith("file:") ||
+    str.startsWith("content:") ||
+    str.startsWith("data:") ||
+    str.startsWith("/")
+  ) {
+    return { uri: str };
+  }
+  const match = wallpaperList.find(
+    (w) => w.id === str || w.uri === str
+  );
+  if (match && match.asset) {
+    return match.asset;
+  }
+  return DEFAULT_WALLPAPER_ASSET;
+};
 
 export interface ChatSettingsType {
   theme: ChatTheme;

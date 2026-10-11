@@ -134,6 +134,24 @@ exports.sendNotificationPush =
       const notification =
         snapshot.data();
 
+      // Skip duplicate Expo push for notifications already sent via OneSignal
+      if (
+        notification.skipExpoPush ||
+        notification.viaOneSignal ||
+        notification.pushSent ||
+        notification.type === "chat" ||
+        notification.type === "group_chat" ||
+        notification.type === "call" ||
+        notification.type === "group_call" ||
+        notification.type === "missed_call"
+      ) {
+        console.log(
+          "Notification handled via OneSignal, skipping duplicate Expo push:",
+          event.params.notificationId
+        );
+        return;
+      }
+
       const notificationId =
         event.params.notificationId;
 

@@ -341,8 +341,22 @@ public class BunkMatesRingtoneModule extends ReactContextBaseJavaModule {
         stopInternal();
         if (context != null) {
             android.app.NotificationManager nm = (android.app.NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-            if (nm != null && callId != null && !callId.isEmpty()) {
-                nm.cancel(callId.hashCode());
+            if (nm != null) {
+                if (callId != null && !callId.isEmpty()) {
+                    nm.cancel(callId.hashCode());
+                }
+                if (latestCallId != null && !latestCallId.isEmpty()) {
+                    nm.cancel(latestCallId.hashCode());
+                }
+                try {
+                    if (NotificationServiceExtension.lastCallNotificationId != 0) {
+                        nm.cancel(NotificationServiceExtension.lastCallNotificationId);
+                        NotificationServiceExtension.lastCallNotificationId = 0;
+                    }
+                    if (NotificationServiceExtension.lastCallId != null && !NotificationServiceExtension.lastCallId.isEmpty()) {
+                        nm.cancel(NotificationServiceExtension.lastCallId.hashCode());
+                    }
+                } catch (Exception ignored) {}
             }
         }
     }
@@ -354,6 +368,16 @@ public class BunkMatesRingtoneModule extends ReactContextBaseJavaModule {
             stopRingtoneDirectly(context, callId);
         } catch (Exception e) {
             Log.e(TAG, "Error stopping custom ringtone", e);
+        }
+    }
+
+    @ReactMethod
+    public void cancelAllCallNotifications(String callId) {
+        try {
+            Context context = getReactApplicationContext();
+            stopRingtoneDirectly(context, callId);
+        } catch (Exception e) {
+            Log.e(TAG, "Error cancelling call notifications", e);
         }
     }
 }
@@ -413,6 +437,8 @@ public class NotificationServiceExtension implements INotificationServiceExtensi
     private static final String TAG = "BunkMatesNotification";
     public static final String CALL_CHANNEL_ID = "bunkmates_call_ringtone_channel_v7";
     public static final String GENERAL_CHANNEL_ID = "bunkmates_default_channel_v1";
+    public static volatile int lastCallNotificationId = 0;
+    public static volatile String lastCallId = "";
 
     private boolean isAppInForeground(Context context) {
         try {
@@ -498,6 +524,8 @@ public class NotificationServiceExtension implements INotificationServiceExtensi
                 final String callerName = data.optString("callerName", "BunkMate");
                 final String callType = data.optString("callType", "audio");
                 final int notificationId = callId.isEmpty() ? notification.getAndroidNotificationId() : callId.hashCode();
+                lastCallNotificationId = notificationId;
+                lastCallId = callId;
 
                 Log.d(TAG, "Incoming call received in killed/background state. Building heads-up call notification for: " + callerName);
 
@@ -558,8 +586,8 @@ public class NotificationServiceExtension implements INotificationServiceExtensi
                     builder.setPriority(NotificationCompat.PRIORITY_MAX);
                     builder.setCategory(NotificationCompat.CATEGORY_CALL);
                     builder.setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
-                    builder.setOngoing(true);
-                    builder.setAutoCancel(false);
+                    builder.setOngoing(false);
+                    builder.setAutoCancel(true);
                     builder.setSound(soundUri);
                     builder.setFullScreenIntent(fullScreenPendingIntent, true);
                     builder.setContentIntent(fullScreenPendingIntent);
@@ -600,6 +628,13 @@ public class NotificationServiceExtension implements INotificationServiceExtensi
                 final int notificationId = callId.isEmpty() ? notification.getAndroidNotificationId() : callId.hashCode();
                 if (nm != null) {
                     nm.cancel(notificationId);
+                    if (lastCallNotificationId != 0) {
+                        nm.cancel(lastCallNotificationId);
+                        lastCallNotificationId = 0;
+                    }
+                    if (!lastCallId.isEmpty()) {
+                        nm.cancel(lastCallId.hashCode());
+                    }
                 }
                 BunkMatesRingtoneModule.stopRingtoneDirectly(context, callId);
             } else {

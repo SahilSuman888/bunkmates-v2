@@ -38,10 +38,12 @@ const PREFERRED_CHAT_MODELS = [
   "deepseek-r1-distill-llama-70b",
 ];
 
+const DEFAULT_ENV_GROQ_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY || "";
+
 export function useGroqAI(): GroqAIState {
   const [currentUid, setCurrentUid] = useState<string | null>(auth.currentUser?.uid || null);
-  const [groqApiKey, setGroqApiKey] = useState("");
-  const [groqKeyStatus, setGroqKeyStatus] = useState<GroqKeyStatus>("idle");
+  const [groqApiKey, setGroqApiKey] = useState(DEFAULT_ENV_GROQ_KEY);
+  const [groqKeyStatus, setGroqKeyStatus] = useState<GroqKeyStatus>(DEFAULT_ENV_GROQ_KEY ? "valid" : "idle");
   const [groqValidatedAt, setGroqValidatedAt] = useState<string | null>(null);
   const [groqModels, setGroqModels] = useState<string[]>([]);
 
@@ -55,17 +57,24 @@ export function useGroqAI(): GroqAIState {
 
   // Real-time listener for user document in Firestore
   useEffect(() => {
-    if (!currentUid) return;
+    if (!currentUid) {
+      setGroqApiKey(DEFAULT_ENV_GROQ_KEY);
+      return;
+    }
 
     const unsubscribe = onSnapshot(doc(db, "users", currentUid), (snap) => {
-      if (!snap.exists()) return;
+      if (!snap.exists()) {
+        setGroqApiKey(DEFAULT_ENV_GROQ_KEY);
+        return;
+      }
       const data = snap.data();
 
-      if (data.groqApiKey !== undefined) {
-        setGroqApiKey(data.groqApiKey || "");
-      }
+      const userKey = data.groqApiKey || DEFAULT_ENV_GROQ_KEY;
+      setGroqApiKey(userKey);
       if (data.groqApiKeyStatus) {
         setGroqKeyStatus(data.groqApiKeyStatus as GroqKeyStatus);
+      } else if (userKey) {
+        setGroqKeyStatus("valid");
       }
       if (data.groqApiKeyValidatedAt) {
         setGroqValidatedAt(data.groqApiKeyValidatedAt);
@@ -80,7 +89,7 @@ export function useGroqAI(): GroqAIState {
 
   const fetchKeyDirectly = useCallback(async (): Promise<string | null> => {
     const uid = auth.currentUser?.uid || currentUid;
-    if (!uid) return null;
+    if (!uid) return DEFAULT_ENV_GROQ_KEY || null;
     try {
       const snap = await getDoc(doc(db, "users", uid));
       if (snap.exists() && snap.data().groqApiKey) {
@@ -91,7 +100,7 @@ export function useGroqAI(): GroqAIState {
     } catch (e) {
       console.warn("fetchKeyDirectly error:", e);
     }
-    return null;
+    return DEFAULT_ENV_GROQ_KEY || null;
   }, [currentUid]);
 
   // Filter out non-chat models (TTS, whisper, audio, guard)

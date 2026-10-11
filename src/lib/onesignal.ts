@@ -6,7 +6,8 @@ import { db } from "./firebase";
 import { setupCallNotificationCategories } from "./callNotifications";
 import { sendOneSignalNotification } from "./oneSignalApi";
 
-export const ONESIGNAL_APP_ID = "263ae218-7fa0-49cf-9503-d7d0fab26d60";
+export const ONESIGNAL_APP_ID =
+  process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID || "263ae218-7fa0-49cf-9503-d7d0fab26d60";
 
 // Safe native module loader (prevents crash in Expo Go where custom native modules cannot run)
 let OneSignal: any = null;
@@ -120,11 +121,20 @@ async function handleNotificationClick(event: any) {
 
     if (actionId === "DECLINE_CALL" && data.callId) {
       try {
+        const { cancelCallNotification } = require("./callNotifications");
+        cancelCallNotification(data.callId);
         await updateDoc(doc(db, "calls", data.callId), { status: "declined" });
       } catch (e) {
         console.warn("[OneSignal] Decline call update failed:", e);
       }
       return;
+    }
+
+    if (data.callId) {
+      try {
+        const { cancelCallNotification } = require("./callNotifications");
+        cancelCallNotification(data.callId);
+      } catch (e) {}
     }
 
     const navItem: PendingNotificationNav = { type, data, actionId };

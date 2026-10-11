@@ -141,14 +141,15 @@ export async function showLocalIncomingCallNotification(
     await setupCallNotificationCategories();
 
     const notifId = await N.scheduleNotificationAsync({
+      identifier: `incoming_${callId}`,
       content: {
         title: callType === "video" ? "📹 Incoming HD Video Call" : "📞 Incoming Voice Call",
         body: `${callerName} is calling you on BunkMates...`,
         data: { type: "call", callId, callType, callerName },
         sound: "default",
         priority: N.AndroidNotificationPriority.MAX,
-        autoDismiss: false,
-        sticky: true,
+        autoDismiss: true,
+        sticky: false,
         categoryIdentifier: "incoming_call_category",
         color: "#00e6b0",
       },
@@ -184,8 +185,8 @@ export async function showOngoingCallNotification(
         title: `Ongoing ${callType === "video" ? "Video" : "Voice"} Call (${formattedDuration})`,
         body: `Talking with ${callerName} • Tap to return`,
         data: { type: "ongoing_call", callId, callType },
-        sticky: true,
-        autoDismiss: false,
+        sticky: false,
+        autoDismiss: true,
         priority: N.AndroidNotificationPriority.HIGH,
         categoryIdentifier: "ongoing_call_category",
         color: "#00e6b0",
@@ -206,23 +207,37 @@ export async function showOngoingCallNotification(
  */
 export async function cancelCallNotification(callId?: string) {
   const N = await getNotifications();
-  if (!N) return;
 
   try {
     if (Platform.OS === "android" && NativeModules.BunkMatesRingtone) {
       NativeModules.BunkMatesRingtone.stop(callId || "");
+      if (NativeModules.BunkMatesRingtone.cancelAllCallNotifications) {
+        NativeModules.BunkMatesRingtone.cancelAllCallNotifications(callId || "");
+      }
     }
 
-    if (activeIncomingNotificationId) {
-      await N.dismissNotificationAsync(activeIncomingNotificationId);
-      activeIncomingNotificationId = null;
-    }
-    if (activeOngoingNotificationId) {
-      await N.dismissNotificationAsync(activeOngoingNotificationId);
-      activeOngoingNotificationId = null;
-    }
-    if (callId) {
-      await N.dismissNotificationAsync(`ongoing_${callId}`);
+    try {
+      const { OneSignal } = require("./onesignal");
+      if (OneSignal?.Notifications?.clearAll) {
+        OneSignal.Notifications.clearAll();
+      }
+    } catch (e) {}
+
+    if (N) {
+      if (activeIncomingNotificationId) {
+        await N.dismissNotificationAsync(activeIncomingNotificationId).catch(() => {});
+        activeIncomingNotificationId = null;
+      }
+      if (activeOngoingNotificationId) {
+        await N.dismissNotificationAsync(activeOngoingNotificationId).catch(() => {});
+        activeOngoingNotificationId = null;
+      }
+      if (callId) {
+        await N.dismissNotificationAsync(`incoming_${callId}`).catch(() => {});
+        await N.dismissNotificationAsync(`call_${callId}`).catch(() => {});
+        await N.dismissNotificationAsync(`ongoing_${callId}`).catch(() => {});
+        await N.dismissNotificationAsync(callId).catch(() => {});
+      }
     }
   } catch (e) {}
 }
