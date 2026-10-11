@@ -12,6 +12,7 @@ import {
   Alert,
   Dimensions,
   Modal,
+  InteractionManager,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -25,6 +26,8 @@ import { db } from "../lib/firebase";
 import { BlurView } from "expo-blur";
 import Svg, { Path, Rect } from "react-native-svg";
 
+import { useLanguage } from "../contexts/LanguageContext";
+
 const { width: SCREEN_W } = Dimensions.get("window");
 const QR_SIZE = SCREEN_W * 0.68;
 const SCAN_BOX_SIZE = Math.min(SCREEN_W * 0.68, 280);
@@ -35,8 +38,10 @@ interface QRCodeScreenProps {
 
 export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
   const router = useRouter();
+  const { t } = useLanguage();
   const { user, userData } = useUser();
-  const [activeTab, setActiveTab] = useState<"my" | "scan">("scan");
+  const [activeTab, setActiveTab] = useState<"my" | "scan">("my");
+  const [cameraReady, setCameraReady] = useState(false);
 
   // Scan state
   const [permission, requestPermission] = useCameraPermissions();
@@ -48,6 +53,13 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
   const [showScannedUserModal, setShowScannedUserModal] = useState(false);
 
   const qrValue = user?.uid ?? "unknown";
+
+  useEffect(() => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      setCameraReady(true);
+    });
+    return () => task.cancel();
+  }, []);
 
   useEffect(() => {
     if (activeTab === "scan" && permission && !permission.granted) {
@@ -145,7 +157,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
       {/* FULL-SCREEN CAMERA FEED BEHIND EVERYTHING WHEN ON SCAN TAB */}
       {activeTab === "scan" && (
         <View style={StyleSheet.absoluteFill}>
-          {permission?.granted ? (
+          {cameraReady && permission?.granted ? (
             <CameraView
               style={StyleSheet.absoluteFill}
               facing="back"
@@ -158,9 +170,9 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
           ) : (
             <View style={styles.centerPerm}>
               <Feather name="camera-off" size={48} color="#555" />
-              <Text style={styles.permText}>Camera permission is required{"\n"}to scan QR codes</Text>
+              <Text style={styles.permText}>{t("Camera permission is required")}{"\n"}{t("to scan QR codes")}</Text>
               <Pressable style={styles.permBtn} onPress={requestPermission}>
-                <Text style={styles.permBtnText}>Allow Camera</Text>
+                <Text style={styles.permBtnText}>{t("Allow Camera")}</Text>
               </Pressable>
             </View>
           )}
@@ -170,7 +182,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
 
           {/* INSTRUCTIONAL TEXT & CONTROLS DYNAMICALLY BELOW FRAME */}
           <View style={styles.belowFrameRow} pointerEvents="box-none">
-            <Text style={styles.scanLabel}>Align QR code within the frame</Text>
+            <Text style={styles.scanLabel}>{t("Align QR code within the frame")}</Text>
             {isProcessing && (
               <ActivityIndicator color="#ffffff" style={{ marginTop: 16 }} />
             )}
@@ -179,7 +191,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
                 style={styles.retryBtn}
                 onPress={() => setScanned(false)}
               >
-                <Text style={styles.retryText}>Tap to Scan Again</Text>
+                <Text style={styles.retryText}>{t("Tap to Scan Again")}</Text>
               </Pressable>
             )}
           </View>
@@ -193,7 +205,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
           <Pressable style={styles.backBtn} onPress={() => (onBack ? onBack() : router.back())}>
             <Feather name="arrow-left" size={22} color="#fff" />
           </Pressable>
-          <Text style={styles.headerTitle}>QR Code</Text>
+          <Text style={styles.headerTitle}>{t("QR Code")}</Text>
         </View>
 
         {/* PILL-SHAPED SEGMENTED TOGGLE BAR */}
@@ -203,7 +215,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
             onPress={() => setActiveTab("my")}
           >
             <Text style={[styles.tabText, activeTab === "my" && styles.tabTextActive]}>
-              My Code
+              {t("My Code")}
             </Text>
           </Pressable>
           <Pressable
@@ -214,7 +226,7 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
             }}
           >
             <Text style={[styles.tabText, activeTab === "scan" && styles.tabTextActive]}>
-              Scan Code
+              {t("Scan Code")}
             </Text>
           </Pressable>
         </View>
@@ -335,6 +347,7 @@ function MyCodeTab({
   photoURL: string | null;
   qrValue: string;
 }) {
+  const { t } = useLanguage();
   return (
     <View style={styles.myCodeOuter}>
       <View style={styles.myCodeCard}>
@@ -369,8 +382,7 @@ function MyCodeTab({
         </View>
 
         <Text style={styles.hint}>
-          Your QR code is private. If you share it, they{"\n"}can add you as a
-          friend.
+          {t("Your QR code is private. If you share it, they can add you as a friend.", "Your QR code is private. If you share it, they can add you as a friend.")}
         </Text>
       </View>
     </View>
@@ -391,6 +403,7 @@ function ScannedUserModal({
   onAddFriend: () => void;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <Modal
       visible={visible}
@@ -423,29 +436,29 @@ function ScannedUserModal({
             {/* Card */}
             <View style={styles.modalCard}>
               <Text style={styles.modalName}>
-                {scannedUser.name || scannedUser.displayName || "User"}
+                {scannedUser.name || scannedUser.displayName || t("User")}
               </Text>
               <Text style={styles.modalUsername}>
                 @{scannedUser.username || "bunkmate"}
               </Text>
               <Text style={styles.modalBio}>
-                {scannedUser.bio || "This user hasn't added a bio yet."}
+                {scannedUser.bio || t("This user hasn't added a bio yet.")}
               </Text>
 
               {/* Action */}
               {isAlreadyFriend ? (
                 <View style={styles.alreadyFriendChip}>
                   <MaterialCommunityIcons name="check-circle" size={16} color="#4caf50" />
-                  <Text style={styles.alreadyFriendText}>Already Friends</Text>
+                  <Text style={styles.alreadyFriendText}>{t("Already Friends")}</Text>
                 </View>
               ) : (
                 <Pressable style={styles.addFriendBtn} onPress={onAddFriend}>
-                  <Text style={styles.addFriendBtnText}>Add Friend</Text>
+                  <Text style={styles.addFriendBtnText}>{t("Add Friend")}</Text>
                 </Pressable>
               )}
 
               <Pressable style={styles.closeModalBtn} onPress={onClose}>
-                <Text style={styles.closeModalText}>Close</Text>
+                <Text style={styles.closeModalText}>{t("Close")}</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -538,12 +551,13 @@ const styles = StyleSheet.create({
   myCodeCard: {
     width: "100%",
     backgroundColor: "#161616",
-    borderRadius: 24,
+    borderRadius: 28,
     alignItems: "center",
     paddingTop: 56,
     paddingBottom: 24,
     paddingHorizontal: 24,
     overflow: "visible",
+    borderWidth: 0,
   },
   avatarWrapper: {
     position: "absolute",
@@ -559,8 +573,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    borderWidth: 3,
-    borderColor: "#fff",
+    borderWidth: 0,
   },
   avatarFallback: {
     backgroundColor: "#333",
@@ -654,17 +667,17 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    borderWidth: 3,
-    borderColor: "#f0f0f0",
+    borderWidth: 0,
   },
   modalCard: {
     width: "100%",
     backgroundColor: "#1a1a1a",
-    borderRadius: 24,
+    borderRadius: 28,
     paddingTop: 56,
     paddingBottom: 24,
     paddingHorizontal: 24,
     alignItems: "center",
+    borderWidth: 0,
   },
   modalName: { color: "#fff", fontSize: 20, fontWeight: "700", marginBottom: 4 },
   modalUsername: { color: "#888", fontSize: 14, marginBottom: 10 },
@@ -684,15 +697,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 20,
     marginBottom: 12,
+    borderWidth: 0,
   },
   alreadyFriendText: { color: "#4caf50", fontWeight: "600", fontSize: 14 },
   addFriendBtn: {
     width: "100%",
     backgroundColor: "#fff",
-    borderRadius: 14,
+    borderRadius: 24,
     paddingVertical: 14,
     alignItems: "center",
     marginBottom: 12,
+    borderWidth: 0,
   },
   addFriendBtnText: { color: "#000", fontSize: 16, fontWeight: "700" },
   closeModalBtn: { paddingVertical: 10, paddingHorizontal: 24 },

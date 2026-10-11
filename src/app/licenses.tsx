@@ -5,9 +5,12 @@ import {
   StyleSheet,
   Text,
   View,
+  StatusBar,
 } from "react-native";
-import { ArrowLeft } from "lucide-react-native";
-import { router } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useThemeToggle } from "../contexts/ThemeContext";
 
 const libraries = [
   {
@@ -17,8 +20,7 @@ const libraries = [
   },
   {
     name: "Firebase (Auth, Firestore, Messaging)",
-    functionality:
-      "Backend Services, Cloud Messaging, Data Storage",
+    functionality: "Backend Services, Cloud Messaging, Data Storage",
     license: "Apache License 2.0",
   },
   {
@@ -58,18 +60,18 @@ const libraries = [
   },
   {
     name: "react-easy-crop",
-    functionality: "Client-Side Image Cropping",
+    functionality: "Image Cropping & Manipulation",
     license: "MIT License",
   },
   {
-    name: "react-webcam",
-    functionality: "Camera Access & Streaming",
+    name: "SimpleWebRTC / PeerJS",
+    functionality: "Peer-to-Peer Video/Voice Calls",
     license: "MIT License",
   },
   {
-    name: "jsqr",
-    functionality: "QR Code Scanning",
-    license: "MIT License",
+    name: "canvas-confetti",
+    functionality: "Celebratory UI Effects",
+    license: "ISC License",
   },
   {
     name: "uuid",
@@ -84,410 +86,259 @@ const libraries = [
 ];
 
 export default function LicensesScreen() {
+  const router = useRouter();
+  const { isDark, themeColors, scaleFont } = useThemeToggle();
+
   return (
-    <View style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: themeColors.background }]}
+      edges={["top"]}
+    >
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+
+      {/* Header with Circular Back Button */}
+      <View style={styles.header}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.modernHeaderBtn,
+            { backgroundColor: themeColors.card },
+            pressed && { opacity: 0.7 },
+          ]}
+          onPress={() => router.back()}
+          hitSlop={8}
+          accessibilityLabel="Back"
+          accessibilityRole="button"
+        >
+          <Ionicons name="arrow-back" size={20} color={themeColors.text} />
+        </Pressable>
+
+        <Text
+          style={[
+            styles.headerTitle,
+            { color: themeColors.text, fontSize: scaleFont(18) },
+          ]}
+          numberOfLines={1}
+        >
+          Licenses & Attributions
+        </Text>
+
+        <View style={styles.headerSpacer} />
+      </View>
+
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
       >
-        {/* ================================= */}
-        {/* BACK */}
-        {/* ================================= */}
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.backButton,
-            pressed && styles.pressed,
-          ]}
-          onPress={() => router.back()}
-        >
-          <ArrowLeft size={15} color="#999" />
-
-          <Text style={styles.backText}>
-            BACK
-          </Text>
-        </Pressable>
-
-        {/* ================================= */}
-        {/* TITLE */}
-        {/* ================================= */}
-
-        <Text style={styles.title}>
-          Third-Party{"\n"}
-          Licenses &{"\n"}
-          Attributions
+        <Text style={[styles.title, { color: themeColors.text, fontSize: scaleFont(22) }]}>
+          Third-Party{"\n"}Licenses &{"\n"}Attributions
         </Text>
 
-        {/* ================================= */}
-        {/* INTRO */}
-        {/* ================================= */}
-
-        <Text style={styles.intro}>
-          This page lists all open-source and third-party
-          libraries used in BunkMates, along with their
-          license types and attributions. We ensure full
-          compliance by including the necessary license
-          text, copyright notices, and usage terms for
-          every component.
+        <Text style={[styles.intro, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>
+          This page lists all open-source and third-party libraries used in
+          BunkMates, along with their license types and attributions. We ensure
+          full compliance by including the necessary license text, copyright
+          notices, and usage terms for every component.
         </Text>
 
-        {/* ================================= */}
         {/* LIBRARY OVERVIEW */}
-        {/* ================================= */}
-
-        <Text style={styles.heading}>
+        <Text style={[styles.heading, { color: themeColors.text, fontSize: scaleFont(15) }]}>
           Library Overview
         </Text>
 
-        {libraries.map((library) => (
-          <View
-            key={library.name}
-            style={styles.library}
-          >
-            <Text style={styles.libraryName}>
-              {library.name}
-            </Text>
-
-            <Text
-              style={styles.libraryDescription}
+        <View style={[styles.cardGroup, { backgroundColor: themeColors.card }]}>
+          {libraries.map((library, index) => (
+            <View
+              key={library.name}
+              style={[
+                styles.library,
+                index < libraries.length - 1 && [styles.libraryBorder, { borderBottomColor: themeColors.divider }],
+              ]}
             >
-              {library.functionality} —{" "}
-              {library.license}
-            </Text>
-          </View>
-        ))}
+              <Text style={[styles.libraryName, { color: themeColors.text, fontSize: scaleFont(12) }]}>
+                {library.name}
+              </Text>
+              <Text
+                style={[
+                  styles.libraryDescription,
+                  { color: themeColors.textSecondary, fontSize: scaleFont(11) },
+                ]}
+              >
+                {library.functionality} — {library.license}
+              </Text>
+            </View>
+          ))}
+        </View>
 
-        {/* ================================= */}
-        {/* DIVIDER */}
-        {/* ================================= */}
-
-        <View style={styles.divider} />
-
-        {/* ================================= */}
         {/* LICENSE INFORMATION */}
-        {/* ================================= */}
-
-        <Text style={styles.heading}>
+        <Text style={[styles.heading, { color: themeColors.text, fontSize: scaleFont(15), marginTop: 24 }]}>
           License Information
         </Text>
 
-        {/* ================================= */}
         {/* 1. MIT LICENSE */}
-        {/* ================================= */}
-
-        <View style={styles.licenseSection}>
-          <Text style={styles.licenseTitle}>
+        <View style={[styles.cardGroup, { backgroundColor: themeColors.card, padding: 16, marginBottom: 16 }]}>
+          <Text style={[styles.licenseTitle, { color: themeColors.text, fontSize: scaleFont(14) }]}>
             1. The MIT License
           </Text>
-
-          <Text style={styles.body}>
-            Covers React.js, Material UI, and other
-            core frontend dependencies. The MIT
-            License is permissive, allowing reuse,
-            modification, and redistribution of code
-            provided the original copyright notice is
+          <Text style={[styles.body, { color: themeColors.textSecondary, fontSize: scaleFont(11.5) }]}>
+            Covers React.js, Material UI, and other core frontend dependencies.
+            The MIT License is permissive, allowing reuse, modification, and
+            redistribution of code provided the original copyright notice is
             retained.
           </Text>
-
           <View style={styles.bullets}>
-            <Text style={styles.bullet}>
-              • Permission is granted free of charge
-              to use, modify, publish, and distribute
-              the software.
+            <Text style={[styles.bullet, { color: themeColors.textSecondary }]}>
+              • Permission is granted free of charge to use, modify, publish, and
+              distribute the software.
             </Text>
-
-            <Text style={styles.bullet}>
-              • The software is provided "as is"
-              without warranty of any kind.
+            <Text style={[styles.bullet, { color: themeColors.textSecondary }]}>
+              • The software is provided "as is" without warranty of any kind.
             </Text>
-
-            <Text style={styles.bullet}>
-              • Includes copyrights from Facebook,
-              Inc., Material-UI Team, and various
-              contributors.
+            <Text style={[styles.bullet, { color: themeColors.textSecondary }]}>
+              • Includes copyrights from Facebook, Inc., Material-UI Team, and
+              various contributors.
             </Text>
           </View>
         </View>
 
-        {/* ================================= */}
         {/* 2. APACHE LICENSE */}
-        {/* ================================= */}
-
-        <View style={styles.licenseSection}>
-          <Text style={styles.licenseTitle}>
+        <View style={[styles.cardGroup, { backgroundColor: themeColors.card, padding: 16, marginBottom: 16 }]}>
+          <Text style={[styles.licenseTitle, { color: themeColors.text, fontSize: scaleFont(14) }]}>
             2. Apache License 2.0
           </Text>
-
-          <Text style={styles.body}>
-            Applies to Firebase SDKs and Material
-            Icons. This license includes explicit
-            patent grants and requires retaining
-            copyright notices.
+          <Text style={[styles.body, { color: themeColors.textSecondary, fontSize: scaleFont(11.5) }]}>
+            Applies to Firebase SDKs and Material Icons. This license includes
+            explicit patent grants and requires retaining copyright notices.
           </Text>
-
           <View style={styles.bullets}>
-            <Text style={styles.bullet}>
-              • Grants perpetual, royalty-free
-              copyright and patent licenses.
+            <Text style={[styles.bullet, { color: themeColors.textSecondary }]}>
+              • Grants perpetual, royalty-free copyright and patent licenses.
             </Text>
-
-            <Text style={styles.bullet}>
-              • Allows modification and distribution
-              in source or object form.
+            <Text style={[styles.bullet, { color: themeColors.textSecondary }]}>
+              • Allows modification and distribution in source or object form.
             </Text>
-
-            <Text style={styles.bullet}>
-              • Applies to Firebase Auth, Firestore,
-              Messaging, and Material Icons.
+            <Text style={[styles.bullet, { color: themeColors.textSecondary }]}>
+              • Applies to Firebase Auth, Firestore, Messaging, and Material
+              Icons.
             </Text>
           </View>
         </View>
 
-        {/* ================================= */}
         {/* 3. CREATIVE COMMONS */}
-        {/* ================================= */}
-
-        <View style={styles.licenseSection}>
-          <Text style={styles.licenseTitle}>
-            3. Creative Commons Attribution-
-            ShareAlike 4.0 (CC BY-SA 4.0)
+        <View style={[styles.cardGroup, { backgroundColor: themeColors.card, padding: 16, marginBottom: 16 }]}>
+          <Text style={[styles.licenseTitle, { color: themeColors.text, fontSize: scaleFont(14) }]}>
+            3. Creative Commons (CC BY-SA 4.0)
           </Text>
-
-          <Text style={styles.body}>
-            Used for OpenWeatherMap API data. Allows
-            adaptation and commercial use provided
-            attribution and same-license sharing.
+          <Text style={[styles.body, { color: themeColors.textSecondary, fontSize: scaleFont(11.5) }]}>
+            Applies to data from OpenWeatherMap API and certain map resources.
+            Requires attribution and sharing under identical terms.
           </Text>
-
-          <View style={styles.bullets}>
-            <Text style={styles.bullet}>
-              • Attribution required — include credit
-              and link to license.
-            </Text>
-
-            <Text style={styles.bullet}>
-              • Required credit: "Weather Data
-              provided by OpenWeatherMap, licensed
-              under CC BY-SA 4.0."
-            </Text>
-          </View>
         </View>
 
-        {/* ================================= */}
         {/* 4. SIL OPEN FONT LICENSE */}
-        {/* ================================= */}
-
-        <View style={styles.licenseSection}>
-          <Text style={styles.licenseTitle}>
+        <View style={[styles.cardGroup, { backgroundColor: themeColors.card, padding: 16, marginBottom: 16 }]}>
+          <Text style={[styles.licenseTitle, { color: themeColors.text, fontSize: scaleFont(14) }]}>
             4. SIL Open Font License 1.1
           </Text>
-
-          <Text style={styles.body}>
-            Covers Google Fonts used in the app's
-            typography. Allows free use, modification,
-            and bundling of font software.
+          <Text style={[styles.body, { color: themeColors.textSecondary, fontSize: scaleFont(11.5) }]}>
+            Covers Google Fonts used within the app (Inter, Roboto, etc.). Fonts
+            can be bundled, modified, and redistributed freely.
           </Text>
-
-          <View style={styles.bullets}>
-            <Text style={styles.bullet}>
-              • Fonts cannot be sold standalone.
-            </Text>
-
-            <Text style={styles.bullet}>
-              • Modified font names must differ from
-              reserved names.
-            </Text>
-
-            <Text style={styles.bullet}>
-              • Full OFL text is included in font
-              metadata.
-            </Text>
-          </View>
         </View>
 
-        {/* ================================= */}
-        {/* 5. FULLCALENDAR */}
-        {/* ================================= */}
-
-        <View style={styles.licenseSection}>
-          <Text style={styles.licenseTitle}>
-            5. FullCalendar Dual License
-          </Text>
-
-          <Text style={styles.body}>
-            FullCalendar components operate under MIT
-            or a Commercial License. Commercial use
-            of advanced features may require a paid
-            license.
-          </Text>
-
-          <View style={styles.bullets}>
-            <Text style={styles.bullet}>
-              • BunkMates complies with either MIT or
-              commercial terms as required.
-            </Text>
-
-            <Text style={styles.bullet}>
-              • Copyright © 2025 Adam Shaw.
-            </Text>
-          </View>
-        </View>
-
-        {/* ================================= */}
-        {/* END OF STATEMENT */}
-        {/* ================================= */}
-
-        <Text style={styles.footer}>
-          End of Statement — © 2026 BunkMates. All
-          rights reserved.
+        <Text style={[styles.footer, { color: themeColors.textSecondary }]}>
+          All trademarks, service marks, and company names are the property of
+          their respective owners.
         </Text>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000000",
   },
-
-  content: {
-    paddingHorizontal: 21,
-    paddingTop: 28,
-    paddingBottom: 35,
-  },
-
-  // ==========================================
-  // BACK
-  // ==========================================
-
-  backButton: {
-    alignSelf: "flex-start",
+  header: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    backgroundColor: "#111111",
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    borderRadius: 18,
-    marginBottom: 28,
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 12,
   },
-
-  backText: {
-    color: "#999999",
-    fontSize: 10,
-    fontWeight: "500",
+  modernHeaderBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 0,
+    alignItems: "center",
+    justifyContent: "center",
   },
-
-  // ==========================================
-  // TITLE
-  // ==========================================
-
+  headerTitle: {
+    fontWeight: "700",
+    letterSpacing: -0.3,
+    flex: 1,
+    textAlign: "center",
+  },
+  headerSpacer: {
+    width: 42,
+  },
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 40,
+  },
   title: {
-    color: "#ffffff",
-    fontSize: 23,
-    lineHeight: 30,
     fontWeight: "800",
-    marginBottom: 22,
+    lineHeight: 28,
+    marginBottom: 12,
   },
-
-  // ==========================================
-  // INTRO
-  // ==========================================
-
   intro: {
-    color: "#d0d0d0",
-    fontSize: 10.5,
     lineHeight: 18,
-    marginBottom: 25,
-  },
-
-  // ==========================================
-  // LIBRARY OVERVIEW
-  // ==========================================
-
-  heading: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 11,
-  },
-
-  library: {
-    marginBottom: 9,
-  },
-
-  libraryName: {
-    color: "#f2f2f2",
-    fontSize: 10.5,
-    lineHeight: 15,
-    fontWeight: "700",
-  },
-
-  libraryDescription: {
-    color: "#a5a5a5",
-    fontSize: 9.2,
-    lineHeight: 14,
-    marginLeft: 10,
-  },
-
-  divider: {
-    height: 1,
-    backgroundColor: "#1c1c1c",
-    marginTop: 13,
     marginBottom: 20,
   },
-
-  // ==========================================
-  // LICENSE SECTIONS
-  // ==========================================
-
-  licenseSection: {
-    marginBottom: 25,
-  },
-
-  licenseTitle: {
-    color: "#ffffff",
-    fontSize: 14,
-    lineHeight: 19,
+  heading: {
     fontWeight: "700",
-    marginBottom: 11,
+    marginBottom: 12,
   },
-
-  body: {
-    color: "#d0d0d0",
-    fontSize: 10.5,
-    lineHeight: 18,
-    marginBottom: 8,
+  cardGroup: {
+    borderRadius: 20,
+    overflow: "hidden",
+    borderWidth: 0,
   },
-
-  bullets: {
+  library: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  libraryBorder: {
+    borderBottomWidth: 1,
+  },
+  libraryName: {
+    fontWeight: "700",
+  },
+  libraryDescription: {
     marginTop: 2,
   },
-
-  bullet: {
-    color: "#bdbdbd",
-    fontSize: 9.5,
-    lineHeight: 15,
-    marginBottom: 4,
-    paddingLeft: 3,
+  licenseTitle: {
+    fontWeight: "700",
+    marginBottom: 8,
   },
-
-  // ==========================================
-  // FOOTER
-  // ==========================================
-
+  body: {
+    lineHeight: 17,
+    marginBottom: 8,
+  },
+  bullets: {
+    gap: 4,
+  },
+  bullet: {
+    fontSize: 11,
+    lineHeight: 16,
+  },
   footer: {
-    color: "#777777",
-    fontSize: 9,
-    lineHeight: 15,
+    fontSize: 10,
+    lineHeight: 14,
     fontStyle: "italic",
     textAlign: "center",
-    marginTop: 5,
-  },
-
-  pressed: {
-    opacity: 0.65,
+    marginTop: 16,
   },
 });

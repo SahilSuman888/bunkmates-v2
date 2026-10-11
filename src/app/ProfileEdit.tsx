@@ -20,43 +20,44 @@ import { useRouter } from "expo-router";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { useUser } from "../contexts/UserContext";
 import { useThemeToggle } from "../contexts/ThemeContext"; // **@** Dynamic theme hook
+import { useLanguage } from "../contexts/LanguageContext";
 import { auth, db, storage } from "../lib/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system/legacy";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import AvatarCropModal from "../components/profile/AvatarCropModal";
-import { compressAndResizeImage } from "../lib/imageCompressor";
 
 export default function EditProfile() {
   const router = useRouter();
   const { user } = useUser();
+  const { t } = useLanguage();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!user);
   const [saving, setSaving] = useState(false);
-  const [showCropModal, setShowCropModal] = useState(false);
-  const [rawPickedUri, setRawPickedUri] = useState<string | null>(null);
 
   // **@** Comprehensive profile state supporting both new UI fields and preserved v2 fields
   const [data, setData] = useState({
-    firstName: "",
-    lastName: "",
-    displayName: "",
+    firstName: user?.displayName?.split(" ")[0] || "",
+    lastName: user?.displayName?.split(" ").slice(1).join(" ") || "",
+    displayName: user?.displayName || "",
     username: "",
-    email: "",
-    mobile: "",
+    email: user?.email || "",
+    mobile: user?.phoneNumber || "",
     bio: "",
     homeCity: "",
-    photoURL: "",
+    photoURL: user?.photoURL || "",
   });
 
   // **@** Dynamic theme integration matching settings page
   let themeMode: "dark" | "light" | "system" = "system";
+  let dynamicThemeColors: any = null;
+  let dynamicAccent = "#FF5A5F";
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       themeMode = themeContext.mode;
+      dynamicThemeColors = themeContext.themeColors;
+      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
     }
   } catch (e) {
     // fallback to system
@@ -68,27 +69,27 @@ export default function EditProfile() {
 
   // **@** Curated color palette matching screenshot with dynamic dark/light support
   const colors = useMemo(() => ({
-    bg: isDark ? "#0A0A0C" : "#F4F6F9",
-    card: isDark ? "#141418" : "#FFFFFF",
-    cardBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "#EBECEF",
-    inputBg: isDark ? "rgba(255, 255, 255, 0.04)" : "#F3F4F6",
-    inputBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "transparent",
-    textPrimary: isDark ? "#FFFFFF" : "#11141A",
-    textSecondary: isDark ? "#8E95A2" : "#7E8590",
-    sectionHeader: isDark ? "#8E95A2" : "#8E8E93",
-    greyishWhite: isDark ? "#E2E8F0" : "#4B5563", // **@** Greyish-white color matching icons
-    iconBoxBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
-    saveBtnBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
-    saveBtnBorder: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.08)",
-    saveBtnText: isDark ? "#E2E8F0" : "#4B5563",
+    bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+    card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+    cardBorder: "transparent",
+    inputBg: isDark ? "#202024" : "#F3F4F6",
+    inputBorder: "transparent",
+    textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+    textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+    sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#8E8E93"),
+    greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
+    iconBoxBg: isDark ? "#222226" : "#F3F4F6",
+    saveBtnBg: dynamicAccent,
+    saveBtnBorder: "transparent",
+    saveBtnText: "#FFFFFF",
     cameraBadgeBg: isDark ? "#26282E" : "#E2E8F0",
     iconColor: isDark ? "#E2E8F0" : "#4B5563",
     warningBg: isDark ? "rgba(245, 158, 11, 0.09)" : "#FFF8ED",
-    warningBorder: isDark ? "rgba(245, 158, 11, 0.35)" : "#FED7AA",
+    warningBorder: "transparent",
     warningText: isDark ? "#FCD34D" : "#9A3412",
     warningIcon: isDark ? "#F59E0B" : "#EA580C",
     placeholder: isDark ? "#555860" : "#9CA3AF",
-  }), [isDark]);
+  }), [isDark, dynamicThemeColors, dynamicAccent]);
 
   // **@** Fetch profile from Firestore with backwards compatibility for split names
   useEffect(() => {
@@ -129,19 +130,15 @@ export default function EditProfile() {
 
   // **@** Image picker from photo library
   const pickImage = async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: false, // Opens our custom WhatsApp-style circular crop modal matching Screenshot 3!
-        quality: 0.9,
-      });
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
 
-      if (!result.canceled && result.assets && result.assets[0]) {
-        setRawPickedUri(result.assets[0].uri);
-        setShowCropModal(true);
-      }
-    } catch (e) {
-      console.warn("pickImage error:", e);
+    if (!result.canceled && result.assets && result.assets[0]) {
+      setData((prev) => ({ ...prev, photoURL: result.assets[0].uri }));
     }
   };
 
@@ -154,22 +151,36 @@ export default function EditProfile() {
 
       let finalPhotoURL = data.photoURL;
 
-      // **@** Compress local image under Firestore 1MB limit (< 40 KB)
+      // **@** Upload local image to Firebase Storage if newly selected
       if (finalPhotoURL && !finalPhotoURL.startsWith("http")) {
-        // Hardware/Skia resize & compress to max 300px
-        const compressed = await compressAndResizeImage(finalPhotoURL, 300, 65);
-        finalPhotoURL = compressed.dataUri;
-
-        // Try Firebase Storage if cloud rules permit
+        let blob: Blob | null = null;
         try {
-          const resp = await fetch(compressed.uri || finalPhotoURL);
-          const blob = await resp.blob();
+          const resp = await fetch(finalPhotoURL);
+          blob = await resp.blob();
+        } catch (fetchErr) {
+          try {
+            blob = await new Promise((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              xhr.onload = function () {
+                resolve(xhr.response);
+              };
+              xhr.onerror = function () {
+                reject(new TypeError("Network request failed"));
+              };
+              xhr.responseType = "blob";
+              xhr.open("GET", finalPhotoURL, true);
+              xhr.send(null);
+            });
+          } catch (xhrErr) {
+            console.log("Upload conversion failed:", fetchErr, xhrErr);
+            throw xhrErr || fetchErr;
+          }
+        }
+
+        if (blob) {
           const storageRef = ref(storage, `profileImages/${user.uid}.jpg`);
-          await uploadBytes(storageRef, blob, { contentType: "image/jpeg" });
+          await uploadBytes(storageRef, blob as any);
           finalPhotoURL = await getDownloadURL(storageRef);
-        } catch (storageErr) {
-          console.log("Firebase storage failed on free plan, safely falling back to compressed base64 (< 40 KB):", finalPhotoURL.length, "bytes");
-          // finalPhotoURL is already a compact ~30 KB base64 string, guaranteed not to exceed 1,048,487 bytes!
         }
       }
 
@@ -210,10 +221,10 @@ export default function EditProfile() {
     }
   };
 
-  if (loading) {
+  if (loading && !user) {
     return (
       <View style={[styles.loader, { backgroundColor: colors.bg }]}>
-        <ActivityIndicator size="large" color={colors.greyishWhite} />
+        <ActivityIndicator size="large" color={colors.saveBtnBg || colors.textPrimary} />
       </View>
     );
   }
@@ -242,7 +253,7 @@ export default function EditProfile() {
           </Pressable>
 
           <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-            Edit Profile
+            {t("Edit Profile")}
           </Text>
 
           <Pressable
@@ -263,7 +274,7 @@ export default function EditProfile() {
             {saving ? (
               <ActivityIndicator size="small" color={colors.saveBtnText} />
             ) : (
-              <Text style={[styles.savePillText, { color: colors.saveBtnText }]}>Save</Text>
+              <Text style={[styles.savePillText, { color: colors.saveBtnText }]}>{t("Save")}</Text>
             )}
           </Pressable>
         </View>
@@ -296,14 +307,14 @@ export default function EditProfile() {
 
           {/* **@** Section Header: "PERSONAL INFORMATION" */}
           <Text style={[styles.sectionHeaderTitle, { color: colors.sectionHeader }]}>
-            PERSONAL INFORMATION
+            {t("PERSONAL INFORMATION")}
           </Text>
 
           {/* **@** Form Container Card: Clean rounded container enclosing all personal fields */}
           <View style={[styles.formCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
             {/* First Name */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>First Name</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("First Name")}</Text>
               <TextInput
                 value={data.firstName}
                 onChangeText={(v) => setData({ ...data, firstName: v })}
@@ -318,7 +329,7 @@ export default function EditProfile() {
 
             {/* Last Name */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Last Name</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Last Name")}</Text>
               <TextInput
                 value={data.lastName}
                 onChangeText={(v) => setData({ ...data, lastName: v })}
@@ -333,7 +344,7 @@ export default function EditProfile() {
 
             {/* Display Name with Subtitle */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Display Name</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Display Name")}</Text>
               <TextInput
                 value={data.displayName}
                 onChangeText={(v) => setData({ ...data, displayName: v })}
@@ -345,13 +356,13 @@ export default function EditProfile() {
                 ]}
               />
               <Text style={[styles.fieldHelper, { color: colors.textSecondary }]}>
-                This is how other bunkmates will see you on trips.
+                {t("This is how other bunkmates will see you on trips.")}
               </Text>
             </View>
 
             {/* **@** Preserved v2 feature: Username handle */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Username</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Username")}</Text>
               <View
                 style={[
                   styles.inputWithIconWrapper,
@@ -372,7 +383,7 @@ export default function EditProfile() {
 
             {/* Email with Icon (Read-only as in reference) */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Email</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Email")}</Text>
               <View
                 style={[
                   styles.inputWithIconWrapper,
@@ -392,7 +403,7 @@ export default function EditProfile() {
 
             {/* Phone with Icon */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Phone</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Phone")}</Text>
               <View
                 style={[
                   styles.inputWithIconWrapper,
@@ -413,7 +424,7 @@ export default function EditProfile() {
 
             {/* Bio / Travel Tagline */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Bio / Travel Tagline</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Bio / Travel Tagline")}</Text>
               <TextInput
                 value={data.bio}
                 onChangeText={(v) => setData({ ...data, bio: v })}
@@ -430,7 +441,7 @@ export default function EditProfile() {
 
             {/* Home City with Location Pin Icon */}
             <View style={[styles.fieldGroup, { marginBottom: 4 }]}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>Home City</Text>
+              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Home City")}</Text>
               <View
                 style={[
                   styles.inputWithIconWrapper,
@@ -468,22 +479,6 @@ export default function EditProfile() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      {/* **@** Custom Circular Avatar Crop Modal matching Screenshot 3 */}
-      <AvatarCropModal
-        visible={showCropModal}
-        imageUri={rawPickedUri}
-        currentAvatarUri={data.photoURL}
-        onCancel={() => {
-          setShowCropModal(false);
-          setRawPickedUri(null);
-        }}
-        onSaveCropped={(croppedDataUri) => {
-          setData((prev) => ({ ...prev, photoURL: croppedDataUri }));
-          setShowCropModal(false);
-          setRawPickedUri(null);
-        }}
-      />
     </SafeAreaView>
   );
 }
@@ -516,7 +511,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 1,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 10,
@@ -529,9 +524,9 @@ const styles = StyleSheet.create({
   },
   savePill: {
     paddingHorizontal: 20,
-    paddingVertical: 7,
-    borderRadius: 20,
-    borderWidth: 1,
+    paddingVertical: 8,
+    borderRadius: 24,
+    borderWidth: 0,
     minWidth: 64,
     alignItems: "center",
     justifyContent: "center",
@@ -568,7 +563,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    borderWidth: 2.5,
+    borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
     elevation: 3,
@@ -593,15 +588,15 @@ const styles = StyleSheet.create({
 
   // **@** Form card container enclosing all fields
   formCard: {
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 28,
+    borderWidth: 0,
     padding: 16,
     marginBottom: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 6,
-    elevation: 1,
+    elevation: 0,
   },
   fieldGroup: {
     marginBottom: 18,
@@ -619,8 +614,8 @@ const styles = StyleSheet.create({
 
   // **@** Standard single-line text input
   textInput: {
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    borderWidth: 0,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14.5,
@@ -630,8 +625,8 @@ const styles = StyleSheet.create({
   inputWithIconWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    borderWidth: 0,
     paddingHorizontal: 14,
     minHeight: 46,
   },
@@ -646,8 +641,8 @@ const styles = StyleSheet.create({
 
   // **@** Multiline text area input for bio
   textAreaInput: {
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    borderWidth: 0,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14.5,
@@ -659,8 +654,8 @@ const styles = StyleSheet.create({
   warningBanner: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 20,
+    borderWidth: 0,
     padding: 14,
   },
   warningIcon: {

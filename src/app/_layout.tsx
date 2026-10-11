@@ -7,6 +7,8 @@ import {
 import { View } from "react-native";
 
 import { UserProvider } from "../contexts/UserContext";
+import { AppSettingsProvider } from "../contexts/AppSettingsContext";
+import { LanguageProvider } from "../contexts/LanguageContext";
 
 import {
   ThemeToggleProvider,
@@ -68,9 +70,13 @@ export default function RootLayout() {
     <GestureHandlerRootView
       style={{ flex: 1 }}
     >
-      <ThemeToggleProvider>
-        <LayoutContent />
-      </ThemeToggleProvider>
+      <AppSettingsProvider>
+        <ThemeToggleProvider>
+          <LanguageProvider>
+            <LayoutContent />
+          </LanguageProvider>
+        </ThemeToggleProvider>
+      </AppSettingsProvider>
     </GestureHandlerRootView>
   );
 }
