@@ -55,9 +55,9 @@ export const useUniversalSearch = (
           query(usersRef, limit(maxResults))
         );
         const usersData = usersSnapshot.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
           .filter(
-            (user) =>
+            (user: any) =>
               user.name?.toLowerCase().includes(lowerQuery) ||
               user.username?.toLowerCase().includes(lowerQuery)
           );
@@ -68,8 +68,8 @@ export const useUniversalSearch = (
           query(notesRef, limit(maxResults * 2))
         );
         const notesData = notesSnapshot.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() }))
-          .filter((note) =>
+          .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
+          .filter((note: any) =>
             note.title?.toLowerCase().includes(lowerQuery) ||
             note.content?.toLowerCase().includes(lowerQuery)
           )
@@ -81,8 +81,8 @@ export const useUniversalSearch = (
           query(remindersRef, limit(maxResults * 2))
         );
         const remindersData = remindersSnapshot.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() }))
-          .filter((reminder) =>
+          .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
+          .filter((reminder: any) =>
             reminder.text?.toLowerCase().includes(lowerQuery)
           )
           .slice(0, maxResults);
@@ -93,8 +93,8 @@ export const useUniversalSearch = (
           query(tripsRef, limit(maxResults * 2))
         );
         const tripsData = tripsSnapshot.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() }))
-          .filter((trip) =>
+          .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
+          .filter((trip: any) =>
             trip.name?.toLowerCase().includes(lowerQuery) ||
             trip.destination?.toLowerCase().includes(lowerQuery)
           )

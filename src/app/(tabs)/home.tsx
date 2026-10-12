@@ -1654,7 +1654,7 @@ export default function Home() {
                   onPress={() =>
                     router.push({
                       pathname:
-                        "/(tabs)/place-details" as any,
+                        "/place-details" as any,
                       params: {
                         placeId:
                           item.placeId,
@@ -1751,7 +1751,7 @@ export default function Home() {
                   onPress={() =>
                     router.push({
                       pathname:
-                        "/(tabs)/place-details" as any,
+                        "/place-details" as any,
                       params: {
                         placeId:
                           item.placeId,

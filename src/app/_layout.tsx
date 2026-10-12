@@ -4,6 +4,9 @@ import { View, Platform, StatusBar } from "react-native";
 import { enableScreens, enableFreeze } from "react-native-screens";
 
 import { UserProvider } from "../contexts/UserContext";
+import { AppSettingsProvider } from "../contexts/AppSettingsContext";
+import { LanguageProvider } from "../contexts/LanguageContext";
+
 import {
   ThemeToggleProvider,
   useThemeToggle,
@@ -14,15 +17,12 @@ import { CallProvider } from "../contexts/CallContext";
 
 import NotificationsHandler from "../components/NotificationsHandler";
 import IncomingCallHandler from "../components/IncomingCallHandler";
-import { InAppNotificationBanner } from "../components/ui/InAppNotificationBanner";
+import OneSignalHandler from "../components/OneSignalHandler";
 import { GradientProvider } from "../contexts/GradientContext";
-import { LanguageProvider } from "../contexts/LanguageContext";
-import { AppSettingsProvider, useAppSettings } from "../contexts/AppSettingsContext";
-import { AppAtmosphereBackground } from "../components/ui/AppAtmosphereBackground";
+import { initOneSignal } from "../lib/onesignal";
 
-// Native hardware-accelerated screen optimizations
-enableScreens(true);
-enableFreeze(true);
+// Initialize OneSignal & Android Notification Channels at module load
+initOneSignal();
 
 function LayoutContent() {
   const { themeColors, isDark, reduceAnimations, background } = useThemeToggle();
@@ -46,7 +46,11 @@ function LayoutContent() {
         <UserProvider>
           <CallProvider>
             <ChatSettingsProvider>
-              {/* Push notifications handler & interactive In-App banner */}
+
+              {/* OneSignal — handles push notification taps & call alerts */}
+              <OneSignalHandler />
+
+              {/* Local expo-notifications handler */}
               <NotificationsHandler />
               <InAppNotificationBanner />
               <IncomingCallHandler />
@@ -79,7 +83,9 @@ function LayoutContent() {
 
 export default function RootLayout() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView
+      style={{ flex: 1 }}
+    >
       <AppSettingsProvider>
         <ThemeToggleProvider>
           <LanguageProvider>

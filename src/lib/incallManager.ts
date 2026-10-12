@@ -1,4 +1,4 @@
-import { Platform } from "react-native";
+import { Platform, NativeModules } from "react-native";
 
 let InCallManager: any = null;
 try {
@@ -103,6 +103,59 @@ export class AudioRouteManager {
       }
     } catch (err) {
       console.warn("[InCallManager] setMute error:", err);
+    }
+  }
+
+  private static isRinging = false;
+
+  public static startRingtone() {
+    if (this.isRinging) return;
+    this.isRinging = true;
+
+    if (Platform.OS === "android" && NativeModules.BunkMatesRingtone) {
+      try {
+        NativeModules.BunkMatesRingtone.start();
+        console.log("[InCallManager] Native BunkMatesRingtone started");
+        return;
+      } catch (err) {
+        console.warn("[InCallManager] BunkMatesRingtone start error:", err);
+      }
+    }
+
+    if (!InCallManager) return;
+    try {
+      if (typeof InCallManager.startRingtone === "function") {
+        InCallManager.startRingtone("_DEFAULT_", [0, 600, 300, 600, 300, 600], "default", 35);
+        console.log("[InCallManager] react-native-incall-manager ringtone started");
+      }
+    } catch (err) {
+      console.warn("[InCallManager] startRingtone error:", err);
+    }
+  }
+
+  public static stopRingtone() {
+    this.isRinging = false;
+
+    if (Platform.OS === "android" && NativeModules.BunkMatesRingtone) {
+      try {
+        NativeModules.BunkMatesRingtone.stop();
+        console.log("[InCallManager] Native BunkMatesRingtone stopped");
+      } catch (err) {
+        console.warn("[InCallManager] BunkMatesRingtone stop error:", err);
+      }
+    }
+
+    if (!InCallManager) return;
+    try {
+      if (typeof InCallManager.stopRingtone === "function") {
+        InCallManager.stopRingtone();
+      }
+      if (typeof InCallManager.stopRingback === "function") {
+        InCallManager.stopRingback();
+      }
+      console.log("[InCallManager] react-native-incall-manager ringtone stopped");
+    } catch (err) {
+      console.warn("[InCallManager] stopRingtone error:", err);
     }
   }
 }

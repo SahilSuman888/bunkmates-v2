@@ -582,7 +582,7 @@ export default function AboutScreen() {
                 <Pressable
                   onPress={() => {
                     setPrivacyModalVisible(false);
-                    router.push("/privacy");
+                    router.push("/privacy" as any);
                   }}
                   style={[styles.modalActionBtn, { flex: 1, backgroundColor: colors.socialBtnBg, borderWidth: 0 }]}
                 >

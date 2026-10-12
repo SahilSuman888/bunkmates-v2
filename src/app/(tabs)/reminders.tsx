@@ -31,6 +31,8 @@ import { Feather, Ionicons } from "@expo/vector-icons";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { useThemeToggle } from "../../contexts/ThemeContext";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 interface ReminderItem {
   id: string;
   text: string;
@@ -41,14 +43,20 @@ interface ReminderItem {
   uid: string;
 }
 
+const memoryCachedReminders: Record<string, ReminderItem[]> = {};
+
 export default function RemindersScreen() {
   const router = useRouter();
   const { isDark, themeColors, accentColor, background, scaleFont } = useThemeToggle();
   const { user, loading: authLoading } = useUser();
   const { t } = useLanguage();
 
-  const [reminders, setReminders] = useState<ReminderItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [reminders, setReminders] = useState<ReminderItem[]>(() => {
+    return (user?.uid && memoryCachedReminders[user.uid]) || [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    return !(user?.uid && memoryCachedReminders[user.uid]?.length);
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [showPast, setShowPast] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
@@ -81,7 +89,20 @@ export default function RemindersScreen() {
       return;
     }
 
-    setLoading(true);
+    // 1. Instantly hydrate from local storage
+    AsyncStorage.getItem(`@bunkmates_cached_reminders_${user.uid}`).then((cached) => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            memoryCachedReminders[user.uid] = parsed;
+            setReminders(parsed);
+            setLoading(false);
+          }
+        } catch (e) {}
+      }
+    });
+
     const q = query(collection(db, "reminders"), where("uid", "==", user.uid));
 
     const unsubscribe = onSnapshot(
@@ -108,12 +129,16 @@ export default function RemindersScreen() {
           });
         });
 
+        memoryCachedReminders[user.uid] = list;
         setReminders(list);
         setLoading(false);
+        AsyncStorage.setItem(
+          `@bunkmates_cached_reminders_${user.uid}`,
+          JSON.stringify(list)
+        ).catch(() => {});
       },
       (err) => {
         console.log("Reminders query error:", err);
-        setReminders([]);
         setLoading(false);
       }
     );

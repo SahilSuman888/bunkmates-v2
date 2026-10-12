@@ -22,6 +22,7 @@ import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { auth, db } from "../lib/firebase";
 import { useLanguage } from "../contexts/LanguageContext";
+import { useThemeToggle } from "../contexts/ThemeContext";
 import { ACCENT_COLORS } from "../theme/theme";
 import { SettingsActionModal } from "../components/ui/SettingsActionModal";
 
@@ -176,6 +177,7 @@ export default function OfflineDownloads() {
       card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
       cardBorder: "transparent",
       divider: "transparent",
+      coral: customAccent || (isDark ? "#E2E8F0" : "#4B5563"),
       textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
       textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),

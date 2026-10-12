@@ -52,7 +52,7 @@ export default function GroupChatScreen({ groups, loading, onRefresh }: GroupCha
   if (groups.length === 0) {
     return (
       <View style={styles.emptyContainer}>
-        <MaterialCommunityIcons name="chat-multiple-outline" size={48} color="#666" />
+        <MaterialCommunityIcons name={"chat-outline" as any} size={48} color="#666" />
         <Text style={styles.emptyText}>No group chats yet</Text>
         <Text style={styles.emptySubtext}>Join or create a group to get started</Text>
       </View>

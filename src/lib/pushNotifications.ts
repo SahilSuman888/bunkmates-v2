@@ -6,19 +6,17 @@ import { db } from "./firebase";
 
 export const NOTIFICATION_CHANNEL_ID = "bunkmates-notifications";
 
-// **@** Fixed for Expo Go SDK 53: expo-notifications Android Push support removed from Expo Go.
-// Lazy-load to prevent crash in Expo Go; works fully in dev/prod builds.
-let Notifications: typeof import("expo-notifications") | null = null;
+import safeNotifications, { isExpoGo } from "./safeNotifications";
+
 let handlerConfigured = false;
 
 async function getNotifications() {
-  if (Notifications !== null) return Notifications;
-  try {
-    Notifications = await import("expo-notifications");
-
-    // Configure notification handler once on first load
-    if (!handlerConfigured) {
-      Notifications.setNotificationHandler({
+  if (isExpoGo) {
+    return safeNotifications;
+  }
+  if (!handlerConfigured && safeNotifications?.setNotificationHandler) {
+    try {
+      safeNotifications.setNotificationHandler({
         handleNotification: async () => ({
           shouldShowAlert: true,
           shouldPlaySound: true,
@@ -28,13 +26,9 @@ async function getNotifications() {
         }),
       });
       handlerConfigured = true;
-    }
-  } catch (e) {
-    console.warn(
-      "[PushNotifications] expo-notifications not available (Expo Go). Notifications disabled."
-    );
+    } catch (e) {}
   }
-  return Notifications;
+  return safeNotifications;
 }
 
 /**
@@ -82,9 +76,14 @@ export async function registerForPushNotifications(
       return null;
     }
 
+    if (isExpoGo) {
+      console.log("[PushNotifications] In Expo Go — push notifications activate in standalone/preview APK build.");
+      return null;
+    }
+
     const N = await getNotifications();
     if (!N) {
-      console.log("[PushNotifications] Not available in this environment (Expo Go).");
+      console.log("[PushNotifications] Not available in this environment.");
       return null;
     }
 
@@ -138,8 +137,6 @@ export async function registerForPushNotifications(
      * Save token in Firestore.
      */
     await updateDoc(doc(db, "users", uid), {
-      expoPushToken,
-      expoPushTokenUpdatedAt: new Date(),
       pushNotificationsEnabled: true,
       pushPlatform: Platform.OS,
     });

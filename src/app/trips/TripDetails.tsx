@@ -19,14 +19,20 @@ import {
   onSnapshot,
   collection,
   getDoc,
+  getDocs,
   addDoc,
   updateDoc,
   deleteDoc,
   serverTimestamp,
+  query,
+  where,
 } from "firebase/firestore";
 import { db, auth } from "../../lib/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Image as ExpoImage } from "expo-image";
+import { useUserGroups } from "../../hooks/useUserGroups";
 
 /* COMPONENTS */
 import ChecklistDrawer from "../../components/trip_components/ChecklistDrawer";
@@ -40,12 +46,10 @@ import LinkDrawer from "../../components/trip_components/LinkDrawer";
 import SettingsDrawer from "../../components/trip_components/SettingsDrawer";
 
 import { useGroqAI } from "../../hooks/useGroqAI";
-import { useThemeToggle } from "../../contexts/ThemeContext";
-import { useAppSettings } from "../../contexts/AppSettingsContext";
-import { SkeletonLoadingScreen } from "../../components/ui/SkeletonLoadingScreen";
+import { functions } from "../../lib/firebase";
+import { httpsCallable } from "firebase/functions";
 
 const { width } = Dimensions.get("window");
-const UNSPLASH_KEY = "MGCA3bsEUNBsSG6XbcqnJXckFB4dDyN5ZPKVBrD0FeQ";
 
 const getCurrentDate = () => {
   const now = new Date();
@@ -57,13 +61,126 @@ const getCurrentTime = () => {
   return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 };
 
+const formatTripDateRange = (startDate?: string, endDate?: string) => {
+  if (!startDate) return "Dates not set";
+  const parseD = (str: string) => {
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) return d;
+    return null;
+  };
+  const s = parseD(startDate);
+  const e = endDate ? parseD(endDate) : s;
+  if (!s) return startDate;
+
+  const options: Intl.DateTimeFormatOptions = {
+    weekday: "short",
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  };
+  const sStr = s.toLocaleDateString("en-US", options);
+  const eStr = e ? e.toLocaleDateString("en-US", options) : sStr;
+  return `${sStr} → ${eStr}`;
+};
+
+const getWeatherInfo = (code: number, temp: number): { emoji: string; text: string } => {
+  if (temp > 30) return { emoji: "🔥", text: "Broken Clouds" };
+  if (code === 0) return { emoji: "☀️", text: "Clear Sky" };
+  if (code <= 3) return { emoji: "☁️", text: "Broken Clouds" };
+  if (code >= 51 && code <= 65) return { emoji: "🌧️", text: "Rain Showers" };
+  if (code >= 71 && code <= 77) return { emoji: "❄️", text: "Cold & Snow" };
+  if (code >= 95) return { emoji: "⛈️", text: "Thunderstorm" };
+  return { emoji: "🔥", text: "Broken Clouds" };
+};
+
+const getCuratedPlacesFallback = (dest: string) => {
+  const d = (dest || "").toLowerCase();
+  if (d.includes("jaipur")) {
+    return [
+      { name: "Amber Fort", category: "Historical Monument", description: "Majestic hilltop fort featuring stunning mirror work and panoramic vistas.", suggestedTime: "Morning" },
+      { name: "Hawa Mahal", category: "Heritage Landmark", description: "Iconic five-story pink sandstone palace with 953 intricate honeycomb windows.", suggestedTime: "Morning" },
+      { name: "City Palace", category: "Royal Residence", description: "Magnificent complex of courtyards, gardens, and buildings in the heart of the city.", suggestedTime: "Afternoon" },
+      { name: "Jantar Mantar", category: "Astronomical Observatory", description: "UNESCO World Heritage site featuring nineteen architectural astronomical instruments.", suggestedTime: "Afternoon" },
+      { name: "Nahargarh Fort", category: "Scenic Viewpoint", description: "Standing on the edge of the Aravalli Hills, offering breathtaking views over Jaipur.", suggestedTime: "Evening" },
+    ];
+  }
+  if (d.includes("dehradun") || d.includes("mussoorie")) {
+    return [
+      { name: "Mindrolling Monastery", category: "Religious Site", description: "A beautiful Buddhist monastery with stunning architecture and peaceful surroundings.", suggestedTime: "Morning" },
+      { name: "Tapkeshwar Temple", category: "Religious Site", description: "An ancient Shiva temple situated on the banks of a river, known for its natural water spring and peaceful ambiance.", suggestedTime: "Morning" },
+      { name: "Sahastradhara", category: "Natural Attraction", description: "A scenic spot with numerous waterfalls, caves, and a sulfur spring, perfect for relaxation and rejuvenation.", suggestedTime: "Afternoon" },
+      { name: "Forest Research Institute", category: "Heritage & Nature", description: "A sprawling Greco-Roman architectural marvel surrounded by lush botanical gardens.", suggestedTime: "Afternoon" },
+      { name: "Robber's Cave (Guchhupani)", category: "Adventure & River", description: "A natural river cave formation where you can wade through cool stream waters.", suggestedTime: "Evening" },
+    ];
+  }
+  const cleanDest = (dest || "Destination").split(",")[0].trim();
+  return [
+    { name: `${cleanDest} Old Town & Local Market`, category: "Culture & Market", description: `Explore lively streets, vibrant bazaars, and local culinary traditions of ${cleanDest}.`, suggestedTime: "Morning" },
+    { name: `${cleanDest} Heritage Landmark`, category: "Historical Site", description: `Iconic heritage site showcasing historical architecture and cultural significance.`, suggestedTime: "Morning" },
+    { name: `${cleanDest} Scenic Nature Park`, category: "Natural Attraction", description: `Peaceful natural park with lush walking paths and panoramic viewpoints.`, suggestedTime: "Afternoon" },
+    { name: `${cleanDest} Panoramic Viewpoint`, category: "Scenic Viewpoint", description: `High elevation lookout offering expansive 360-degree vistas of ${cleanDest}.`, suggestedTime: "Evening" },
+    { name: `${cleanDest} Evening Promenade`, category: "Leisure & Dining", description: `Popular evening gathering area with vibrant street cafes and welcoming atmosphere.`, suggestedTime: "Evening" },
+  ];
+};
+
+const getCuratedChecklistFallback = (dest: string) => {
+  return [
+    "Travel Adapter & Power Bank",
+    "Water Bottle & Hydration Flask",
+    "Rain Gear & Windbreaker",
+    "Portable Bluetooth Speaker",
+    "Government IDs & Booking Passes",
+    "First Aid Kit & Medications",
+    "Comfortable Walking / Trail Shoes",
+  ];
+};
+
+const getCuratedTimelineFallback = (from: string, to: string, startDate?: string, endDate?: string) => {
+  const cFrom = (from || "Origin").split(",")[0].trim();
+  const cTo = (to || "Destination").split(",")[0].trim();
+  const sD = startDate ? new Date(startDate) : new Date();
+  const formatIso = (baseDate: Date, addDays: number, hours: number) => {
+    const copy = new Date(baseDate.getTime() + addDays * 86400000);
+    copy.setHours(hours, 0, 0, 0);
+    return copy.toISOString();
+  };
+
+  return [
+    {
+      title: `Day 0 - Towards ${cTo}`,
+      time: formatIso(sD, 0, 17),
+      note: `Departure from ${cFrom}, transit, and travel preparation.`,
+    },
+    {
+      title: `Day 1 - Arrival & Explore ${cTo} local and famous places`,
+      time: formatIso(sD, 1, 13),
+      note: `Arrival, hotel check-in, relax, and explore local neighborhood.`,
+    },
+    {
+      title: `Day 2 - Landmark Exploration & Sightseeing`,
+      time: formatIso(sD, 2, 10),
+      note: `Visiting famous monuments, viewpoints, and cultural spots.`,
+    },
+    {
+      title: `Day 3 - Scenic Adventure & Camping Experience`,
+      time: formatIso(sD, 3, 11),
+      note: `Outdoor trails, viewpoints, nature photography, and group gathering.`,
+    },
+    {
+      title: `Day 4 - Final Exploration & Departure`,
+      time: formatIso(sD, 4, 10),
+      note: `Souvenir shopping, local delicacies, and return transit back to ${cFrom}.`,
+    },
+  ];
+};
+
 export default function TripDetails() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const user = auth.currentUser;
   const uid = user?.uid || null;
-  const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
-  const { formatTemperature } = useAppSettings();
+  const insets = useSafeAreaInsets();
+  const { groups = [] } = useUserGroups(uid) || {};
 
   /* ─── DATA STATE ─── */
   const [trip, setTrip] = useState<any>(null);
@@ -111,17 +228,8 @@ export default function TripDetails() {
       setTrip({ id: snap.id, ...data });
       setLoading(false);
 
-      if (data.iconURL || data.imageURL) {
-        setGroupChatIcon(data.iconURL || data.imageURL);
-      }
-
-      /* fetch cover image from Unsplash */
-      const loc = data.location || data.to || data.name;
-      if (loc && !coverImage) {
-        fetch(`https://api.unsplash.com/photos/random?query=travel+${encodeURIComponent(loc)}&client_id=${UNSPLASH_KEY}`)
-          .then(r => r.json())
-          .then(d => { if (d?.urls?.regular) setCoverImage(d.urls.regular); })
-          .catch(() => {});
+      if (data.iconURL || data.imageURL || data.coverImage) {
+        setGroupChatIcon(data.iconURL || data.imageURL || data.coverImage);
       }
 
       /* load member details */
@@ -138,12 +246,34 @@ export default function TripDetails() {
       }
     });
 
-    /* Fetch Group Chat icon image for this trip */
-    const unsubGroup = onSnapshot(doc(db, "groupChats", id), (snap) => {
+    /* Fetch Group Chat icon image for this trip (Direct or via tripId query) */
+    const unsubGroup = onSnapshot(doc(db, "groupChats", id), async (snap) => {
       if (snap.exists()) {
         const gData = snap.data();
-        const icon = gData.iconURL || gData.groupChatIcon || gData.photoURL || gData.groupIcon || gData.imageBackgroundUrl;
+        const icon =
+          gData.iconURL ||
+          gData.photoURL ||
+          gData.groupChatIcon ||
+          gData.groupIcon ||
+          gData.imageBackgroundUrl;
         if (icon) setGroupChatIcon(icon);
+      } else {
+        try {
+          const q = query(collection(db, "groupChats"), where("tripId", "==", id));
+          const qSnap = await getDocs(q);
+          if (!qSnap.empty) {
+            const gData = qSnap.docs[0].data();
+            const icon =
+              gData.iconURL ||
+              gData.photoURL ||
+              gData.groupChatIcon ||
+              gData.groupIcon ||
+              gData.imageBackgroundUrl;
+            if (icon) setGroupChatIcon(icon);
+          }
+        } catch (e) {
+          console.warn("Could not query groupChats by tripId:", e);
+        }
       }
     });
 
@@ -188,6 +318,45 @@ export default function TripDetails() {
       unsubPlaces();
     };
   }, [id, uid]);
+
+  /* ─── LIVE WEATHER FETCH FOR DESTINATION ─── */
+  useEffect(() => {
+    const loc = trip?.to || trip?.location || trip?.from;
+    if (!loc) return;
+    (async () => {
+      try {
+        const clean = loc.split(",")[0].trim();
+        const geoRes = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(clean)}&limit=1`,
+          { headers: { "User-Agent": "BunkMatesApp/2.0" } }
+        );
+        const geoData = await geoRes.json();
+        let lat = 26.9124;
+        let lon = 75.7873;
+        if (geoData?.[0]) {
+          lat = parseFloat(geoData[0].lat);
+          lon = parseFloat(geoData[0].lon);
+        }
+        const wRes = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`
+        );
+        const wData = await wRes.json();
+        if (wData?.current_weather) {
+          const temp = Math.round(wData.current_weather.temperature);
+          const wCode = wData.current_weather.weathercode;
+          const { emoji, text } = getWeatherInfo(wCode, temp);
+          setWeather({
+            temp,
+            emoji,
+            description: text,
+            locationName: clean,
+          });
+        }
+      } catch (err) {
+        console.log("Weather fetch error in TripDetails:", err);
+      }
+    })();
+  }, [trip?.to, trip?.location, trip?.from]);
 
   /* ─── CHECKLIST ACTIONS ─── */
   const addTask = async () => {
@@ -288,12 +457,7 @@ export default function TripDetails() {
   };
 
   /* ─── REAL-TIME GROQ AI FROM FIRESTORE ─── */
-  const { groqApiKey: hookGroqApiKey, defaultModel, fetchKeyDirectly } = useGroqAI();
-
-  const getActiveGroqKey = async (): Promise<string | null> => {
-    if (hookGroqApiKey) return hookGroqApiKey;
-    return await fetchKeyDirectly();
-  };
+  const { defaultModel } = useGroqAI();
 
   const parseAiJson = (rawContent: string) => {
     if (!rawContent) return null;
@@ -304,15 +468,21 @@ export default function TripDetails() {
     if (firstBrace !== -1 && lastBrace !== -1) {
       cleaned = cleaned.substring(firstBrace, lastBrace + 1);
     }
-    return JSON.parse(cleaned);
+    try {
+      return JSON.parse(cleaned);
+    } catch {
+      return null;
+    }
   };
 
   /**
-   * Resilient Groq Chat Completion API caller.
-   * If the chosen model fails (e.g. non-chat model, terms required, or rate-limited),
-   * it automatically retries with "llama-3.3-70b-versatile" or "llama-3.1-8b-instant".
+   * Resilient Groq Chat Completion API caller with multi-model fallback
    */
-  const callGroqChatApi = async (apiKey: string, prompt: string) => {
+  const callGroqChatApi = async (prompt: string) => {
+    const generateCompletion = httpsCallable<
+      { model: string; prompt: string },
+      { content: string }
+    >(functions, "generateGroqChatCompletion");
     const modelsToTry = [
       defaultModel || "llama-3.3-70b-versatile",
       "llama-3.3-70b-versatile",
@@ -322,7 +492,6 @@ export default function TripDetails() {
     let lastError: any = null;
 
     for (const modelCandidate of modelsToTry) {
-      // Skip audio/TTS models if passed by mistake
       if (
         modelCandidate.includes("orpheus") ||
         modelCandidate.includes("whisper") ||
@@ -332,22 +501,9 @@ export default function TripDetails() {
       }
 
       try {
-        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({
-            model: modelCandidate,
-            messages: [{ role: "user", content: prompt }],
-            temperature: 0.3,
-          }),
-        });
-
-        const data = await res.json();
-        if (res.ok && data?.choices?.[0]?.message?.content) {
-          return data.choices[0].message.content;
-        }
-
-        lastError = new Error(data?.error?.message || `API Error (${res.status})`);
+        const result = await generateCompletion({ model: modelCandidate, prompt });
+        if (result.data?.content) return result.data.content;
+        lastError = new Error("Groq returned an empty completion.");
       } catch (err) {
         lastError = err;
       }
@@ -359,41 +515,49 @@ export default function TripDetails() {
   /* ─── AI: FAMOUS PLACES ─── */
   const handleGenerateAiPlaces = async () => {
     const dest = trip?.to || trip?.location || trip?.name;
-    if (!dest) { Alert.alert("Trip Location", "No destination location set for this trip."); return; }
-
-    const activeKey = await getActiveGroqKey();
-    if (!activeKey) {
-      Alert.alert("API Key Required", "Please configure and validate your Groq API Key in Profile > AI Features.");
+    if (!dest) {
+      Alert.alert("Trip Location", "No destination location set for this trip.");
       return;
     }
 
     setIsGeneratingPlaces(true);
+    let placesToAdd: any[] = [];
+
     try {
       const prompt = `Give me 5 famous, must-visit tourist attractions and local places to visit in "${dest}".
 Return strictly raw JSON format without reasoning or explanation:
 {"places":[{"name":"Place Name","category":"Historical Monument","description":"Short description.","suggestedTime":"Morning"}]}`;
 
-      const rawContent = await callGroqChatApi(activeKey, prompt);
+      const rawContent = await callGroqChatApi(prompt);
       const parsed = parseAiJson(rawContent);
+      if (parsed?.places?.length) {
+        placesToAdd = parsed.places;
+      }
+    } catch (e: any) {
+      console.warn("Groq AI places error, using curated fallback:", e);
+    }
 
-      if (parsed?.places?.length && id) {
-        for (const item of parsed.places) {
+    if (!placesToAdd.length) {
+      placesToAdd = getCuratedPlacesFallback(dest);
+    }
+
+    try {
+      if (id && placesToAdd.length) {
+        for (const item of placesToAdd) {
           await addDoc(collection(db, "trips", id, "places"), {
             name: item.name,
             category: item.category || "Sightseeing",
             description: item.description || "",
-            suggestedTime: item.suggestedTime || "Flexible",
+            suggestedTime: item.suggestedTime || "Morning",
             createdAt: new Date().toISOString(),
             createdBy: uid,
           });
         }
-        Alert.alert("✨ Famous Places Added", `Added ${parsed.places.length} famous places for ${dest}!`);
-      } else {
-        Alert.alert("AI Error", "Could not parse places from AI response. Please try again.");
+        Alert.alert("✨ Famous Places Added", `Discovered ${placesToAdd.length} top spots for ${dest.split(",")[0]}!`);
       }
-    } catch (e: any) {
-      console.error("handleGenerateAiPlaces error:", e);
-      Alert.alert("AI Error", e.message || "Failed to generate AI places. Try again.");
+    } catch (err: any) {
+      console.error("Error saving places to firestore:", err);
+      Alert.alert("Save Error", "Could not save places. Please try again.");
     } finally {
       setIsGeneratingPlaces(false);
     }
@@ -404,13 +568,9 @@ Return strictly raw JSON format without reasoning or explanation:
     const origin = trip?.from || "Current Location";
     const dest = trip?.to || trip?.location || trip?.name || "Destination";
 
-    const activeKey = await getActiveGroqKey();
-    if (!activeKey) {
-      Alert.alert("API Key Required", "Please configure and validate your Groq API Key in Profile > AI Features.");
-      return;
-    }
-
     setIsGeneratingTimeline(true);
+    let timelineToAdd: any[] = [];
+
     try {
       let numDays = 3;
       if (trip?.startDate && trip?.endDate) {
@@ -422,11 +582,22 @@ Return strictly raw JSON format without reasoning or explanation:
 Return strictly raw JSON format without reasoning or explanation:
 {"timeline":[{"title":"Day 1 - Arrival & Hotel Check-in","time":"${trip?.startDate || getCurrentDate()}T10:00","note":"Transit to destination, check in and evening sightseeing."}]}`;
 
-      const rawContent = await callGroqChatApi(activeKey, prompt);
+      const rawContent = await callGroqChatApi(prompt);
       const parsed = parseAiJson(rawContent);
+      if (parsed?.timeline?.length) {
+        timelineToAdd = parsed.timeline;
+      }
+    } catch (e: any) {
+      console.warn("Groq AI timeline error, using fallback:", e);
+    }
 
-      if (parsed?.timeline?.length && id) {
-        for (const item of parsed.timeline) {
+    if (!timelineToAdd.length) {
+      timelineToAdd = getCuratedTimelineFallback(origin, dest, trip?.startDate, trip?.endDate);
+    }
+
+    try {
+      if (id && timelineToAdd.length) {
+        for (const item of timelineToAdd) {
           await addDoc(collection(db, "trips", id, "timeline"), {
             title: item.title,
             time: item.time || `${getCurrentDate()}T10:00`,
@@ -438,13 +609,10 @@ Return strictly raw JSON format without reasoning or explanation:
             revealed: true,
           });
         }
-        Alert.alert("✨ AI Timeline Generated", `Added ${parsed.timeline.length} timeline events!`);
-      } else {
-        Alert.alert("AI Error", "Could not parse timeline from AI response. Please try again.");
+        Alert.alert("✨ AI Timeline Generated", `Added ${timelineToAdd.length} timeline events!`);
       }
-    } catch (e: any) {
-      console.error("handleGenerateAiTimeline error:", e);
-      Alert.alert("AI Error", e.message || "Failed to generate AI Timeline.");
+    } catch (err: any) {
+      console.error("Error saving timeline to firestore:", err);
     } finally {
       setIsGeneratingTimeline(false);
     }
@@ -454,32 +622,36 @@ Return strictly raw JSON format without reasoning or explanation:
   const handleGenerateAiChecklist = async () => {
     const dest = trip?.to || trip?.location || trip?.name || "Destination";
 
-    const activeKey = await getActiveGroqKey();
-    if (!activeKey) {
-      Alert.alert("API Key Required", "Please configure and validate your Groq API Key in Profile > AI Features.");
-      return;
-    }
-
     setIsGeneratingChecklist(true);
+    let checklistToAdd: string[] = [];
+
     try {
       const prompt = `Generate an essential packing checklist for a trip to "${dest}".
 Return strictly raw JSON format without reasoning or explanation:
 {"checklist":["Government IDs & Tickets","Phone Chargers","First Aid Kit","Comfortable Shoes"]}`;
 
-      const rawContent = await callGroqChatApi(activeKey, prompt);
+      const rawContent = await callGroqChatApi(prompt);
       const parsed = parseAiJson(rawContent);
-
-      if (parsed?.checklist?.length && id) {
-        for (const text of parsed.checklist) {
-          await addDoc(collection(db, "trips", id, "checklist"), { text, completed: false });
-        }
-        Alert.alert("✨ AI Checklist Added", `Added ${parsed.checklist.length} packing checklist items!`);
-      } else {
-        Alert.alert("AI Error", "Could not parse checklist items from AI response. Please try again.");
+      if (parsed?.checklist?.length) {
+        checklistToAdd = parsed.checklist;
       }
     } catch (e: any) {
-      console.error("handleGenerateAiChecklist error:", e);
-      Alert.alert("AI Error", e.message || "Failed to generate AI Checklist.");
+      console.warn("Groq AI checklist error, using fallback:", e);
+    }
+
+    if (!checklistToAdd.length) {
+      checklistToAdd = getCuratedChecklistFallback(dest);
+    }
+
+    try {
+      if (id && checklistToAdd.length) {
+        for (const text of checklistToAdd) {
+          await addDoc(collection(db, "trips", id, "checklist"), { text, completed: false });
+        }
+        Alert.alert("✨ AI Checklist Added", `Added ${checklistToAdd.length} packing checklist items!`);
+      }
+    } catch (err: any) {
+      console.error("Error saving checklist to firestore:", err);
     } finally {
       setIsGeneratingChecklist(false);
     }
@@ -498,7 +670,7 @@ Return strictly raw JSON format without reasoning or explanation:
       surprise: false,
       revealed: true,
     });
-    Alert.alert(`Added "${place.name}" to Timeline!`);
+    Alert.alert("Added to Timeline", `Added "${place.name}" to Timeline!`);
   };
 
   const handleAddPlaceToChecklist = async (place: any) => {
@@ -507,7 +679,7 @@ Return strictly raw JSON format without reasoning or explanation:
       text: `Explore ${place.name} (${place.category})`,
       completed: false,
     });
-    Alert.alert(`Added "${place.name}" to Checklist!`);
+    Alert.alert("Added to Checklist", `Added "${place.name}" to Checklist!`);
   };
 
   const handleDeletePlace = async (placeId: string) => {
@@ -526,350 +698,393 @@ Return strictly raw JSON format without reasoning or explanation:
   const usedAmount = budget?.expenses?.reduce((s: number, e: any) => s + Number(e.amount || 0), 0) || 0;
   const totalBudget = Number(budget?.total || 0);
   const budgetProgress = totalBudget === 0 ? 0 : Math.min(100, (usedAmount / totalBudget) * 100);
-  const displayImage = trip?.iconURL || coverImage;
+
+  // Group Icon Resolution (Priority: groupChatIcon from groupChats doc, matching group in useUserGroups, trip's own fields)
+  const matchedGroup = (groups || []).find((g: any) => {
+    if (!g) return false;
+    if (g.id === id || g.tripId === id) return true;
+    if (g.name && trip?.name && g.name.trim().toLowerCase() === trip.name.trim().toLowerCase()) return true;
+    return false;
+  });
+
+  const displayImage =
+    groupChatIcon ||
+    matchedGroup?.iconURL ||
+    matchedGroup?.photoURL ||
+    matchedGroup?.groupChatIcon ||
+    matchedGroup?.groupIcon ||
+    matchedGroup?.imageBackgroundUrl ||
+    trip?.iconURL ||
+    trip?.coverImage ||
+    trip?.photoURL ||
+    "https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=1000&auto=format&fit=crop";
+
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(trip?.from || "")}&destination=${encodeURIComponent(trip?.to || "")}`;
 
+  const routeFrom = trip?.from ? trip.from.split(",")[0].trim() : "";
+  const routeTo = trip?.to ? trip.to.split(",")[0].trim() : trip?.location ? trip.location.split(",")[0].trim() : "";
+  const routeText = routeFrom && routeTo ? `${routeFrom} → ${routeTo}` : routeTo || routeFrom || "Direct Route";
+
   if (loading) {
-    return <SkeletonLoadingScreen title={trip?.title || "Trip Details"} showAvatarCard={false} itemCount={4} />;
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#ffffff" />
+      </View>
+    );
   }
 
   return (
     <View style={[styles.root, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
-      {/* ── HERO IMAGE ── */}
-      <View style={styles.heroContainer}>
-        <ImageBackground
-          source={displayImage ? { uri: displayImage } : undefined}
-          style={styles.hero}
-        >
-          {!displayImage && (
-            <LinearGradient colors={["#1a1a2e", "#16213e"]} style={styles.hero}>
-              <Text style={{ color: "#fff", fontSize: 60, fontWeight: "900", opacity: 0.3 }}>
-                {trip?.name?.charAt(0)?.toUpperCase() || "T"}
-              </Text>
-            </LinearGradient>
-          )}
+      {/* ── FLOATING TOP BAR NAVIGATION (Fixed on screen top with safe-area) ── */}
+      <View style={[styles.topBarFixed, { top: insets.top + 8 }]} pointerEvents="box-none">
+        <TouchableOpacity style={styles.backPill} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={17} color="#ffffff" />
+          <Text style={styles.backPillText}>Back</Text>
+        </TouchableOpacity>
 
-          <LinearGradient
-            colors={["transparent", "rgba(0,0,0,0.88)"]}
-            style={styles.heroGradient}
-          />
-
-          {/* TOP BUTTONS ROW */}
-          <View style={styles.topBar}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()}>
-              <Ionicons name="chevron-back" size={16} color="#fff" />
-              <Text style={styles.headerBtnText}>Back</Text>
-            </TouchableOpacity>
-
-            <View style={styles.topRightBtns}>
-              <TouchableOpacity style={styles.iconBtn} onPress={() => setShareDrawerOpen(true)}>
-                <Ionicons name="share-outline" size={18} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconBtn} onPress={() => router.push(`/(tabs)/group-chatroom/${id}` as any)}>
-                <Ionicons name="people-outline" size={18} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconBtn} onPress={() => setSettingsDrawerOpen(true)}>
-                <Ionicons name="information-circle-outline" size={18} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* WEATHER CHIP */}
-          {weather && (
-            <View style={styles.weatherChip}>
-              <Text style={styles.weatherTemp}>
-                {weather.temp > 32 ? "🔥" : weather.temp < 10 ? "❄️" : "☀️"} {formatTemperature(weather.temp, "C")}
-              </Text>
-              <Text style={styles.weatherDesc}>{weather.description}</Text>
-              <Text style={styles.weatherLoc}>IN {trip?.location?.toUpperCase()}</Text>
-            </View>
-          )}
-        </ImageBackground>
+        <View style={styles.topRightBtns}>
+          <TouchableOpacity style={styles.iconCircleBtn} onPress={() => setShareDrawerOpen(true)}>
+            <Ionicons name="share-social" size={18} color="#ffffff" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.iconCircleBtn}
+            onPress={() => router.push(`/(tabs)/group-chatroom/${id}` as any)}
+          >
+            <Ionicons name="people" size={18} color="#ffffff" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconCircleBtn} onPress={() => setSettingsDrawerOpen(true)}>
+            <Ionicons name="settings-sharp" size={18} color="#ffffff" />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* ── CONTENT CARD ── */}
+      {/* ── MAIN SCROLLVIEW (Hero image scrolls up naturally like Image 2!) ── */}
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={{ paddingBottom: 80 }}
+        style={styles.mainScrollView}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
       >
-        {/* Trip Info */}
-        <View style={styles.contentPad}>
-          <Text style={styles.tripTitle}>{trip?.name}</Text>
+        {/* ── HERO IMAGE (Inside ScrollView, scrollable with page) ── */}
+        <View style={styles.heroScrollContainer}>
+          <ImageBackground
+            source={{ uri: displayImage }}
+            style={styles.hero}
+            resizeMode="cover"
+          >
+            {/* Top dark gradient for back & settings button contrast */}
+            <LinearGradient
+              colors={["rgba(0,0,0,0.6)", "transparent"]}
+              style={styles.heroTopGradient}
+            />
 
-          <View style={styles.infoRow}>
-            <Ionicons name="location-sharp" size={14} color="#aaa" />
-            <Text style={styles.infoText}>{trip?.location}</Text>
-          </View>
+            {/* WEATHER CHIP (Floating on hero image bottom-left, Image 1) */}
+            {weather && (
+              <View style={styles.weatherChip}>
+                <Text style={styles.weatherEmoji}>{weather.emoji || "🔥"}</Text>
+                <View style={styles.weatherTextWrap}>
+                  <Text style={styles.weatherTempText}>{weather.temp}°C</Text>
+                  <Text style={styles.weatherDescText}>{weather.description}</Text>
+                </View>
+                <Text style={styles.weatherLocText}>
+                  IN {weather.locationName?.toUpperCase()}
+                </Text>
+              </View>
+            )}
 
-          <View style={styles.infoRow}>
-            <Ionicons name="time-outline" size={14} color="#aaa" />
-            <Text style={styles.infoText}>
-              {trip?.startDate
-                ? `${new Date(trip.startDate).toDateString()} → ${new Date(trip?.endDate || trip.startDate).toDateString()}`
-                : "Dates not set"}
-            </Text>
-          </View>
+            {/* Bottom blur/gradient fade blending hero image into title card (Image 1) */}
+            <LinearGradient
+              colors={["transparent", "rgba(12, 14, 21, 0.4)", "rgba(12, 14, 21, 0.9)", "#0c0e15"]}
+              locations={[0, 0.35, 0.75, 1]}
+              style={styles.heroBottomGradient}
+            />
+          </ImageBackground>
+        </View>
 
-          {trip?.from && trip?.to && (
-            <View style={styles.routeBox}>
+        {/* ── SLIDING CONTENT SHEET (Overlapping hero with rounded top & blur blend) ── */}
+        <View style={styles.sheetContentWrap}>
+          {/* ─── TRIP OVERVIEW INFO (Screenshot 1) ─── */}
+          <View style={styles.tripInfoPad}>
+            <Text style={styles.tripTitle}>{trip?.name}</Text>
+
+            <View style={styles.metaRow}>
+              <Ionicons name="location-sharp" size={16} color="#8e92a4" />
+              <Text style={styles.metaText}>{trip?.location || trip?.to}</Text>
+            </View>
+
+            <View style={styles.metaRow}>
+              <Ionicons name="time-outline" size={16} color="#8e92a4" />
+              <Text style={styles.metaText}>{formatTripDateRange(trip?.startDate, trip?.endDate)}</Text>
+            </View>
+
+            <View style={styles.routeContainer}>
               <Text style={styles.routeLabel}>Route:</Text>
               <View style={styles.routeRow}>
-                <Text style={styles.routeText}>
-                  {trip.from} → {trip.to}
-                </Text>
+                <Text style={styles.routeText}>{routeText}</Text>
                 <TouchableOpacity
-                  style={styles.mapsBtn}
+                  style={styles.navSquareBtn}
                   onPress={() => Linking.openURL(mapsUrl)}
                 >
-                  <Ionicons name="navigate" size={16} color="#fff" />
+                  <Ionicons name="navigate" size={18} color="#ffffff" />
                 </TouchableOpacity>
               </View>
             </View>
-          )}
-        </View>
-
-        {/* ─── FAMOUS PLACES & TOP ATTRACTIONS ─── */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Ionicons name="compass" size={20} color="#00e6b0" />
-              <Text style={styles.sectionTitle}>Famous Places & Top Attractions</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.aiBtn}
-              onPress={handleGenerateAiPlaces}
-              disabled={isGeneratingPlaces}
-            >
-              {isGeneratingPlaces ? (
-                <ActivityIndicator size="small" color="#00e6b0" />
-              ) : (
-                <Text style={styles.aiBtnText}>✦ ✨ Discover Places</Text>
-              )}
-            </TouchableOpacity>
           </View>
 
-          {famousPlaces.length === 0 ? (
-            <Text style={styles.emptyText}>
-              No places discovered yet. Tap "Discover Places" to find top local spots with AI!
-            </Text>
-          ) : (
-            famousPlaces.map((place) => (
-              <View key={place.id} style={styles.placeCard}>
-                <View style={styles.placeHeaderRow}>
-                  <Text style={styles.placeName}>{place.name}</Text>
-                  <TouchableOpacity onPress={() => handleDeletePlace(place.id)}>
-                    <Ionicons name="trash" size={18} color="#ff4444" />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.placeTagRow}>
-                  <View style={styles.placeTagOutline}>
-                    <Text style={styles.placeTagOutlineText}>{place.category}</Text>
+          {/* ─── FAMOUS PLACES & TOP ATTRACTIONS (Screenshots 1 & 2) ─── */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Ionicons name="compass" size={22} color="#ffffff" />
+                <Text style={styles.sectionMainTitle}>Famous Places & Top Attractions</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.discoverPlacesBtn}
+                onPress={handleGenerateAiPlaces}
+                disabled={isGeneratingPlaces}
+              >
+                {isGeneratingPlaces ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                    <Ionicons name="sparkles" size={13} color="#ffffff" />
+                    <Text style={styles.discoverPlacesText}>Discover Places</Text>
                   </View>
-                  {place.suggestedTime && (
-                    <View style={styles.placeTagGreen}>
-                      <Text style={styles.placeTagGreenText}>{place.suggestedTime}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {famousPlaces.length === 0 ? (
+              <View style={styles.emptyCardBox}>
+                <Text style={styles.emptyCardText}>
+                  No places discovered yet. Tap "Discover Places" to find top local spots with Groq AI!
+                </Text>
+              </View>
+            ) : (
+              famousPlaces.map((place) => (
+                <View key={place.id} style={styles.placeCard}>
+                  <View style={styles.placeTopRow}>
+                    <Text style={styles.placeTitle}>{place.name}</Text>
+                    <TouchableOpacity onPress={() => handleDeletePlace(place.id)} hitSlop={10}>
+                      <Ionicons name="trash" size={18} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.placeTagsRow}>
+                    <View style={styles.placeCategoryBadge}>
+                      <Text style={styles.placeCategoryText}>{place.category || "Sightseeing"}</Text>
+                    </View>
+                    {place.suggestedTime ? (
+                      <View style={styles.placeTimeBadge}>
+                        <Text style={styles.placeTimeText}>{place.suggestedTime}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <Text style={styles.placeDesc}>{place.description}</Text>
+
+                  {/* EXACT SOLID WHITE PILL BUTTONS FROM SCREENSHOTS 1 & 2 */}
+                  <View style={styles.placeActionRow}>
+                    <TouchableOpacity
+                      style={styles.solidWhiteBtn}
+                      onPress={() => handleAddPlaceToTimeline(place)}
+                    >
+                      <Ionicons name="calendar-outline" size={16} color="#000000" style={{ marginRight: 6 }} />
+                      <Text style={styles.solidWhiteBtnText}>+ Timeline</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.solidWhiteBtn}
+                      onPress={() => handleAddPlaceToChecklist(place)}
+                    >
+                      <Ionicons name="list" size={16} color="#000000" style={{ marginRight: 6 }} />
+                      <Text style={styles.solidWhiteBtnText}>+ Checklist</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+
+          {/* ─── CHECKLIST (Screenshot 3) ─── */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionSectionHeader}>Checklist</Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <TouchableOpacity
+                  style={styles.aiWhiteBtn}
+                  onPress={handleGenerateAiChecklist}
+                  disabled={isGeneratingChecklist}
+                >
+                  {isGeneratingChecklist ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Ionicons name="sparkles" size={13} color="#ffffff" />
+                      <Text style={styles.aiWhiteBtnText}>AI Checklist</Text>
                     </View>
                   )}
-                </View>
-
-                <Text style={styles.placeDesc}>{place.description}</Text>
-
-                <View style={styles.placeActionRow}>
-                  <TouchableOpacity
-                    style={styles.placeActionBtnSolid}
-                    onPress={() => handleAddPlaceToTimeline(place)}
-                  >
-                    <Ionicons name="calendar-outline" size={14} color="#000" />
-                    <Text style={styles.placeActionBtnSolidText}> + Timeline</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.placeActionBtnOutline}
-                    onPress={() => handleAddPlaceToChecklist(place)}
-                  >
-                    <Ionicons name="list-outline" size={14} color="#fff" />
-                    <Text style={styles.placeActionBtnOutlineText}> + Checklist</Text>
-                  </TouchableOpacity>
-                </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.addPillBtn}
+                  onPress={() => setChecklistDrawerOpen(true)}
+                >
+                  <Text style={styles.addPillBtnText}>+ Add</Text>
+                </TouchableOpacity>
               </View>
-            ))
-          )}
-        </View>
-
-        {/* ─── CHECKLIST ─── */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Checklist</Text>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <TouchableOpacity
-                style={styles.aiBtn}
-                onPress={handleGenerateAiChecklist}
-                disabled={isGeneratingChecklist}
-              >
-                {isGeneratingChecklist ? (
-                  <ActivityIndicator size="small" color="#00e6b0" />
-                ) : (
-                  <Text style={styles.aiBtnText}>✦ ✨ AI Checklist</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.addBtn}
-                onPress={() => setChecklistDrawerOpen(true)}
-              >
-                <Text style={styles.addBtnText}>+ Add</Text>
-              </TouchableOpacity>
             </View>
-          </View>
 
-          {checklist.slice(0, 5).map((task) => (
-            <TouchableOpacity
-              key={task.id}
-              style={styles.checkRow}
-              onPress={() => toggleTask(task)}
-            >
-              <Ionicons
-                name={task.completed ? "checkbox" : "square-outline"}
-                size={22}
-                color={task.completed ? "#4caf50" : "#888"}
-                style={{ marginRight: 12 }}
-              />
-              <Text
-                style={[
-                  styles.checkText,
-                  task.completed && { textDecorationLine: "line-through", color: "#666" },
-                ]}
-              >
-                {task.text || task.title}
-              </Text>
-            </TouchableOpacity>
-          ))}
-
-          {checklist.length === 0 && (
-            <Text style={styles.emptyText}>No checklist items yet.</Text>
-          )}
-
-          <TouchableOpacity style={styles.viewAllBtn} onPress={() => setChecklistViewAllOpen(true)}>
-            <Text style={styles.viewAllBtnText}>View All</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ─── TRIP TIMELINE ─── */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Trip Timeline</Text>
-            <View style={{ flexDirection: "row", gap: 8 }}>
+            {checklist.slice(0, 5).map((task) => (
               <TouchableOpacity
-                style={styles.aiBtn}
-                onPress={handleGenerateAiTimeline}
-                disabled={isGeneratingTimeline}
-              >
-                {isGeneratingTimeline ? (
-                  <ActivityIndicator size="small" color="#00e6b0" />
-                ) : (
-                  <Text style={styles.aiBtnText}>✦ ✨ AI Timeline</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.addBtn}
-                onPress={() => setTimelineDrawerOpen(true)}
-              >
-                <Text style={styles.addBtnText}>+ Add</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {timeline.slice(0, 3).map((item) => {
-            const itemTime = item.time ? new Date(item.time) : null;
-            return (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.timelineCard}
-                onPress={() => toggleEventCompleted(item)}
+                key={task.id}
+                style={styles.checkItemRow}
+                onPress={() => toggleTask(task)}
               >
                 <Ionicons
-                  name={item.completed ? "checkbox" : "square-outline"}
-                  size={20}
-                  color={item.completed ? "#4caf50" : "#888"}
-                  style={{ marginRight: 12, marginTop: 2 }}
+                  name={task.completed ? "checkbox" : "square-outline"}
+                  size={22}
+                  color={task.completed ? "#ffffff" : "rgba(255,255,255,0.4)"}
+                  style={{ marginRight: 14 }}
                 />
-                <View style={{ flex: 1 }}>
-                  <Text
-                    style={[
-                      styles.timelineTitle,
-                      item.completed && { textDecorationLine: "line-through", color: "#666" },
-                    ]}
-                  >
-                    {item.title}
-                  </Text>
-                  <Text style={styles.timelineTime}>
-                    {itemTime ? itemTime.toLocaleString() : item.time}
-                    {item.note ? ` — ${item.note}` : ""}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-
-          {timeline.length === 0 && (
-            <Text style={styles.emptyText}>No timeline events yet.</Text>
-          )}
-
-          <TouchableOpacity style={styles.viewAllBtn} onPress={() => setTimelineAllDrawerOpen(true)}>
-            <Text style={styles.viewAllBtnText}>View All</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ─── MEMBERS ─── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Members</Text>
-
-          {memberDetails.map((m) => (
-            <View key={m.uid} style={styles.memberRow}>
-              <Image
-                source={m?.photoURL ? { uri: m.photoURL } : { uri: `https://i.pravatar.cc/150?u=${m.uid}` }}
-                style={styles.memberAvatar}
-              />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.memberName}>
-                  {m.uid === uid ? `${m.name || "You"} (Me)` : m.name || "Unknown"}
+                <Text
+                  style={[
+                    styles.checkItemText,
+                    task.completed && styles.checkItemTextDone,
+                  ]}
+                >
+                  {task.text || task.title}
                 </Text>
-                <Text style={styles.memberEmail}>{m.email || m.username || ""}</Text>
-              </View>
-            </View>
-          ))}
+              </TouchableOpacity>
+            ))}
 
-          <TouchableOpacity style={styles.inviteBtn} onPress={() => setShareDrawerOpen(true)}>
-            <Text style={styles.inviteBtnText}>Invite Members</Text>
-          </TouchableOpacity>
-        </View>
+            {checklist.length === 0 && (
+              <Text style={styles.emptySimpleText}>No checklist items yet.</Text>
+            )}
 
-        {/* ─── BUDGET ─── */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Budget</Text>
-            <TouchableOpacity style={styles.addBtn} onPress={() => setBudgetDrawerOpen(true)}>
-              <Text style={styles.addBtnText}>Edit</Text>
+            <TouchableOpacity style={styles.viewAllDarkBtn} onPress={() => setChecklistViewAllOpen(true)}>
+              <Text style={styles.viewAllDarkText}>View All</Text>
             </TouchableOpacity>
           </View>
-          <Text style={styles.budgetText}>₹{usedAmount} used of ₹{totalBudget}</Text>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${budgetProgress}%` }]} />
-          </View>
-        </View>
 
-        {/* ─── DANGER ZONE ─── */}
-        <View style={[styles.section, { paddingBottom: 20 }]}>
-          <TouchableOpacity
-            style={styles.deleteBtn}
-            onPress={() => setConfirmDeleteOpen(true)}
-          >
-            <Ionicons name="trash-outline" size={16} color="#ff4444" />
-            <Text style={styles.deleteBtnText}>Delete Trip</Text>
-          </TouchableOpacity>
+          {/* ─── TRIP TIMELINE (Screenshots 3 & 4) ─── */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionSectionHeader}>Trip Timeline</Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <TouchableOpacity
+                  style={styles.aiWhiteBtn}
+                  onPress={handleGenerateAiTimeline}
+                  disabled={isGeneratingTimeline}
+                >
+                  {isGeneratingTimeline ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Ionicons name="sparkles" size={13} color="#ffffff" />
+                      <Text style={styles.aiWhiteBtnText}>AI Timeline</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.addPillBtn}
+                  onPress={() => setTimelineDrawerOpen(true)}
+                >
+                  <Text style={styles.addPillBtnText}>+ Add</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {timeline.slice(0, 5).map((item) => {
+              const itemTime = item.time ? new Date(item.time) : null;
+              const timeStr = itemTime && !isNaN(itemTime.getTime())
+                ? `${itemTime.getMonth() + 1}/${itemTime.getDate()}/${itemTime.getFullYear()}, ${itemTime.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })}`
+                : item.time;
+
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.timelineCardBox}
+                  onPress={() => toggleEventCompleted(item)}
+                >
+                  <Ionicons
+                    name={item.completed ? "checkbox" : "square-outline"}
+                    size={20}
+                    color={item.completed ? "#ffffff" : "rgba(255,255,255,0.4)"}
+                    style={{ marginRight: 12, marginTop: 2 }}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.timelineTitleText,
+                        item.completed && styles.timelineTitleDone,
+                      ]}
+                    >
+                      {item.title}
+                    </Text>
+                    <Text style={styles.timelineTimeText}>
+                      {timeStr}{item.note ? ` — ${item.note}` : ""}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+
+            {timeline.length === 0 && (
+              <Text style={styles.emptySimpleText}>No timeline events yet.</Text>
+            )}
+
+            <TouchableOpacity style={styles.viewAllDarkBtn} onPress={() => setTimelineAllDrawerOpen(true)}>
+              <Text style={styles.viewAllDarkText}>View All</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ─── MEMBERS (Screenshot 4) ─── */}
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionSectionHeader}>Members</Text>
+
+            {memberDetails.map((m) => (
+              <View key={m.uid} style={styles.memberItemRow}>
+                <ExpoImage
+                  source={{ uri: m?.photoURL || `https://i.pravatar.cc/150?u=${m.uid}` }}
+                  style={styles.memberAvatarImg}
+                  contentFit="cover"
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.memberNameText}>
+                    {m.uid === uid ? `${m.name || "You"} (Me)` : m.name || "Member"}
+                  </Text>
+                  <Text style={styles.memberEmailText}>{m.email || m.username || "bunkmate"}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* ─── BUDGET ─── */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionSectionHeader}>Budget</Text>
+              <TouchableOpacity style={styles.addPillBtn} onPress={() => setBudgetDrawerOpen(true)}>
+                <Text style={styles.addPillBtnText}>Edit</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.budgetText}>₹{usedAmount} used of ₹{totalBudget}</Text>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${budgetProgress}%` }]} />
+            </View>
+          </View>
+
+          {/* ─── DANGER ZONE ─── */}
+          <View style={[styles.sectionContainer, { paddingBottom: 24 }]}>
+            <TouchableOpacity
+              style={styles.deleteTripBtn}
+              onPress={() => setConfirmDeleteOpen(true)}
+            >
+              <Ionicons name="trash-outline" size={17} color="#ef4444" />
+              <Text style={styles.deleteTripText}>Delete Trip</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
 
@@ -938,8 +1153,9 @@ Return strictly raw JSON format without reasoning or explanation:
       <ShareDrawer
         shareDrawerOpen={shareDrawerOpen}
         setShareDrawerOpen={setShareDrawerOpen}
-        inviteLink={`https://bunkmates.app/join?trip=${id}`}
+        inviteLink={`https://bunk-mates.vercel.app/join?trip=${id}`}
         trip={trip}
+        memberDetails={memberDetails}
         mode="dark"
         setSnackbar={() => {}}
       />
@@ -952,7 +1168,6 @@ Return strictly raw JSON format without reasoning or explanation:
         mode="dark"
       />
 
-      {/* Settings drawer */}
       <SettingsDrawer
         settingsDrawerOpen={settingsDrawerOpen}
         setSettingsDrawerOpen={setSettingsDrawerOpen}
@@ -961,142 +1176,169 @@ Return strictly raw JSON format without reasoning or explanation:
         memberDetails={memberDetails}
         tripPermissions={{}}
         updatePermissions={() => {}}
-        promoteToAdmin={() => {}}
-        demoteAdmin={() => {}}
         mode="dark"
         setConfirmDeleteOpen={setConfirmDeleteOpen}
         getMemberName={getMemberName}
         currentUseruid={uid || ""}
-        displaySettings={{ layout: "list", gridCols: 1, listCols: 1, cardType: "regular" }}
-        updateDisplaySettings={() => {}}
       />
     </View>
   );
 }
 
-/* ──────── STYLES ──────── */
+/* ──────── STYLES (Matching Screenshots 1, 2, 3 & 4) ──────── */
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: "#050505",
+    backgroundColor: "#0c0e15",
   },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#050505",
+    backgroundColor: "#0c0e15",
   },
-  heroContainer: {
-    height: 340,
-  },
-  hero: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  heroGradient: {
+  topBarFixed: {
     position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  topBar: {
-    position: "absolute",
-    top: 48,
     left: 16,
     right: 16,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    zIndex: 99,
   },
-  headerBtn: {
+  mainScrollView: {
+    flex: 1,
+    backgroundColor: "#0c0e15",
+  },
+  heroScrollContainer: {
+    height: 400,
+    width: "100%",
+  },
+  hero: {
+    flex: 1,
+    width: "100%",
+    position: "relative",
+  },
+  heroTopGradient: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 120,
+  },
+  heroBottomGradient: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 140,
+  },
+  sheetContentWrap: {
+    backgroundColor: "#0c0e15",
+    marginTop: -32,
+    borderTopLeftRadius: 36,
+    borderTopRightRadius: 36,
+  },
+  backPill: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.4)",
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    gap: 4,
-    backdropFilter: "blur(20px)" as any,
+    backgroundColor: "rgba(18, 22, 32, 0.65)",
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.16)",
+    gap: 6,
   },
-  headerBtnText: {
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "600",
+  backPillText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
   },
   topRightBtns: {
     flexDirection: "row",
-    gap: 8,
+    gap: 10,
   },
-  iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(0,0,0,0.4)",
+  iconCircleBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(18, 22, 32, 0.65)",
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.16)",
   },
+
+  /* Weather Chip (Screenshot 1) */
   weatherChip: {
     position: "absolute",
-    bottom: 90,
+    bottom: 52,
     left: 16,
-    backgroundColor: "rgba(20,20,20,0.5)",
-    borderRadius: 16,
-    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(15, 18, 26, 0.65)",
+    borderRadius: 20,
+    paddingHorizontal: 16,
     paddingVertical: 10,
-    backdropFilter: "blur(20px)" as any,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.16)",
+    zIndex: 10,
   },
-  weatherTemp: {
-    color: "#fff",
+  weatherEmoji: {
+    fontSize: 22,
+    marginRight: 8,
+  },
+  weatherTextWrap: {
+    marginRight: 16,
+  },
+  weatherTempText: {
+    color: "#ffffff",
     fontSize: 18,
-    fontWeight: "700",
+    fontWeight: "800",
   },
-  weatherDesc: {
-    color: "rgba(255,255,255,0.7)",
+  weatherDescText: {
+    color: "rgba(255, 255, 255, 0.7)",
     fontSize: 11,
-    textTransform: "capitalize",
+    fontWeight: "500",
   },
-  weatherLoc: {
-    color: "rgba(255,255,255,0.5)",
-    fontSize: 10,
-    fontWeight: "700",
-    marginTop: 2,
+  weatherLocText: {
+    color: "rgba(255, 255, 255, 0.55)",
+    fontSize: 10.5,
+    fontWeight: "800",
+    letterSpacing: 0.5,
   },
-  scrollView: {
-    flex: 1,
-    marginTop: -20,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    backgroundColor: "#050505",
-  },
-  contentPad: {
+
+  tripInfoPad: {
     paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 8,
+    paddingTop: 26,
+    paddingBottom: 16,
   },
   tripTitle: {
     color: "#ffffff",
-    fontSize: 30,
+    fontSize: 34,
     fontWeight: "900",
-    letterSpacing: -0.5,
-    marginBottom: 10,
+    letterSpacing: -0.6,
+    marginBottom: 14,
   },
-  infoRow: {
+  metaRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginBottom: 6,
+    gap: 8,
+    marginBottom: 8,
   },
-  infoText: {
-    color: "#aaaaaa",
-    fontSize: 13,
+  metaText: {
+    color: "#a1a6b8",
+    fontSize: 13.5,
+    fontWeight: "500",
   },
-  routeBox: {
-    marginTop: 12,
+
+  /* Route Container (Screenshot 1) */
+  routeContainer: {
+    marginTop: 14,
   },
   routeLabel: {
-    color: "#888",
+    color: "rgba(255, 255, 255, 0.5)",
     fontSize: 12,
     fontWeight: "600",
     marginBottom: 4,
@@ -1108,262 +1350,291 @@ const styles = StyleSheet.create({
   },
   routeText: {
     color: "#ffffff",
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "800",
   },
-  mapsBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(255,255,255,0.12)",
+  navSquareBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
     alignItems: "center",
     justifyContent: "center",
   },
-  section: {
+
+  /* Sections */
+  sectionContainer: {
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderTopWidth: 0.5,
-    borderColor: "#1e1e1e",
+    paddingTop: 22,
+    paddingBottom: 8,
   },
-  sectionHeader: {
+  sectionHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 14,
-    flexWrap: "wrap",
-    gap: 8,
+    marginBottom: 16,
   },
-  sectionTitle: {
+  sectionMainTitle: {
     color: "#ffffff",
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: "800",
   },
-  aiBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "#00e6b0",
+  sectionSectionHeader: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "800",
+  },
+  discoverPlacesBtn: {
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.4)",
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: "rgba(0, 230, 176, 0.08)",
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
-  aiBtnText: {
-    color: "#00e6b0",
-    fontSize: 11,
+  discoverPlacesText: {
+    color: "#ffffff",
+    fontSize: 12,
     fontWeight: "800",
   },
-  addBtn: {
+  aiWhiteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.4)",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+  },
+  aiWhiteBtnText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  addPillBtn: {
     paddingHorizontal: 14,
     paddingVertical: 6,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
   },
-  addBtnText: {
+  addPillBtnText: {
     color: "#ffffff",
     fontSize: 12,
     fontWeight: "700",
   },
-  emptyText: {
-    color: "#666",
+  emptyCardBox: {
+    backgroundColor: "#141720",
+    borderRadius: 16,
+    padding: 18,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+  },
+  emptyCardText: {
+    color: "rgba(255, 255, 255, 0.45)",
     fontSize: 13,
     textAlign: "center",
-    marginVertical: 10,
+    lineHeight: 18,
   },
+  emptySimpleText: {
+    color: "rgba(255, 255, 255, 0.45)",
+    fontSize: 13,
+    marginVertical: 8,
+  },
+
+  /* Famous Places Cards (Screenshots 1 & 2) */
   placeCard: {
-    backgroundColor: "#111114",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 12,
+    backgroundColor: "#141720",
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
+    borderColor: "rgba(255, 255, 255, 0.08)",
   },
-  placeHeaderRow: {
+  placeTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 8,
+    alignItems: "center",
+    marginBottom: 10,
   },
-  placeName: {
+  placeTitle: {
     color: "#ffffff",
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "800",
     flex: 1,
     marginRight: 8,
   },
-  placeTagRow: {
+  placeTagsRow: {
     flexDirection: "row",
     gap: 8,
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  placeTagOutline: {
+  placeCategoryBadge: {
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
-    borderRadius: 20,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 3,
   },
-  placeTagOutlineText: {
-    color: "rgba(255,255,255,0.8)",
+  placeCategoryText: {
+    color: "rgba(255, 255, 255, 0.75)",
     fontSize: 11,
     fontWeight: "600",
   },
-  placeTagGreen: {
-    backgroundColor: "rgba(0, 230, 176, 0.15)",
-    borderRadius: 20,
+  placeTimeBadge: {
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 3,
   },
-  placeTagGreenText: {
-    color: "#00e6b0",
+  placeTimeText: {
+    color: "#ffffff",
     fontSize: 11,
     fontWeight: "700",
   },
   placeDesc: {
-    color: "#999",
+    color: "rgba(255, 255, 255, 0.65)",
     fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 12,
+    lineHeight: 19,
+    marginBottom: 14,
   },
   placeActionRow: {
     flexDirection: "row",
-    gap: 10,
+    gap: 12,
   },
-  placeActionBtnSolid: {
+  solidWhiteBtn: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#ffffff",
-    borderRadius: 10,
-    paddingVertical: 8,
+    borderRadius: 24,
+    height: 44,
   },
-  placeActionBtnSolidText: {
+  solidWhiteBtnText: {
     color: "#000000",
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "800",
   },
-  placeActionBtnOutline: {
-    flex: 1,
+
+  /* Checklist Items (Screenshot 3) */
+  checkItemRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
-    borderRadius: 10,
-    paddingVertical: 8,
-  },
-  placeActionBtnOutlineText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  checkRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    borderBottomWidth: 0.5,
-    borderColor: "#1e1e1e",
-  },
-  checkText: {
-    color: "#ffffff",
-    fontSize: 14,
-    flex: 1,
-  },
-  timelineCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    backgroundColor: "#111114",
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-  },
-  timelineTitle: {
-    color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "700",
-    marginBottom: 3,
-  },
-  timelineTime: {
-    color: "#888",
-    fontSize: 12,
-  },
-  viewAllBtn: {
-    marginTop: 14,
-    alignItems: "center",
-    backgroundColor: "#111114",
-    borderRadius: 20,
     paddingVertical: 12,
   },
-  viewAllBtnText: {
+  checkItemText: {
+    color: "#ffffff",
+    fontSize: 15,
+    fontWeight: "500",
+    flex: 1,
+  },
+  checkItemTextDone: {
+    textDecorationLine: "line-through",
+    color: "rgba(255, 255, 255, 0.35)",
+  },
+  viewAllDarkBtn: {
+    marginTop: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderRadius: 22,
+    height: 44,
+  },
+  viewAllDarkText: {
     color: "#ffffff",
     fontSize: 13,
     fontWeight: "700",
   },
-  memberRow: {
+
+  /* Timeline Items (Screenshots 3 & 4) */
+  timelineCardBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#141720",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.06)",
+  },
+  timelineTitleText: {
+    color: "#ffffff",
+    fontSize: 14.5,
+    fontWeight: "700",
+    marginBottom: 3,
+  },
+  timelineTitleDone: {
+    textDecorationLine: "line-through",
+    color: "rgba(255, 255, 255, 0.35)",
+  },
+  timelineTimeText: {
+    color: "rgba(255, 255, 255, 0.5)",
+    fontSize: 12,
+  },
+
+  /* Members (Screenshot 4) */
+  memberItemRow: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 14,
   },
-  memberAvatar: {
+  memberAvatarImg: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    marginRight: 12,
-    backgroundColor: "#222",
+    marginRight: 14,
+    backgroundColor: "#1c2130",
   },
-  memberName: {
+  memberNameText: {
     color: "#ffffff",
     fontWeight: "700",
-    fontSize: 14,
+    fontSize: 14.5,
   },
-  memberEmail: {
-    color: "#888",
+  memberEmailText: {
+    color: "rgba(255, 255, 255, 0.5)",
     fontSize: 12,
-    marginTop: 1,
+    marginTop: 2,
   },
-  inviteBtn: {
-    marginTop: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-    borderRadius: 14,
-    paddingVertical: 13,
-    alignItems: "center",
-  },
-  inviteBtnText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "700",
-  },
+
+  /* Budget */
   budgetText: {
-    color: "#aaa",
+    color: "rgba(255, 255, 255, 0.65)",
     fontSize: 13,
     marginBottom: 8,
   },
   progressTrack: {
     height: 5,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
     borderRadius: 3,
     overflow: "hidden",
   },
   progressFill: {
     height: "100%",
-    backgroundColor: "#00e6b0",
+    backgroundColor: "#ffffff",
     borderRadius: 3,
   },
-  deleteBtn: {
+
+  /* Danger Zone */
+  deleteTripBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#ff4444",
-    borderRadius: 14,
-    paddingVertical: 13,
+    borderColor: "rgba(239, 68, 68, 0.4)",
+    borderRadius: 16,
+    height: 48,
+    backgroundColor: "rgba(239, 68, 68, 0.08)",
   },
-  deleteBtnText: {
-    color: "#ff4444",
-    fontSize: 13,
+  deleteTripText: {
+    color: "#ef4444",
+    fontSize: 13.5,
     fontWeight: "700",
   },
 });

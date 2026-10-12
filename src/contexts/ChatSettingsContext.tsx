@@ -12,6 +12,7 @@ import React, {
   useCallback,
   ReactNode,
 } from "react";
+import type { ImageSourcePropType } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { doc, onSnapshot, updateDoc, collection, getDocs, deleteDoc } from "firebase/firestore";
@@ -19,15 +20,18 @@ import { auth, db } from "../lib/firebase";
 
 export type ChatTheme = "system" | "light" | "dark";
 export type DisappearingTimer = "off" | "24h" | "7d" | "30d" | "90d";
+export const DEFAULT_WALLPAPER_ASSET = require("../../assets/images/chatbg/1.jpeg");
 
 export interface WallpaperOption {
   id: string;
   name: string;
   category: "minimal" | "nature" | "space" | "urban";
   uri: string;
+  label: string;
+  asset: ImageSourcePropType;
 }
 
-export const wallpaperList: WallpaperOption[] = [
+const wallpaperPresets: Omit<WallpaperOption, "label" | "asset">[] = [
   { id: "default", name: "Default (Theme Dynamic)", category: "minimal", uri: "" },
   { id: "space1", name: "Deep Cosmos", category: "space", uri: "https://images.unsplash.com/photo-1503023345310-bd7c1de61c7d" },
   { id: "nebula1", name: "Stellar Nebula", category: "space", uri: "https://images.unsplash.com/photo-1478720568477-152d9b164e26" },
@@ -41,6 +45,59 @@ export const wallpaperList: WallpaperOption[] = [
   { id: "city1", name: "Neon Metropolis", category: "urban", uri: "https://images.unsplash.com/photo-1492528459143-9e8efeb3c23b" },
   { id: "redmountain", name: "Crimson Ridge", category: "nature", uri: "https://images.unsplash.com/photo-1549888834-0e916ee2bfdc" },
 ];
+
+export const wallpaperList: WallpaperOption[] = wallpaperPresets.map((wallpaper) => ({
+  ...wallpaper,
+  label: wallpaper.name,
+  asset: wallpaper.uri ? { uri: wallpaper.uri } : DEFAULT_WALLPAPER_ASSET,
+}));
+
+const bundledWallpaperSources: Record<string, ImageSourcePropType> = {
+  "local:chatbg:1": require("../../assets/images/chatbg/1.jpeg"),
+  "local:chatbg:2": require("../../assets/images/chatbg/2.jpeg"),
+  "local:chatbg:3": require("../../assets/images/chatbg/3.jpeg"),
+  "local:chatbg:4": require("../../assets/images/chatbg/4.jpeg"),
+  "local:chatbg:5": require("../../assets/images/chatbg/5.jpeg"),
+  "local:chatbg:6": require("../../assets/images/chatbg/6.jpeg"),
+  "local:chatbg:7": require("../../assets/images/chatbg/7.jpeg"),
+  "local:chatbg:8": require("../../assets/images/chatbg/8.jpeg"),
+  "local:chatbg:9": require("../../assets/images/chatbg/9.jpeg"),
+  "local:chatbg:10": require("../../assets/images/chatbg/10.jpeg"),
+  "local:chatbg:11": require("../../assets/images/chatbg/11.jpeg"),
+  "local:chatbg:12": require("../../assets/images/chatbg/12.jpeg"),
+  "local:chatbg:13": require("../../assets/images/chatbg/13.jpeg"),
+  "local:chatbg:light": require("../../assets/images/chatbg/light.png"),
+};
+
+export const getWallpaperSource = (
+  wallpaperIdOrUri: string | null | undefined
+): ImageSourcePropType => {
+  if (!wallpaperIdOrUri || wallpaperIdOrUri === "default") {
+    return DEFAULT_WALLPAPER_ASSET;
+  }
+
+  const value = wallpaperIdOrUri.trim();
+  const legacySource = bundledWallpaperSources[value];
+  if (legacySource) return legacySource;
+
+  const preset = wallpaperList.find(
+    (wallpaper) => wallpaper.id === value || wallpaper.uri === value
+  );
+  if (preset) return preset.asset;
+
+  if (
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("file:") ||
+    value.startsWith("content:") ||
+    value.startsWith("data:") ||
+    value.startsWith("/")
+  ) {
+    return { uri: value };
+  }
+
+  return DEFAULT_WALLPAPER_ASSET;
+};
 
 export interface ChatPreferences {
   wallpaper: string;

@@ -23,6 +23,18 @@ In the output, you'll find options to open the app in a
 - [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
 - [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
 
+## Firebase Functions secrets
+
+Trip AI and OneSignal push delivery use server-side Firebase Functions secrets. Revoke any previously exposed provider keys, then set replacement keys and deploy the functions:
+
+```bash
+firebase functions:secrets:set GROQ_API_KEY
+firebase functions:secrets:set ONESIGNAL_REST_API_KEY
+firebase deploy --only functions
+```
+
+Enter the rotated provider keys when prompted. Do not add them to the app or commit them to the repository. Users can alternatively provide their own Groq key in AI settings.
+
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
 ## Get a fresh project

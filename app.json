@@ -1,19 +1,95 @@
 {
   "expo": {
-    "name": "bunkmates-v2",
+    "name": "BunkMates",
     "slug": "bunkmates-v2",
     "version": "1.0.0",
+    "description": "BunkMates - Ultimate travel and trip planning app for friends, trips, and bunking together.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "bunkmates",
-    "owner": "iam_sahilsuman",
+    "owner": "mohithac",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.bm.bunkmates",
+      "infoPlist": {
+        "LSApplicationCategoryType": "public.app-category.travel"
+      },
+      "associatedDomains": [
+        "applinks:bunk-mates-beccc.firebaseapp.com",
+        "applinks:bunk-mates-beccc.web.app",
+        "applinks:bunk-mates.vercel.app",
+        "applinks:app.bunkmates.xyz",
+        "applinks:bunkmates.xyz"
+      ]
     },
     "android": {
       "package": "com.bm.bunkmates",
       "googleServicesFile": "./google-services.json",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "bunk-mates-beccc.firebaseapp.com"
+            },
+            {
+              "scheme": "https",
+              "host": "bunk-mates-beccc.web.app"
+            },
+            {
+              "scheme": "https",
+              "host": "bunk-mates.vercel.app"
+            },
+            {
+              "scheme": "https",
+              "host": "app.bunkmates.xyz"
+            },
+            {
+              "scheme": "https",
+              "host": "bunkmates.xyz"
+            },
+            {
+              "scheme": "http",
+              "host": "bunk-mates-beccc.firebaseapp.com"
+            },
+            {
+              "scheme": "http",
+              "host": "bunk-mates-beccc.web.app"
+            },
+            {
+              "scheme": "http",
+              "host": "bunk-mates.vercel.app"
+            },
+            {
+              "scheme": "http",
+              "host": "app.bunkmates.xyz"
+            },
+            {
+              "scheme": "http",
+              "host": "bunkmates.xyz"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "geo"
+            }
+          ],
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ]
+        }
+      ],
       "permissions": [
         "NOTIFICATIONS",
         "CAMERA",
@@ -50,11 +126,21 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      [
+        "onesignal-expo-plugin",
+        {
+          "mode": "development"
+        }
+      ],
       "expo-router",
       "expo-web-browser",
-      "expo-sharing",
-      "expo-notifications",
-      "@react-native-google-signin/google-signin",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#00e6b0"
+        }
+      ],
       "expo-image",
       "expo-splash-screen",
       [
@@ -64,7 +150,8 @@
           "microphonePermission": "Allow BunkMates to access your microphone for voice calls.",
           "recordAudioAndroid": true
         }
-      ]
+      ],
+      "./scripts/withIncomingCall.js"
     ],
     "experiments": {
       "typedRoutes": true
@@ -72,7 +159,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "9ab7093d-32f1-4cb6-a7b3-67f82abf1b65"
+        "projectId": "ae9166e7-8f27-477b-b829-7f007e1c91da"
       }
     }
   }

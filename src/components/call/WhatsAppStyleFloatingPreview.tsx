@@ -10,6 +10,7 @@ import {
   Dimensions,
   Platform,
   Easing,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -264,14 +265,19 @@ export default function WhatsAppStyleFloatingPreview({
             style={StyleSheet.absoluteFill}
             objectFit="cover"
             mirror={facing === "front"}
-            zOrder={1}
+            zOrder={2}
           />
         ) : (
-          <CameraView
-            style={StyleSheet.absoluteFill}
-            facing={facing}
-            mirror={facing === "front"}
-          />
+          <View style={styles.pipAvatarPlaceholder}>
+            <Image
+              source={{ uri: currentUserAvatar || "https://i.pravatar.cc/150" }}
+              style={styles.pipAvatar}
+            />
+            <View style={styles.pipCamConnectingBadge}>
+              <ActivityIndicator size="small" color="#00e6b0" />
+              <Text style={styles.pipConnectingText}>Starting cam...</Text>
+            </View>
+          </View>
         )}
 
         {/* WhatsApp-Style Illustrative Overlay Filter */}
@@ -323,7 +329,7 @@ export default function WhatsAppStyleFloatingPreview({
             hitSlop={8}
           >
             <MaterialCommunityIcons
-              name="wand"
+              name={"wand" as any}
               size={14}
               color={filtersActive ? "#25D366" : "#ffffff"}
             />
@@ -337,9 +343,12 @@ export default function WhatsAppStyleFloatingPreview({
 const styles = StyleSheet.create({
   pipContainer: {
     position: "absolute",
+    top: 0,
+    left: 0,
     width: PIP_WIDTH,
     height: PIP_HEIGHT,
-    zIndex: 999,
+    zIndex: 9999,
+    elevation: 9999,
   },
   pipContentBox: {
     width: PIP_WIDTH,
@@ -395,6 +404,21 @@ const styles = StyleSheet.create({
   },
   pipOffText: {
     color: "#ff5252",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  pipCamConnectingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginTop: 6,
+  },
+  pipConnectingText: {
+    color: "#00e6b0",
     fontSize: 9,
     fontWeight: "700",
   },

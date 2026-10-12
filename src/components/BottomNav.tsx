@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Pressable,
@@ -8,14 +8,18 @@ import {
   Dimensions,
   Text,
   ActivityIndicator,
+  Animated,
+  Keyboard,
 } from "react-native";
 import { BlurView } from "./ui/AppBlurView";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, usePathname } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUser } from "../contexts/UserContext";
 import { useThemeToggle } from "../contexts/ThemeContext";
 import { db } from "../lib/firebase";
 import { doc, onSnapshot } from "firebase/firestore";
+import * as Haptics from "expo-haptics";
 
 import { useAppSettings } from "../contexts/AppSettingsContext";
 
@@ -24,130 +28,191 @@ const { width } = Dimensions.get("window");
 export default function BottomNav() {
   const router = useRouter();
   const pathname = usePathname();
+  const insets = useSafeAreaInsets();
   const { user, userData } = useUser();
-  const { isDark, themeColors, accentColor } = useThemeToggle();
-  const { largeTouchTargets, triggerHaptic, highContrastMode } = useAppSettings();
+  const [profile, setProfile] = useState<any>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
-  // Efficiently derive profile from UserContext with zero duplicate Firestore snapshots
-  const profile = userData || user;
+  // Keyboard listener for responsive floating above keyboard (Image 3)
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // Sync profile data in real time
+  useEffect(() => {
+    if (!user?.uid) {
+      setProfile(null);
+      setProfileLoading(false);
+      return;
+    }
+    setProfileLoading(true);
+    const ref = doc(db, "users", user.uid);
+    const unsub = onSnapshot(ref, (snap) => {
+      if (snap.exists()) {
+        setProfile(snap.data());
+      } else {
+        setProfile(null);
+      }
+      setProfileLoading(false);
+    });
+    return () => unsub();
+  }, [user]);
+
+  // Hide bottom navigation on full-screen chats
+  if (pathname.includes("group-chatroom") || pathname.includes("chat/")) {
+    return null;
+  }
 
   const isActive = (route: string) => {
     const trimmed = route.replace("/(tabs)", "");
     return pathname.includes(route) || pathname.includes(trimmed);
   };
 
-  const NavItem = ({ route, icon, label }: { route: string; icon: string; label: string }) => {
+  const NavItem = ({
+    route,
+    icon,
+  }: {
+    route: string;
+    icon: string;
+  }) => {
     const active = isActive(route);
+    const scaleAnim = useRef(new Animated.Value(active ? 1.05 : 1)).current;
+
+    useEffect(() => {
+      Animated.spring(scaleAnim, {
+        toValue: active ? 1.05 : 1,
+        useNativeDriver: true,
+        friction: 6,
+        tension: 80,
+      }).start();
+    }, [active]);
+
+    const handlePress = () => {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (e) {}
+
+      // Press down animation
+      Animated.sequence([
+        Animated.timing(scaleAnim, {
+          toValue: 0.92,
+          duration: 80,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1.05,
+          friction: 5,
+          tension: 80,
+          useNativeDriver: true,
+        }),
+      ]).start();
+
+      const path = route.replace("/(tabs)", "");
+      router.push(path as any);
+    };
 
     return (
       <Pressable
-        onPress={() => {
-          triggerHaptic("selection");
-          const path = route.replace("/(tabs)", "");
-          router.navigate(path as any);
-        }}
-        hitSlop={largeTouchTargets ? { top: 14, bottom: 14, left: 14, right: 14 } : { top: 6, bottom: 6, left: 6, right: 6 }}
-        accessible={true}
-        accessibilityRole="tab"
-        accessibilityLabel={label}
-        accessibilityState={{ selected: active }}
-        style={[
-          styles.navItem,
-          active && [
-            styles.activeItemPill,
-            {
-              backgroundColor: accentColor,
-            },
-          ],
-        ]}
+        onPress={handlePress}
+        style={styles.navItemTouchTarget}
+        hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
       >
-        <Ionicons
-          name={active ? (icon as any) : ((icon + "-outline") as any)}
-          size={22}
-          color={
-            active
-              ? "#FFFFFF"
-              : isDark
-              ? "rgba(255, 255, 255, 0.55)"
-              : "rgba(0, 0, 0, 0.45)"
-          }
-        />
+        <Animated.View
+          style={[
+            styles.navItemPill,
+            active && styles.activeItemPill,
+            { transform: [{ scale: scaleAnim }] },
+          ]}
+        >
+          <Ionicons
+            name={active ? (icon as any) : ((icon + "-outline") as any)}
+            size={22}
+            color={active ? "#000000" : "rgba(255, 255, 255, 0.65)"}
+          />
+        </Animated.View>
       </Pressable>
     );
   };
 
-  return (
-    <View style={styles.outerContainer}>
-      {/* Main Navigation Pill */}
-      <BlurView
-        intensity={40}
-        tint={isDark ? "dark" : "light"}
-        style={[
-          styles.navPillContainer,
-          {
-            backgroundColor: isDark
-              ? "rgba(20, 20, 20, 0.45)"
-              : "rgba(255, 255, 255, 0.65)",
-          },
-        ]}
-      >
-        <NavItem route="/home" icon="home" label="Home Tab" />
-        <NavItem route="/notes" icon="document-text" label="Notes Tab" />
-        <NavItem route="/trips" icon="compass" label="Trips Tab" />
-        <NavItem route="/chats" icon="chatbubble" label="Chats Tab" />
-      </BlurView>
+  const bottomOffset =
+    keyboardHeight > 0
+      ? keyboardHeight + 8
+      : Math.max(insets.bottom, 10) + 8;
 
-      {/* Standalone Profile Button */}
-      <Pressable
-        style={[
-          styles.avatarWrapper,
-          {
-            backgroundColor: isDark
-              ? "rgba(255, 255, 255, 0.08)"
-              : "rgba(0, 0, 0, 0.06)",
-          },
-          highContrastMode && {
-            borderColor: isDark ? "#FFFFFF" : "#000000",
-            borderWidth: 1.5,
-          },
-        ]}
-        hitSlop={largeTouchTargets ? { top: 14, bottom: 14, left: 14, right: 14 } : { top: 6, bottom: 6, left: 6, right: 6 }}
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel="Profile & Settings"
-        onPress={() => {
-          triggerHaptic("selection");
-          router.push("/ProfileSettings" as any);
-        }}
-      >
-        {profile?.photoURL || user?.photoURL || userData?.photoURL ? (
-          <Image
-            source={{
-              uri:
-                profile?.photoURL ||
-                user?.photoURL ||
-                userData?.photoURL ||
-                undefined,
-            }}
-            style={styles.navAvatar}
-          />
-        ) : (
-          <View
-            style={[
-              styles.navAvatar,
-              styles.initialAvatar,
-              { backgroundColor: accentColor },
-            ]}
-          >
-            <Text style={styles.initialText}>
-              {(profile?.name ||
-                userData?.name ||
-                user?.displayName ||
-                "?")[0]?.toUpperCase()}
-            </Text>
-          </View>
-        )}
-      </Pressable>
+  const userInitial = (
+    profile?.name ||
+    profile?.displayName ||
+    userData?.name ||
+    userData?.displayName ||
+    user?.displayName ||
+    "M"
+  )[0]?.toUpperCase();
+
+  const userPhoto =
+    profile?.photoURL ||
+    user?.photoURL ||
+    userData?.photoURL ||
+    null;
+
+  return (
+    <View
+      style={[
+        styles.outerContainer,
+        {
+          bottom: bottomOffset,
+        },
+      ]}
+      pointerEvents="box-none"
+    >
+      <View style={styles.dockRow}>
+        {/* Main Glossy Navigation Capsule Dock */}
+        <View style={styles.dockGlassWrapper}>
+          <BlurView intensity={70} tint="dark" style={styles.navPillContainer}>
+            <NavItem route="/home" icon="home" />
+            <NavItem route="/notes" icon="document-text" />
+            <NavItem route="/trips" icon="compass" />
+            <NavItem route="/chats" icon="chatbubble" />
+          </BlurView>
+        </View>
+
+        {/* Standalone Circular Profile Pod */}
+        <Pressable
+          style={styles.avatarGlassWrapper}
+          onPress={() => {
+            try {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            } catch (e) {}
+            router.push("/ProfileSettings" as any);
+          }}
+          hitSlop={8}
+        >
+          <BlurView intensity={70} tint="dark" style={styles.avatarPillContainer}>
+            {profileLoading ? (
+              <ActivityIndicator color="#ffffff" size="small" />
+            ) : userPhoto ? (
+              <Image source={{ uri: userPhoto }} style={styles.navAvatar} />
+            ) : (
+              <View style={[styles.navAvatar, styles.initialAvatar]}>
+                <Text style={styles.initialText}>{userInitial}</Text>
+              </View>
+            )}
+          </BlurView>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -155,89 +220,104 @@ export default function BottomNav() {
 const styles = StyleSheet.create({
   outerContainer: {
     position: "absolute",
-    bottom: Platform.OS === "ios" ? 34 : 20,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 999,
+  },
+  dockRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     width: "100%",
-    paddingHorizontal: 20,
-    zIndex: 20,
+    maxWidth: 345,
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  dockGlassWrapper: {
+    flex: 1,
+    borderRadius: 32,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderTopColor: "rgba(255, 255, 255, 0.22)",
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.55,
+    shadowRadius: 18,
+    elevation: 12,
   },
   navPillContainer: {
     flexDirection: "row",
-    borderRadius: 35,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    height: 64,
-    flex: 1,
-    marginRight: 12,
     alignItems: "center",
-    justifyContent: "space-around",
-    overflow: "hidden",
-    borderWidth: 0,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.12,
-        shadowRadius: 12,
-      },
-      android: {
-        elevation: 4,
-      },
-      web: {
-        boxShadow: "0 4px 16px rgba(0,0,0,0.1)",
-      },
-    }),
+    justifyContent: "space-between",
+    paddingHorizontal: 6,
+    paddingVertical: 5,
+    height: 56,
   },
-  navItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    justifyContent: "center",
+  navItemTouchTarget: {
+    flex: 1,
     alignItems: "center",
+    justifyContent: "center",
+  },
+  navItemPill: {
+    height: 40,
+    width: 56,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
   },
   activeItemPill: {
-    borderRadius: 24,
-    height: 48,
-    width: 60,
+    backgroundColor: "#e5e7eb", // Soft glossy light off-white from images 1 & 2
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  avatarWrapper: {
+  avatarGlassWrapper: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    justifyContent: "center",
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderTopColor: "rgba(255, 255, 255, 0.22)",
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.55,
+    shadowRadius: 18,
+    elevation: 12,
     alignItems: "center",
-    borderWidth: 0,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 3,
-      },
-      web: {
-        boxShadow: "0 3px 12px rgba(0,0,0,0.08)",
-      },
-    }),
+    justifyContent: "center",
+  },
+  avatarPillContainer: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
   },
   navAvatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    borderWidth: 0,
-    backgroundColor: "transparent",
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+    backgroundColor: "#1c2026",
     overflow: "hidden",
   },
   initialAvatar: {
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "#00a884", // Vibrant teal green from Image 1 & 2
   },
   initialText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
+    color: "#ffffff",
+    fontSize: 17,
+    fontWeight: "800",
   },
 });

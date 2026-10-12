@@ -1,8 +1,10 @@
-// contexts/UserContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { AppState } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, serverTimestamp, deleteField } from 'firebase/firestore';
+import { loginOneSignalUser, logoutOneSignalUser } from '../lib/onesignal';
 
 interface UserContextType {
   user: any; // Firebase Auth user
@@ -48,19 +50,18 @@ export const UserProvider = ({ children }: UserProviderProps) => {
     return () => unsubscribe();
   }, []);
 
-  // **@** Keep session active whenever app comes to foreground on any device
+  // Guarantee OneSignal is linked to user's Firebase UID whenever user exists
   useEffect(() => {
-    if (!user?.uid) return;
-    recordDeviceSessionInFirestore(user).catch(console.error);
-
-    const sub = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active' && user?.uid) {
-        recordDeviceSessionInFirestore(user).catch(console.error);
-      }
-    });
-
-    return () => sub.remove();
-  }, [user]);
+    if (user?.uid) {
+      loginOneSignalUser(user.uid);
+      // Clean up legacy expoPushToken so Cloud Functions never double-push
+      updateDoc(doc(db, 'users', user.uid), {
+        expoPushToken: deleteField(),
+      }).catch(() => {});
+    } else if (!loading && !user) {
+      logoutOneSignalUser();
+    }
+  }, [user?.uid, loading]);
 
   // fetch the Firestore document whenever an authenticated user is available
   useEffect(() => {
@@ -68,16 +69,63 @@ export const UserProvider = ({ children }: UserProviderProps) => {
       return;
     }
 
+    // 1. Immediately hydrate cached profile offline
+    AsyncStorage.getItem(`@bunkmates_cached_profile_${user.uid}`).then((cached) => {
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && typeof parsed === 'object') {
+            setUserData((prev: any) => prev || parsed);
+          }
+        } catch (e) {}
+      }
+    });
+
+    // 2. Real-time Firestore sync
     const ref = doc(db, 'users', user.uid);
     const unsub = onSnapshot(ref, (snap) => {
       if (snap.exists()) {
-        setUserData(snap.data());
+        const data = snap.data();
+        setUserData(data);
+        AsyncStorage.setItem(`@bunkmates_cached_profile_${user.uid}`, JSON.stringify(data)).catch(() => {});
       } else {
         setUserData(null);
       }
     });
 
-    return () => unsub();
+    // Mark current user online in Firestore
+    updateDoc(ref, {
+      online: true,
+      isOnline: true,
+      lastSeen: serverTimestamp(),
+    }).catch(() => {});
+
+    // Listen to AppState (active vs background)
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        updateDoc(ref, {
+          online: true,
+          isOnline: true,
+          lastSeen: serverTimestamp(),
+        }).catch(() => {});
+      } else {
+        updateDoc(ref, {
+          online: false,
+          isOnline: false,
+          lastSeen: serverTimestamp(),
+        }).catch(() => {});
+      }
+    });
+
+    return () => {
+      unsub();
+      appStateSub.remove();
+      updateDoc(ref, {
+        online: false,
+        isOnline: false,
+        lastSeen: serverTimestamp(),
+      }).catch(() => {});
+    };
   }, [user]);
 
   return (

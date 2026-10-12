@@ -9,14 +9,14 @@ export const pickImage = async () => {
   }
 
   const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    mediaTypes: ['images'],
     allowsEditing: true,
     aspect: [4, 3],
     quality: 0.7,
     base64: true,
   });
 
-  if (!result.cancelled) {
+  if (!result.canceled) {
     return result;
   }
   return null;
@@ -30,14 +30,14 @@ export const takePhoto = async () => {
   }
 
   const result = await ImagePicker.launchCameraAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    mediaTypes: ['images'],
     allowsEditing: true,
     aspect: [4, 3],
     quality: 0.7,
     base64: true,
   });
 
-  if (!result.cancelled) {
+  if (!result.canceled) {
     return result;
   }
   return null;

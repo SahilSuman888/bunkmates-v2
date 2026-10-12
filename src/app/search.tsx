@@ -6,29 +6,27 @@ import {
   TextInput,
   Pressable,
   Text,
-  Image,
   Modal,
-  SafeAreaView,
   StatusBar,
   ActivityIndicator,
   Dimensions,
 } from "react-native";
+import { Image as ExpoImage } from "expo-image";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useUser } from "../contexts/UserContext";
 import { db } from "../lib/firebase";
+import Animated, { FadeIn } from "react-native-reanimated";
 import {
   collection,
   getDocs,
   query,
   where,
 } from "firebase/firestore";
-// **@** Import Animated and FadeIn from react-native-reanimated
-import Animated, { FadeIn } from "react-native-reanimated";
 import { MotiView } from "moti";
 import placesData from "./data/data.json";
-import { useLanguage } from "../contexts/LanguageContext";
-import { useThemeToggle } from "../contexts/ThemeContext";
+import { searchTravelEngine, getFallbackPhoto } from "../services/travelSearchEngine";
 
 const { width } = Dimensions.get("window");
 
@@ -42,7 +40,12 @@ export default function SearchScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("all");
-  const [results, setResults] = useState<{ users: any[]; places: any[]; trips: any[] }>({ users: [], places: [], trips: [] });
+  const [results, setResults] = useState<{
+    users: any[];
+    places: any[];
+    food: any[];
+    trips: any[];
+  }>({ users: [], places: [], food: [], trips: [] });
   const [loading, setLoading] = useState(false);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [selectedItem, setSelectedItem] = useState<any>(null);
@@ -69,7 +72,7 @@ export default function SearchScreen() {
   useEffect(() => {
     const performSearch = async () => {
       if (!searchQuery.trim()) {
-        setResults({ users: [], places: [], trips: [] });
+        setResults({ users: [], places: [], food: [], trips: [] });
         return;
       }
 
@@ -77,7 +80,7 @@ export default function SearchScreen() {
       try {
         const term = searchQuery.toLowerCase();
 
-        // Search Users
+        // 1. Search Users
         const usersSnap = await getDocs(collection(db, "users"));
         const userResults = usersSnap.docs
           .map(doc => ({ id: doc.id, uid: doc.id, ...doc.data() } as any))
@@ -89,15 +92,15 @@ export default function SearchScreen() {
             return searchIn.includes(term);
           });
 
-        // Search Places
-        const placeResults = allPlaces.filter(p => {
+        // 2. Search Static Places from JSON
+        const staticPlaceResults = allPlaces.filter(p => {
           const searchIn = [p.name, p.districtName, p.stateName, p.description]
             .join(" ")
             .toLowerCase();
           return searchIn.includes(term);
         });
 
-        // Search Trips
+        // 3. Search Trips
         let tripResults: any[] = [];
         if (user) {
           const tripsSnap = await getDocs(
@@ -114,7 +117,84 @@ export default function SearchScreen() {
             });
         }
 
-        setResults({ users: userResults, places: placeResults, trips: tripResults });
+        // 4. BunkMates Intelligent Travel & Food Engine (Gemini Flash-Lite + Wikimedia + Curated)
+        let discoveryPlaces: any[] = [];
+        let discoveryFood: any[] = [];
+
+        if (term.length >= 3) {
+          try {
+            const engineCategory = activeTab === "food" ? "food" : activeTab === "places" ? "places" : "all";
+            const engineResponse = await searchTravelEngine(
+              searchQuery,
+              engineCategory,
+              8
+            );
+
+            if (Array.isArray(engineResponse.results)) {
+              engineResponse.results.forEach(item => {
+                const mappedItem = {
+                  placeId: item.id,
+                  id: item.id,
+                  name: item.name,
+                  category: item.category,
+                  type: item.category,
+                  city: item.city,
+                  state: item.state,
+                  districtName: item.city || item.name,
+                  stateName: item.state || "",
+                  rating: item.rating,
+                  reviewCount: item.reviewCount,
+                  description: item.detailedOverview || item.highlight,
+                  highlight: item.highlight,
+                  detailedOverview: item.detailedOverview,
+                  highlightsList: item.highlightsList,
+                  timing: item.timing,
+                  entryFee: item.entryFee,
+                  entryFees: item.entryFees,
+                  approxCost: item.approxCost,
+                  bestTimeToVisit: item.bestTimeToVisit,
+                  bestTimeReason: item.bestTimeReason,
+                  season: item.season || "October to March (Winter)",
+                  seasonReason: item.seasonReason,
+                  images: Array.isArray(item.images) && item.images.length > 0 ? item.images : [item.imageUrl].filter(Boolean),
+                  imageUrl: item.imageUrl,
+                  imageThumbnail: item.imageThumbnail,
+                  fallbackImageUrl: item.fallbackImageUrl || item.imageUrl,
+                  tags: item.tags,
+                  isDiscovery: true,
+                };
+
+                const catLower = (item.category || "").toLowerCase();
+                if (
+                  catLower.includes("food") ||
+                  catLower.includes("cafe") ||
+                  catLower.includes("restaurant")
+                ) {
+                  discoveryFood.push(mappedItem);
+                } else {
+                  discoveryPlaces.push(mappedItem);
+                }
+              });
+            }
+          } catch (engineErr) {
+            console.warn("Travel engine lookup warning:", engineErr);
+          }
+        }
+
+        // Combine static places and discovery places (deduplicated by name)
+        const combinedPlaces = [...staticPlaceResults];
+        discoveryPlaces.forEach(dp => {
+          if (!combinedPlaces.some(p => p.name.toLowerCase() === dp.name.toLowerCase())) {
+            combinedPlaces.push(dp);
+          }
+        });
+
+        setResults({
+          users: userResults,
+          places: combinedPlaces,
+          food: discoveryFood,
+          trips: tripResults,
+        });
 
         // Add to history
         setSearchHistory(prev => [
@@ -128,21 +208,23 @@ export default function SearchScreen() {
       }
     };
 
-    const debounce = setTimeout(performSearch, 300);
+    const debounce = setTimeout(performSearch, 500);
     return () => clearTimeout(debounce);
-  }, [searchQuery, user, allPlaces]);
+  }, [searchQuery, user, allPlaces, activeTab]);
 
   const filteredResults = useMemo(() => {
     if (activeTab === "all") {
       return [
-        ...results.users.slice(0, 5),
         ...results.places.slice(0, 5),
+        ...results.food.slice(0, 5),
+        ...results.users.slice(0, 5),
         ...results.trips.slice(0, 5),
       ];
     }
     const typeMap: Record<string, keyof typeof results> = {
       users: "users",
       places: "places",
+      food: "food",
       trips: "trips",
     };
     return results[typeMap[activeTab]] || [];
@@ -245,7 +327,7 @@ export default function SearchScreen() {
                   showsHorizontalScrollIndicator={false}
                   style={styles.tabsContainer}
                 >
-                  {["all", "users", "places", "trips"].map(tab => (
+                  {["all", "places", "food", "users", "trips"].map(tab => (
                     <Pressable
                       key={tab}
                       onPress={() => setActiveTab(tab)}
@@ -271,11 +353,41 @@ export default function SearchScreen() {
               {searchQuery ? (
                 loading ? (
                   <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={accentColor} />
+                    <ActivityIndicator size="large" color="#ffffff" />
                   </View>
                 ) : filteredResults.length > 0 ? (
                   <View>
-                    {results.users.length > 0 && (
+                    {(activeTab === "all" || activeTab === "places") && results.places.length > 0 && (
+                      <View style={styles.groupContainer}>
+                        <Text style={styles.groupTitle}>Places & Sights ({results.places.length})</Text>
+                        {results.places.slice(0, activeTab === "all" ? 5 : 50).map((place, i) => (
+                          <ResultCard
+                            key={place.placeId || place.id}
+                            item={place}
+                            index={i}
+                            onPress={() => handleResultPress(place, "place")}
+                            icon="map-marker"
+                          />
+                        ))}
+                      </View>
+                    )}
+
+                    {(activeTab === "all" || activeTab === "food") && results.food.length > 0 && (
+                      <View style={styles.groupContainer}>
+                        <Text style={styles.groupTitle}>Food, Cafes & Drinks ({results.food.length})</Text>
+                        {results.food.slice(0, activeTab === "all" ? 5 : 50).map((foodItem, i) => (
+                          <ResultCard
+                            key={foodItem.placeId || foodItem.id}
+                            item={foodItem}
+                            index={i}
+                            onPress={() => handleResultPress(foodItem, "place")}
+                            icon="silverware-fork-knife"
+                          />
+                        ))}
+                      </View>
+                    )}
+
+                    {(activeTab === "all" || activeTab === "users") && results.users.length > 0 && (
                       <View style={styles.groupContainer}>
                         <Text style={styles.groupTitle}>{t("Users")} ({results.users.length})</Text>
                         {results.users.slice(0, activeTab === "all" ? 5 : 50).map((user, i) => (
@@ -290,22 +402,7 @@ export default function SearchScreen() {
                       </View>
                     )}
 
-                    {results.places.length > 0 && (
-                      <View style={styles.groupContainer}>
-                        <Text style={styles.groupTitle}>{t("Places")} ({results.places.length})</Text>
-                        {results.places.slice(0, activeTab === "all" ? 5 : 50).map((place, i) => (
-                          <ResultCard
-                            key={place.placeId}
-                            item={place}
-                            index={i}
-                            onPress={() => handleResultPress(place, "place")}
-                            icon="map-marker"
-                          />
-                        ))}
-                      </View>
-                    )}
-
-                    {results.trips.length > 0 && (
+                    {(activeTab === "all" || activeTab === "trips") && results.trips.length > 0 && (
                       <View style={styles.groupContainer}>
                         <Text style={styles.groupTitle}>{t("Trips")} ({results.trips.length})</Text>
                         {results.trips.map((trip, i) => (
@@ -323,8 +420,14 @@ export default function SearchScreen() {
                 ) : (
                   <View style={styles.emptyContainer}>
                     <Ionicons name="search-outline" size={48} color="rgba(255,255,255,0.2)" />
-                    <Text style={styles.emptyText}>{t("No results found")}</Text>
-                    <Text style={styles.emptySubtext}>{t("Try a different search")}</Text>
+                    <Text style={styles.emptyText}>No results found</Text>
+                    <Text style={styles.emptySubtext}>
+                      {activeTab === "places"
+                        ? "No places found for this search"
+                        : activeTab === "food"
+                        ? "No food found for this search"
+                        : "Try a different search"}
+                    </Text>
                   </View>
                 )
               ) : searchHistory.length > 0 ? (
@@ -357,7 +460,7 @@ export default function SearchScreen() {
         {/* Drawer Modal */}
         <Modal
           visible={drawerVisible}
-          animationType="slide"
+          animationType="fade"
           transparent
           onRequestClose={() => setDrawerVisible(false)}
         >
@@ -366,7 +469,12 @@ export default function SearchScreen() {
               style={styles.drawerBackdrop}
               onPress={() => setDrawerVisible(false)}
             />
-            <View style={styles.drawerContent}>
+            <MotiView
+              from={{ translateY: 400, opacity: 0 }}
+              animate={{ translateY: 0, opacity: 1 }}
+              transition={{ type: "timing", duration: 280 }}
+              style={styles.drawerContent}
+            >
               <View style={styles.drawerHandle} />
 
               {drawerType === "user" && selectedItem && (
@@ -382,7 +490,7 @@ export default function SearchScreen() {
                   onClose={() => setDrawerVisible(false)}
                 />
               )}
-            </View>
+            </MotiView>
           </View>
         </Modal>
       </View>
@@ -403,6 +511,14 @@ function ResultCard({
   onPress: () => void;
   icon: string;
 }) {
+  const fallbackUrl = item.fallbackImageUrl || getFallbackPhoto(item.category || item.type || "", item.name || "");
+  const initialUri = item.imageUrl || item.imageThumbnail || item.images?.[0] || fallbackUrl;
+  const [imageUri, setImageUri] = useState<string>(initialUri);
+
+  useEffect(() => {
+    setImageUri(item.imageUrl || item.imageThumbnail || item.images?.[0] || fallbackUrl);
+  }, [item]);
+
   return (
     <MotiView
       from={{ opacity: 0, translateX: -20 }}
@@ -410,16 +526,45 @@ function ResultCard({
       transition={{ delay: index * 30 }}
     >
       <Pressable onPress={onPress} style={styles.resultCard}>
-        <View style={styles.resultIconContainer}>
-          <MaterialCommunityIcons name={icon as any} size={20} color="#00f721" />
-        </View>
+        {imageUri ? (
+          <ExpoImage
+            source={{
+              uri: imageUri,
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
+                "Referer": "https://en.wikipedia.org/",
+              },
+            }}
+            style={styles.resultImageThumbnail}
+            contentFit="cover"
+            transition={200}
+            cachePolicy="disk"
+            onError={() => {
+              if (imageUri !== fallbackUrl) {
+                setImageUri(fallbackUrl);
+              }
+            }}
+          />
+        ) : (
+          <View style={styles.resultIconContainer}>
+            <MaterialCommunityIcons name={icon as any} size={20} color="#00f721" />
+          </View>
+        )}
 
         <View style={styles.resultTextContainer}>
-          <Text style={styles.resultTitle} numberOfLines={1}>
-            {item.displayName || item.name || item.title}
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <Text style={styles.resultTitle} numberOfLines={1}>
+              {item.displayName || item.name || item.title}
+            </Text>
+            {item.rating ? (
+              <Text style={{ color: "#FFD700", fontSize: 12, fontWeight: "700", marginLeft: 4 }}>
+                ⭐ {item.rating}
+              </Text>
+            ) : null}
+          </View>
           <Text style={styles.resultSubtitle} numberOfLines={1}>
-            {item.username ? `@${item.username}` : item.districtName || item.description || ""}
+            {item.category ? `${item.category} • ` : ""}
+            {item.username ? `@${item.username}` : item.districtName || item.city || item.description || ""}
           </Text>
         </View>
 
@@ -437,9 +582,10 @@ function UserDrawerContent({ user, onClose }: { user: any; onClose: () => void }
   return (
     <ScrollView style={styles.drawerScrollView} showsVerticalScrollIndicator={false}>
       <View style={styles.userHeader}>
-        <Image
-          source={{ uri: user.photoURL || "https://via.placeholder.com/150" }}
+        <ExpoImage
+          source={{ uri: user.photoURL || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80" }}
           style={styles.userAvatar}
+          contentFit="cover"
         />
         <Text style={styles.userName}>{user.displayName || user.name}</Text>
         <Text style={styles.userEmail}>{user.email}</Text>
@@ -489,45 +635,85 @@ function UserDrawerContent({ user, onClose }: { user: any; onClose: () => void }
 // Place Drawer Content
 function PlaceDrawerContent({ place, onClose }: { place: any; onClose: () => void }) {
   const router = useRouter();
-  const { t } = useLanguage();
+  const fallbackUrl = place.fallbackImageUrl || getFallbackPhoto(place.category || place.type || "", place.name || "");
+  const initialUri = place.imageUrl || place.imageThumbnail || place.images?.[0] || fallbackUrl;
+  const [currentImage, setCurrentImage] = useState<string>(initialUri);
+
+  useEffect(() => {
+    setCurrentImage(place.imageUrl || place.imageThumbnail || place.images?.[0] || fallbackUrl);
+  }, [place]);
 
   return (
     <ScrollView style={styles.drawerScrollView} showsVerticalScrollIndicator={false}>
-      <Image
-        source={{ uri: place.images?.[0] }}
-        style={styles.placeImage}
-      />
+      {currentImage ? (
+        <ExpoImage
+          source={{
+            uri: currentImage,
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
+              "Referer": "https://en.wikipedia.org/",
+            },
+          }}
+          style={styles.placeImage}
+          contentFit="cover"
+          transition={250}
+          cachePolicy="disk"
+          onError={() => {
+            if (currentImage !== fallbackUrl) {
+              setCurrentImage(fallbackUrl);
+            }
+          }}
+        />
+      ) : null}
 
       <View style={styles.placeInfo}>
-        <Text style={styles.placeName}>{place.name}</Text>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <Text style={[styles.placeName, { flex: 1 }]}>{place.name}</Text>
+          {place.rating ? (
+            <View style={[styles.chip, { backgroundColor: "rgba(255, 215, 0, 0.15)", borderWidth: 1, borderColor: "rgba(255, 215, 0, 0.3)" }]}>
+              <Text style={[styles.chipText, { color: "#FFD700", fontWeight: "700" }]}>⭐ {place.rating}</Text>
+            </View>
+          ) : null}
+        </View>
+
         <Text style={styles.placeLocation}>
-          {place.districtName}, {place.stateName}
+          {place.districtName || place.city}{place.stateName || place.state ? `, ${place.stateName || place.state}` : ""}
         </Text>
 
         <View style={styles.placeChips}>
           <View style={styles.chip}>
-            <Text style={styles.chipText}>{t(place.type)}</Text>
+            <Text style={styles.chipText}>{place.category || place.type || "Sightseeing"}</Text>
           </View>
-          <View style={styles.chip}>
-            <Text style={styles.chipText}>{place.districtName}</Text>
-          </View>
+          {place.districtName || place.city ? (
+            <View style={styles.chip}>
+              <Text style={styles.chipText}>{place.districtName || place.city}</Text>
+            </View>
+          ) : null}
         </View>
 
-        <Text style={styles.placeDescription}>{place.description}</Text>
+        <Text style={styles.placeDescription}>{place.highlight || place.description}</Text>
 
         <View style={styles.placeDetails}>
           <View style={styles.detailBox}>
-            <MaterialCommunityIcons name="calendar-month" size={18} color="#00f7a5" />
-            <Text style={styles.detailBoxLabel}>{t("Best Time")}</Text>
-            <Text style={styles.detailBoxValue}>{place.bestTimeToVisit}</Text>
+            <MaterialCommunityIcons name="clock-outline" size={18} color="#ffffff" />
+            <Text style={styles.detailBoxLabel}>Timing</Text>
+            <Text style={styles.detailBoxValue}>{place.timing || "Open daily"}</Text>
           </View>
 
           <View style={styles.detailBox}>
-            <Ionicons name="cloudy" size={18} color="#FFD700" />
-            <Text style={styles.detailBoxLabel}>{t("Season")}</Text>
-            <Text style={styles.detailBoxValue}>{place.season}</Text>
+            <Ionicons name="pricetag-outline" size={18} color="#ffffff" />
+            <Text style={styles.detailBoxLabel}>Cost / Entry</Text>
+            <Text style={styles.detailBoxValue}>{place.entryFee || place.approxCost || "Free"}</Text>
           </View>
         </View>
+
+        {place.bestTimeToVisit ? (
+          <View style={[styles.detailBox, { marginTop: 8 }]}>
+            <MaterialCommunityIcons name="calendar-month" size={18} color="#ffffff" />
+            <Text style={styles.detailBoxLabel}>Best Time to Visit</Text>
+            <Text style={styles.detailBoxValue}>{place.bestTimeToVisit}</Text>
+          </View>
+        ) : null}
 
         <View style={styles.placeActions}>
           <Pressable style={[styles.actionButton, { flex: 1 }]} onPress={onClose}>
@@ -535,7 +721,23 @@ function PlaceDrawerContent({ place, onClose }: { place: any; onClose: () => voi
           </Pressable>
           <Pressable
             style={[styles.actionButton, styles.primaryButton, { flex: 1, marginLeft: 10 }]}
-            onPress={() => router.push({ pathname: "/(tabs)/place-details", params: { placeId: place.placeId } })}
+            onPress={() => {
+              onClose();
+              const allImages = Array.isArray(place.images) && place.images.length > 0
+                ? place.images
+                : [currentImage, fallbackUrl].filter(Boolean);
+              router.push({
+                pathname: "/place-details",
+                params: {
+                  placeId: place.placeId || place.id,
+                  placeData: JSON.stringify({
+                    ...place,
+                    imageUrl: currentImage,
+                    images: allImages,
+                  }),
+                },
+              });
+            }}
           >
             <Text style={[styles.actionButtonText, { color: "#000" }]}>{t("View Details")}</Text>
           </Pressable>
@@ -602,12 +804,12 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   tabActive: {
-    backgroundColor: "rgba(0,247,33,0.2)",
+    backgroundColor: "rgba(255,255,255,0.18)",
     borderWidth: 1,
-    borderColor: "#00f721",
+    borderColor: "#ffffff",
   },
   tabText: { fontSize: 12, fontWeight: "600", color: "#888" },
-  tabTextActive: { color: "#00f721" },
+  tabTextActive: { color: "#ffffff", fontWeight: "700" },
 
   // Results
   groupContainer: { marginBottom: 20 },
@@ -631,10 +833,17 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: "rgba(0,247,33,0.1)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     justifyContent: "center",
     alignItems: "center",
   },
+  resultImageThumbnail: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+
   resultTextContainer: { flex: 1 },
   resultTitle: { fontSize: 14, fontWeight: "600", color: "#fff", marginBottom: 2 },
   resultSubtitle: { fontSize: 12, color: "#888" },
@@ -684,14 +893,14 @@ const styles = StyleSheet.create({
   userEmail: { fontSize: 12, color: "#aaa", marginBottom: 12 },
   userChips: { flexDirection: "row", gap: 8 },
   chip: {
-    backgroundColor: "rgba(0,247,165,0.1)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "rgba(0,247,165,0.3)",
+    borderColor: "rgba(255,255,255,0.2)",
   },
-  chipText: { color: "#00f7a5", fontSize: 11, fontWeight: "bold" },
+  chipText: { color: "#ffffff", fontSize: 11, fontWeight: "600" },
 
   userDetails: { marginBottom: 20 },
   detailLabel: { fontSize: 12, fontWeight: "600", color: "#aaa", marginTop: 12, marginBottom: 4 },

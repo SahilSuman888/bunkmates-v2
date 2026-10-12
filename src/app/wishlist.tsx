@@ -8,10 +8,10 @@ import {
   TextInput,
   Modal,
   Alert,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { auth, db } from "../lib/firebase";
 import {
@@ -253,7 +253,7 @@ function Icon({ name, text }: { name: any; text: string }) {
       style={styles.iconInfo}
     >
       <View style={styles.iconBox}>
-        <MaterialCommunityIcons name={name} size={20} color="#00f721" />
+        <MaterialCommunityIcons name={name as any} size={20} color="#00f721" />
       </View>
       <Text style={styles.iconText}>{text}</Text>
     </MotiView>

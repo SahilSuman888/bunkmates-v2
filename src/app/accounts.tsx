@@ -434,7 +434,7 @@ export default function AccountAndSecurity() {
   if (authLoading && !user) {
     return (
       <View style={[styles.loader, { backgroundColor: colors.bg }]}>
-        <ActivityIndicator size="large" color={accentColor || colors.activeText} />
+        <ActivityIndicator size="large" color={dynamicAccent || colors.textPrimary} />
       </View>
     );
   }

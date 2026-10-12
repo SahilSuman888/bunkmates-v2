@@ -193,7 +193,7 @@ export function WeatherCard({ weather, loading }: WeatherCardProps) {
     );
   }
 
-  const iconName = (WEATHER_ICONS as any)[weather.main] || "weather-cloudy";
+  const iconName = (weather?.main && (WEATHER_ICONS as any)[weather.main]) || "weather-cloudy";
 
   return (
     <MotiView

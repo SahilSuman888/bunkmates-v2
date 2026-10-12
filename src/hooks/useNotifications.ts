@@ -21,7 +21,7 @@ export const useNotifications = () => {
 
     const run = async () => {
       try {
-        const Notifications = await import('expo-notifications');
+        const Notifications = (await import('../lib/safeNotifications')).default;
 
         const registerForPushNotificationsAsync = async () => {
           let token: string | null = null;
@@ -57,8 +57,8 @@ export const useNotifications = () => {
         try {
           const token = await registerForPushNotificationsAsync();
           if (token) setExpoPushToken(token);
-        } catch (e: any) {
-          console.warn('Push registration failed or is not supported in this environment:', e?.message || e);
+        } catch (e) {
+          console.warn('Push registration failed or is not supported in this environment:', (e as any)?.message || e);
         }
 
         subscription = Notifications.addNotificationReceivedListener((notif: any) => {
@@ -84,19 +84,18 @@ export const useNotifications = () => {
     };
   }, []);
 
-  // when token available, optionally persist to user document
+  // OneSignal is the active unified push provider for standalone & preview APKs.
+  // We clean up legacy expoPushToken so Cloud Functions never trigger duplicate pushes.
   useEffect(() => {
-    if (!expoPushToken) return;
-    // attempt to save to firestore if user logged in
     import('../lib/firebase').then(({ db, auth }) => {
       const user = auth.currentUser;
       if (user) {
-        const { doc, setDoc, serverTimestamp } = require('firebase/firestore');
+        const { doc, updateDoc, deleteField } = require('firebase/firestore');
         const userRef = doc(db, 'users', user.uid);
-        setDoc(userRef, { expoPushToken, updatedAt: serverTimestamp() }, { merge: true });
+        updateDoc(userRef, { expoPushToken: deleteField() }).catch(() => {});
       }
     });
-  }, [expoPushToken]);
+  }, []);
   // registerForPushNotificationsAsync moved inside the effect to avoid
   // importing expo-notifications at module load time (prevents Expo Go warnings)
 

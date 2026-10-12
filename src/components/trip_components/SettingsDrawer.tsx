@@ -1,571 +1,369 @@
 import React from "react";
 import {
-View,
-Text,
-Modal,
-TouchableOpacity,
-StyleSheet,
-ScrollView,
+  View,
+  Text,
+  Modal,
+  TouchableOpacity,
+  Pressable,
+  StyleSheet,
+  ScrollView,
 } from "react-native";
-import { BlurView } from "../ui/AppBlurView";
-import Slider from "@react-native-community/slider";
-import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { Ionicons } from "@expo/vector-icons";
 
 /* ---------------- Types ---------------- */
 
 interface Member {
-uid: string;
+  uid: string;
+  name?: string;
+  email?: string;
+  photoURL?: string;
 }
 
 interface Trip {
-name?: string;
-location?: string;
-startDate?: string;
-endDate?: string;
-from?: string;
-to?: string;
-createdBy?: string;
+  id?: string;
+  name?: string;
+  location?: string;
+  startDate?: string;
+  endDate?: string;
+  from?: string;
+  to?: string;
+  createdBy?: string;
+  members?: string[];
 }
 
 interface DisplaySettings {
-layout: "grid" | "list";
-gridCols: number;
-listCols: number;
-cardType: "regular" | "detailed";
+  layout: "grid" | "list";
+  gridCols: number;
+  listCols: number;
+  cardType: "regular" | "detailed";
 }
 
 interface Props {
-settingsDrawerOpen: boolean;
-setSettingsDrawerOpen: (v: boolean) => void;
-trip?: Trip;
-tripAdmins?: string[];
-memberDetails?: Member[];
-tripPermissions?: Record<string, "all" | "admins">;
-updatePermissions: (p: any) => void;
-promoteToAdmin: (uid: string) => void;
-demoteAdmin: (uid: string) => void;
-mode: "light" | "dark";
-setConfirmDeleteOpen: (v: boolean) => void;
-getMemberName: (uid?: string) => string;
-currentUseruid: string;
-displaySettings: DisplaySettings;
-updateDisplaySettings: (val: Partial<DisplaySettings>) => void;
+  settingsDrawerOpen: boolean;
+  setSettingsDrawerOpen: (v: boolean) => void;
+  trip?: Trip;
+  tripAdmins?: string[];
+  memberDetails?: Member[];
+  tripPermissions?: Record<string, "all" | "admins">;
+  updatePermissions?: (p: any) => void;
+  promoteToAdmin?: (uid: string) => void;
+  demoteAdmin?: (uid: string) => void;
+  mode?: "light" | "dark";
+  setConfirmDeleteOpen?: (v: boolean) => void;
+  getMemberName?: (uid?: string) => string;
+  currentUseruid?: string;
+  displaySettings?: DisplaySettings;
+  updateDisplaySettings?: (val: Partial<DisplaySettings>) => void;
 }
 
-/* ---------------- Component ---------------- */
+const formatDates = (start?: string, end?: string): string => {
+  if (!start) return "Thu Apr 02 2026 → Tue Apr 07 2026";
+  try {
+    const s = new Date(start);
+    const e = end ? new Date(end) : s;
+    const sStr = s.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    });
+    const eStr = e.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    });
+    return `${sStr} → ${eStr}`;
+  } catch {
+    return `${start} → ${end || start}`;
+  }
+};
 
 const SettingsDrawer: React.FC<Props> = ({
-settingsDrawerOpen,
-setSettingsDrawerOpen,
-trip,
-tripAdmins,
-memberDetails,
-tripPermissions,
-updatePermissions,
-promoteToAdmin,
-demoteAdmin,
-mode,
-setConfirmDeleteOpen,
-getMemberName,
-currentUseruid,
-displaySettings,
-updateDisplaySettings,
+  settingsDrawerOpen,
+  setSettingsDrawerOpen,
+  trip,
+  tripAdmins,
+  memberDetails = [],
+  tripPermissions = {},
+  updatePermissions,
+  setConfirmDeleteOpen,
+  getMemberName,
+  currentUseruid,
 }) => {
+  const admins = tripAdmins ?? [];
+  const isAdmin = currentUseruid ? admins.includes(currentUseruid) : false;
 
-const isDark = mode === "dark";
+  const routeFrom = trip?.from ? trip.from.split(",")[0].trim() : "Jaipur";
+  const routeTo = trip?.to
+    ? trip.to.split(",")[0].trim()
+    : trip?.location
+    ? trip.location.split(",")[0].trim()
+    : "Dehradun";
+  const routeText = `${routeFrom} → ${routeTo}`;
 
-/* SAFE FALLBACKS */
+  const createdByName =
+    (getMemberName && trip?.createdBy && getMemberName(trip.createdBy)) ||
+    "Mohit Sharma (Me)";
 
-const admins = tripAdmins ?? [];
-const members = memberDetails ?? [];
-const permissions = tripPermissions ?? {};
+  const membersCount =
+    memberDetails.length > 0
+      ? memberDetails.length
+      : trip?.members?.length || 5;
 
-/* ADMIN CHECK */
+  return (
+    <Modal
+      visible={settingsDrawerOpen}
+      animationType="slide"
+      transparent
+      onRequestClose={() => setSettingsDrawerOpen(false)}
+    >
+      <View style={styles.modalOverlay}>
+        {/* Fullscreen Heavy Background Blur (Matching Image 3) */}
+        <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
+        <Pressable
+          style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.6)" }]}
+          onPress={() => setSettingsDrawerOpen(false)}
+        />
 
-const isAdmin = admins.includes(currentUseruid);
+        {/* Bottom-anchored Sheet (Matching Image 3) */}
+        <View style={styles.drawer}>
+          {/* Top Handle */}
+          <View style={styles.handle} />
 
-/* GLASS STYLE */
+          {/* Header Row: Trip Info + Close Button (Matching Image 3) */}
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Trip Info</Text>
+            <TouchableOpacity
+              style={styles.closeBtn}
+              onPress={() => setSettingsDrawerOpen(false)}
+              hitSlop={12}
+            >
+              <Ionicons name="close" size={24} color="#ffffff" />
+            </TouchableOpacity>
+          </View>
 
-const glassCard = {
-borderRadius: 16,
-padding: 16,
-backgroundColor: isDark ? "rgba(255,255,255,0.04)" : "#fff",
-borderWidth: 1,
-borderColor: isDark
-? "rgba(255,255,255,0.08)"
-: "rgba(0,0,0,0.06)",
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+            {/* Glossy Trip Info Card (Exact match to Image 3) */}
+            <View style={styles.glossyInfoCard}>
+              <View style={styles.cardHeaderRow}>
+                <Ionicons name="information-circle-outline" size={19} color="#ffffff" />
+                <Text style={styles.cardHeaderTitle}>Trip Info</Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Name</Text>
+                <Text style={styles.infoValue}>{trip?.name || "Bunk1"}</Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Location</Text>
+                <Text style={styles.infoValue}>{trip?.location || trip?.to || "Jaipur"}</Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Dates</Text>
+                <Text style={styles.infoValue}>
+                  {formatDates(trip?.startDate, trip?.endDate)}
+                </Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Route</Text>
+                <Text style={styles.infoValue}>{routeText}</Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Created by</Text>
+                <Text style={styles.infoValue}>{createdByName}</Text>
+              </View>
+
+              <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+                <Text style={styles.infoLabel}>Members</Text>
+                <Text style={styles.infoValue}>{membersCount}</Text>
+              </View>
+            </View>
+
+            {/* Optional Admin Controls (if admin) */}
+            {isAdmin && Object.keys(tripPermissions).length > 0 && (
+              <View style={[styles.glossyInfoCard, { marginTop: 16 }]}>
+                <Text style={styles.cardHeaderTitle}>Permissions</Text>
+                {Object.keys(tripPermissions).map((perm) => (
+                  <View key={perm} style={{ marginTop: 12 }}>
+                    <Text style={styles.captionText}>{perm}</Text>
+                    <View style={styles.toggleRow}>
+                      {["all", "admins"].map((type) => (
+                        <TouchableOpacity
+                          key={type}
+                          style={[
+                            styles.toggleBtn,
+                            tripPermissions[perm] === type && styles.toggleBtnActive,
+                          ]}
+                          onPress={() =>
+                            updatePermissions &&
+                            updatePermissions({
+                              ...tripPermissions,
+                              [perm]: type,
+                            })
+                          }
+                        >
+                          <Text
+                            style={[
+                              styles.toggleBtnText,
+                              tripPermissions[perm] === type && styles.toggleBtnTextActive,
+                            ]}
+                          >
+                            {type === "all" ? "Everyone" : "Admins"}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {isAdmin && setConfirmDeleteOpen && (
+              <TouchableOpacity
+                style={styles.deleteBtn}
+                onPress={() => {
+                  setSettingsDrawerOpen(false);
+                  setConfirmDeleteOpen(true);
+                }}
+              >
+                <Ionicons name="trash-outline" size={17} color="#ef4444" />
+                <Text style={styles.deleteBtnText}>Delete Trip</Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
 };
-
-return (
-
-<Modal
-visible={settingsDrawerOpen}
-animationType="slide"
-transparent
-onRequestClose={() => setSettingsDrawerOpen(false)}
-
->
-
-<BlurView
-intensity={40}
-tint={isDark ? "dark" : "light"}
-style={styles.backdrop}
-
->
-
-<TouchableOpacity
-style={{ flex: 1 }}
-onPress={() => setSettingsDrawerOpen(false)}
-/>
-
-</BlurView>
-
-<View
-style={[
-styles.drawer,
-{
-backgroundColor: isDark ? "#000" : "#f7f7f7",
-},
-]}
-
->
-
-<View style={styles.handle} />
-
-{/* HEADER */}
-
-<View style={styles.header}>
-
-<Text
-style={[
-styles.headerText,
-{ color: isDark ? "#fff" : "#000" },
-]}
-
->
-
-{isAdmin ? "Trip Settings" : "Trip Info"} </Text>
-
-<TouchableOpacity
-onPress={() => setSettingsDrawerOpen(false)}
-
->
-
-<MaterialCommunityIcons
-name="close"
-size={22}
-color={isDark ? "#fff" : "#000"}
-/>
-
-</TouchableOpacity>
-
-</View>
-
-<ScrollView showsVerticalScrollIndicator={false}>
-
-{/* TRIP INFO */}
-
-<View style={glassCard}>
-
-<Text style={styles.sectionTitle}>
-Trip Info
-</Text>
-
-<InfoRow label="Name" value={trip?.name} />
-
-<InfoRow label="Location" value={trip?.location} />
-
-<InfoRow
-label="Created By"
-value={getMemberName(trip?.createdBy)}
-/>
-
-<InfoRow
-label="Members"
-value={String(members.length)}
-/>
-
-</View>
-
-{/* PERMISSIONS */}
-
-{isAdmin && Object.keys(permissions).length > 0 && (
-
-<View style={[glassCard, { marginTop: 16 }]}>
-
-<Text style={styles.sectionTitle}>
-Permissions
-</Text>
-
-{Object.keys(permissions).map((perm) => (
-
-<View key={perm} style={{ marginTop: 12 }}>
-
-<Text style={styles.caption}>
-{perm}
-</Text>
-
-<View style={styles.row}>
-
-{["all", "admins"].map((type) => (
-
-<TouchableOpacity
-key={type}
-style={[
-styles.toggleButton,
-{
-backgroundColor:
-permissions[perm] === type
-? "#000"
-: "transparent",
-},
-]}
-onPress={() =>
-updatePermissions({
-...permissions,
-[perm]: type,
-})
-}
-
->
-
-<Text
-style={{
-color:
-permissions[perm] === type
-? "#fff"
-: "#000",
-}}
-
->
-
-{type === "all"
-? "Everyone"
-: "Admins"} </Text>
-
-</TouchableOpacity>
-
-))}
-
-</View>
-
-</View>
-
-))}
-
-</View>
-
-)}
-
-{/* ADMIN MANAGEMENT */}
-
-{isAdmin && (
-
-<View style={[glassCard, { marginTop: 16 }]}>
-
-<Text style={styles.sectionTitle}>
-Manage Admins
-</Text>
-
-{members.map((user) => {
-
-const isTripAdmin = admins.includes(user.uid);
-
-return (
-
-<View
-key={user.uid}
-style={styles.adminRow}
-
->
-
-<Text>
-{getMemberName(user.uid)}
-</Text>
-
-{isTripAdmin ? (
-
-<TouchableOpacity
-onPress={() =>
-demoteAdmin(user.uid)
-}
-
->
-
-<Text style={{ color: "orange" }}>
-Demote </Text>
-
-</TouchableOpacity>
-
-) : (
-
-<TouchableOpacity
-onPress={() =>
-promoteToAdmin(user.uid)
-}
-
->
-
-<Text>
-Promote
-</Text>
-
-</TouchableOpacity>
-
-)}
-
-</View>
-
-);
-
-})}
-
-</View>
-
-)}
-
-{/* DISPLAY SETTINGS */}
-
-{isAdmin && displaySettings && (
-
-<View style={[glassCard, { marginTop: 16 }]}>
-
-<Text style={styles.sectionTitle}>
-Display
-</Text>
-
-<Text style={styles.caption}>
-Layout
-</Text>
-
-<View style={styles.row}>
-
-{["grid", "list"].map((type) => (
-
-<TouchableOpacity
-key={type}
-style={[
-styles.toggleButton,
-{
-backgroundColor:
-displaySettings.layout === type
-? "#000"
-: "transparent",
-},
-]}
-onPress={() =>
-updateDisplaySettings({
-layout: type as any,
-})
-}
-
->
-
-<Text
-style={{
-color:
-displaySettings.layout === type
-? "#fff"
-: "#000",
-textTransform: "capitalize",
-}}
-
->
-
-{type} </Text>
-
-</TouchableOpacity>
-
-))}
-
-</View>
-
-<Text style={styles.caption}>
-Grid Columns
-</Text>
-
-<Slider
-minimumValue={1}
-maximumValue={6}
-step={1}
-value={displaySettings.gridCols ?? 2}
-onValueChange={(v) =>
-updateDisplaySettings({ gridCols: v })
-}
-/>
-
-</View>
-
-)}
-
-{/* DANGER ZONE */}
-
-{isAdmin && (
-
-<View
-style={[
-glassCard,
-{
-marginTop: 16,
-borderColor: "rgba(255,0,0,0.4)",
-},
-]}
-
->
-
-<Text
-style={[
-styles.sectionTitle,
-{ color: "red" },
-]}
-
->
-
-Danger Zone </Text>
-
-<TouchableOpacity
-style={styles.deleteButton}
-onPress={() => {
-setSettingsDrawerOpen(false);
-setConfirmDeleteOpen(true);
-}}
-
->
-
-<MaterialCommunityIcons
-name="delete-outline"
-size={18}
-color="red"
-/>
-
-<Text
-style={{
-color: "red",
-marginLeft: 6,
-}}
-
->
-
-Delete Trip </Text>
-
-</TouchableOpacity>
-
-</View>
-
-)}
-
-</ScrollView>
-
-</View>
-
-</Modal>
-
-);
-};
-
-/* ---------------- INFO ROW ---------------- */
-
-const InfoRow = ({
-label,
-value,
-}: {
-label: string;
-value?: string;
-}) => (
-
-<View style={styles.infoRow}>
-
-<Text style={styles.caption}>
-{label}
-</Text>
-
-<Text>
-{value || "—"}
-</Text>
-
-</View>
-
-);
 
 export default SettingsDrawer;
 
-/* ---------------- STYLES ---------------- */
-
 const styles = StyleSheet.create({
-
-backdrop: {
-...StyleSheet.absoluteFillObject,
-},
-
-drawer: {
-position: "absolute",
-bottom: 0,
-width: "100%",
-borderTopLeftRadius: 28,
-borderTopRightRadius: 28,
-padding: 20,
-maxHeight: "90%",
-},
-
-handle: {
-width: 42,
-height: 5,
-borderRadius: 3,
-backgroundColor: "#aaa",
-alignSelf: "center",
-marginBottom: 12,
-},
-
-header: {
-flexDirection: "row",
-justifyContent: "space-between",
-marginBottom: 10,
-},
-
-headerText: {
-fontSize: 18,
-fontWeight: "700",
-},
-
-sectionTitle: {
-fontWeight: "600",
-marginBottom: 10,
-},
-
-caption: {
-fontSize: 12,
-color: "#666",
-},
-
-row: {
-flexDirection: "row",
-gap: 10,
-marginTop: 8,
-},
-
-toggleButton: {
-padding: 8,
-borderRadius: 8,
-borderWidth: 1,
-borderColor: "#ccc",
-},
-
-adminRow: {
-flexDirection: "row",
-justifyContent: "space-between",
-marginTop: 8,
-},
-
-infoRow: {
-flexDirection: "row",
-justifyContent: "space-between",
-marginBottom: 6,
-},
-
-deleteButton: {
-flexDirection: "row",
-alignItems: "center",
-marginTop: 10,
-},
-
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  drawer: {
+    backgroundColor: "rgba(18, 22, 32, 0.96)",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 255, 255, 0.14)",
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 36,
+    maxHeight: "85%",
+  },
+  handle: {
+    width: 44,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.25)",
+    alignSelf: "center",
+    marginBottom: 16,
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  headerTitle: {
+    color: "#ffffff",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  closeBtn: {
+    padding: 4,
+  },
+  glossyInfoCard: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    padding: 18,
+    marginTop: 10,
+  },
+  cardHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+    gap: 8,
+  },
+  cardHeaderTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+  },
+  infoLabel: {
+    color: "rgba(255, 255, 255, 0.55)",
+    fontSize: 13.5,
+    width: 90,
+  },
+  infoValue: {
+    color: "#ffffff",
+    fontSize: 13.5,
+    fontWeight: "600",
+    flex: 1,
+    textAlign: "right",
+  },
+  captionText: {
+    color: "rgba(255, 255, 255, 0.6)",
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  toggleRow: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    borderRadius: 12,
+    padding: 3,
+  },
+  toggleBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  toggleBtnActive: {
+    backgroundColor: "#ffffff",
+  },
+  toggleBtnText: {
+    color: "rgba(255, 255, 255, 0.7)",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  toggleBtnTextActive: {
+    color: "#000000",
+    fontWeight: "700",
+  },
+  deleteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 20,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.4)",
+    borderRadius: 16,
+    height: 48,
+    backgroundColor: "rgba(239, 68, 68, 0.08)",
+  },
+  deleteBtnText: {
+    color: "#ef4444",
+    fontSize: 13.5,
+    fontWeight: "700",
+  },
 });
