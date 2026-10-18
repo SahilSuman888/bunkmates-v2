@@ -34,6 +34,7 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import NotificationBell from "../../components/NotificationBell";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BlurView } from "expo-blur";
+import { useLanguage } from "../../contexts/LanguageContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -298,6 +299,7 @@ const memoryCachedNotes: Record<string, NoteData[]> = {};
 
 export default function NotesScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useLanguage();
 
   // Auth & User Profile
   const [authInitialized, setAuthInitialized] = useState(false);
@@ -986,7 +988,7 @@ export default function NotesScreen() {
 
       {/* ── TOP HEADER (Image 1) ── */}
       <View style={[s.topHeader, { paddingTop: insets.top + 10 }]}>
-        <Text style={s.topHeaderTitle}>Notes</Text>
+        <Text style={s.topHeaderTitle}>{t("notes", "Notes")}</Text>
         <NotificationBell />
       </View>
 
@@ -995,7 +997,7 @@ export default function NotesScreen() {
         <View style={s.searchField}>
           <Feather name="search" size={17} color="#777c8e" style={{ marginRight: 10 }} />
           <TextInput
-            placeholder="Search notes..."
+            placeholder={t("search_notes", "Search notes...")}
             placeholderTextColor="#686d80"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -1022,6 +1024,12 @@ export default function NotesScreen() {
       <View style={s.scopePillsRow}>
         {(["All", "Pinned", "Shared"] as const).map((scope) => {
           const active = activeScope === scope;
+          const scopeLabel =
+            scope === "All"
+              ? t("all", "All")
+              : scope === "Pinned"
+              ? t("pinned", "Pinned")
+              : t("shared", "Shared");
           return (
             <Pressable
               key={scope}
@@ -1032,7 +1040,7 @@ export default function NotesScreen() {
               style={[s.scopePill, active && s.scopePillActive]}
             >
               {scope === "Pinned" && <Text style={{ marginRight: 4, fontSize: 12 }}>📌</Text>}
-              <Text style={[s.scopePillText, active && s.scopePillTextActive]}>{scope}</Text>
+              <Text style={[s.scopePillText, active && s.scopePillTextActive]}>{scopeLabel}</Text>
             </Pressable>
           );
         })}
@@ -1094,12 +1102,12 @@ export default function NotesScreen() {
         <View style={s.emptyBox}>
           <Feather name="file-text" size={44} color="rgba(255, 255, 255, 0.2)" />
           <Text style={s.emptyTitle}>
-            {searchQuery ? "No matching notes" : "No notes yet"}
+            {searchQuery ? t("no_matching_notes", "No matching notes") : t("no_notes_yet", "No notes yet")}
           </Text>
           <Text style={s.emptySubtitle}>
             {searchQuery
-              ? "Try adjusting your search or clear filters"
-              : "Tap the pencil button below to create a note"}
+              ? t("try_adjusting_search", "Try adjusting your search or clear filters")
+              : t("tap_pencil_to_create", "Tap the pencil button below to create a note")}
           </Text>
         </View>
       )}
@@ -1299,7 +1307,7 @@ export default function NotesScreen() {
           >
             {/* Title Input */}
             <TextInput
-              placeholder="Enter title..."
+              placeholder={t("enter_title", "Enter title...")}
               placeholderTextColor="#5a5e70"
               value={noteTitle}
               onChangeText={setNoteTitle}
@@ -1330,7 +1338,7 @@ export default function NotesScreen() {
 
             {/* Note Content Editor */}
             <TextInput
-              placeholder="Start writing your note..."
+              placeholder={t("start_writing_note", "Start writing your note...")}
               placeholderTextColor="#5a5e70"
               value={noteContent}
               onChangeText={setNoteContent}

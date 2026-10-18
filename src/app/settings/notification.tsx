@@ -17,16 +17,17 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "../lib/firebase";
-import { registerForPushNotifications, disablePushNotifications } from "../lib/pushNotifications";
-import { useThemeToggle } from "../contexts/ThemeContext";
-import { useLanguage } from "../contexts/LanguageContext";
-import { useAppSettings } from "../contexts/AppSettingsContext";
+import { auth } from "../../lib/firebase";
+import { registerForPushNotifications, disablePushNotifications } from "../../lib/pushNotifications";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
 import {
   NotificationCategory,
   NotificationPreferences,
   sendTestNotification,
-} from "../lib/NotificationService";
+} from "../../lib/NotificationService";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 const TIME_OPTIONS = [
   "08:00 PM",
@@ -600,87 +601,82 @@ export default function NotificationSettings() {
         </View>
       </ScrollView>
 
-      {/* ── TIME SELECTOR MODAL ── */}
-      <Modal
+      {/* ── TIME SELECTOR DRAWER ── */}
+      <SwipeableDrawer
         visible={showTimeModal !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowTimeModal(null)}
+        onClose={() => setShowTimeModal(null)}
+        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
-            <View
-              style={[
-                styles.iconBox,
-                {
-                  backgroundColor: colors.iconBoxBg,
-                  width: 44,
-                  height: 44,
-                  borderRadius: 22,
-                  marginBottom: 10,
-                  marginRight: 0,
-                },
-              ]}
-            >
-              <Ionicons name="time-outline" size={22} color={colors.greyishWhite} />
-            </View>
-
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
-              {showTimeModal === "from" ? "Silence From" : "Silence Until"}
-            </Text>
-            <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              Select the time to automatically start or stop quiet hours.
-            </Text>
-
-            <ScrollView
-              style={styles.timeListScroll}
-              contentContainerStyle={styles.timeListGrid}
-            >
-              {TIME_OPTIONS.map((timeOption) => {
-                const isSelected =
-                  showTimeModal === "from"
-                    ? silenceFrom === timeOption
-                    : silenceUntil === timeOption;
-                return (
-                  <Pressable
-                    key={timeOption}
-                    style={({ pressed }) => [
-                      styles.timeOptionPill,
-                      {
-                        backgroundColor: isSelected ? colors.accent : colors.timeBoxBg,
-                      },
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={() => handleSelectTime(timeOption)}
-                  >
-                    <Text
-                      style={[
-                        styles.timeOptionText,
-                        { color: isSelected ? "#FFFFFF" : colors.textPrimary },
-                      ]}
-                    >
-                      {timeOption}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalCloseBtn,
-                { backgroundColor: colors.timeBoxBg },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setShowTimeModal(null)}
-            >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textSecondary }]}>
-                Close
-              </Text>
-            </Pressable>
-          </View>
+        <View
+          style={[
+            styles.iconBox,
+            {
+              backgroundColor: colors.iconBoxBg,
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              marginBottom: 10,
+              marginRight: 0,
+            },
+          ]}
+        >
+          <Ionicons name="time-outline" size={22} color={colors.greyishWhite} />
         </View>
-      </Modal>
+
+        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+          {showTimeModal === "from" ? "Silence From" : "Silence Until"}
+        </Text>
+        <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
+          Select the time to automatically start or stop quiet hours.
+        </Text>
+
+        <ScrollView
+          style={styles.timeListScroll}
+          contentContainerStyle={styles.timeListGrid}
+        >
+          {TIME_OPTIONS.map((timeOption) => {
+            const isSelected =
+              showTimeModal === "from"
+                ? silenceFrom === timeOption
+                : silenceUntil === timeOption;
+            return (
+              <Pressable
+                key={timeOption}
+                style={({ pressed }) => [
+                  styles.timeOptionPill,
+                  {
+                    backgroundColor: isSelected ? colors.accent : colors.timeBoxBg,
+                  },
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => handleSelectTime(timeOption)}
+              >
+                <Text
+                  style={[
+                    styles.timeOptionText,
+                    { color: isSelected ? "#FFFFFF" : colors.textPrimary },
+                  ]}
+                >
+                  {timeOption}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.modalCloseBtn,
+            { backgroundColor: colors.timeBoxBg },
+            pressed && styles.pressed,
+          ]}
+          onPress={() => setShowTimeModal(null)}
+        >
+          <Text style={[styles.modalCloseBtnText, { color: colors.textSecondary }]}>
+            Close
+          </Text>
+        </Pressable>
+      </SwipeableDrawer>
     </SafeAreaView>
   );
 }
@@ -915,16 +911,16 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     width: "100%",
-    maxWidth: 380,
-    borderRadius: 28,
+    maxWidth: "100%",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     borderWidth: 0,
-    padding: 24,
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === "ios" ? 34 : 24,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 0,
   },
   modalTitle: {
     fontSize: 18,

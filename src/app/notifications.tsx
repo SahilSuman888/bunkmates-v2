@@ -38,7 +38,9 @@ import {
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../lib/firebase";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import { useLanguage } from "../contexts/LanguageContext";
 import { haptic } from "../constants/authTheme";
+import { SwipeableDrawer } from "../components/ui/SwipeableDrawer";
 
 /* ============================================================
    TYPES
@@ -261,6 +263,7 @@ export default function Notifications() {
   const router = useRouter();
   const params = useLocalSearchParams<{ notificationId?: string }>();
   const { themeColors, accentColor } = useThemeToggle();
+  const { t } = useLanguage();
 
   // State
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -641,7 +644,7 @@ export default function Notifications() {
           </TouchableOpacity>
 
           <View style={styles.headerTitleRow}>
-            <Text style={styles.headerTitle}>Notifications</Text>
+            <Text style={styles.headerTitle}>{t("notifications", "Notifications")}</Text>
             {unreadCount > 0 && (
               <View style={[styles.unreadCountPill, { backgroundColor: "#ffffff" }]}>
                 <Text style={styles.unreadCountText}>{unreadCount}</Text>
@@ -673,7 +676,7 @@ export default function Notifications() {
               activeOpacity={0.75}
             >
               <Ionicons name="checkmark-done" size={15} color="#ffffff" style={{ marginRight: 4 }} />
-              <Text style={[styles.actionPillText, { color: "#ffffff" }]}>Read All</Text>
+              <Text style={[styles.actionPillText, { color: "#ffffff" }]}>{t("read_all", "Read All")}</Text>
             </TouchableOpacity>
           )}
 
@@ -696,7 +699,7 @@ export default function Notifications() {
           <View style={styles.searchBarInner}>
             <Ionicons name="search" size={16} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
             <TextInput
-              placeholder="Search notifications or senders..."
+              placeholder={t("search_notifications", "Search notifications or senders...")}
               placeholderTextColor="rgba(255,255,255,0.4)"
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -722,7 +725,7 @@ export default function Notifications() {
           contentContainerStyle={styles.filtersScrollContent}
         >
           <CategoryChip
-            label="All"
+            label={t("all", "All")}
             icon="layers-outline"
             count={notifications.length}
             active={activeCategory === "all"}
@@ -733,7 +736,7 @@ export default function Notifications() {
             }}
           />
           <CategoryChip
-            label="Unread"
+            label={t("unread", "Unread")}
             icon="ellipse"
             count={unreadCount}
             active={activeCategory === "unread"}
@@ -745,7 +748,7 @@ export default function Notifications() {
             }}
           />
           <CategoryChip
-            label="Messages"
+            label={t("messages", "Messages")}
             icon="chatbubbles-outline"
             active={activeCategory === "messages"}
             accent={activeAccent}
@@ -755,7 +758,7 @@ export default function Notifications() {
             }}
           />
           <CategoryChip
-            label="Calls"
+            label={t("calls", "Calls")}
             icon="call-outline"
             active={activeCategory === "calls"}
             accent={activeAccent}
@@ -765,7 +768,7 @@ export default function Notifications() {
             }}
           />
           <CategoryChip
-            label="Requests"
+            label={t("requests", "Requests")}
             icon="person-add-outline"
             active={activeCategory === "requests"}
             accent={activeAccent}
@@ -775,7 +778,7 @@ export default function Notifications() {
             }}
           />
           <CategoryChip
-            label="System"
+            label={t("system", "System")}
             icon="notifications-outline"
             active={activeCategory === "system"}
             accent={activeAccent}
@@ -794,8 +797,7 @@ export default function Notifications() {
             <View style={styles.unreadBannerLeft}>
               <View style={[styles.pulseDot, { backgroundColor: "#ffffff" }]} />
               <Text style={styles.unreadBannerText}>
-                <Text style={{ fontWeight: "800", color: "#ffffff" }}>{unreadCount} unread</Text> notification
-                {unreadCount > 1 ? "s" : ""}
+                <Text style={{ fontWeight: "800", color: "#ffffff" }}>{unreadCount} {t("unread", "unread")}</Text> {t("notifications", "notifications")}
               </Text>
             </View>
             <TouchableOpacity
@@ -803,7 +805,7 @@ export default function Notifications() {
               activeOpacity={0.7}
               style={[styles.bannerActionBtn, { backgroundColor: "rgba(255, 255, 255, 0.15)" }]}
             >
-              <Text style={[styles.bannerActionText, { color: "#ffffff" }]}>Mark all read</Text>
+              <Text style={[styles.bannerActionText, { color: "#ffffff" }]}>{t("mark_all_read", "Mark all read")}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -813,7 +815,7 @@ export default function Notifications() {
       {loading ? (
         <View style={styles.centerLoading}>
           <ActivityIndicator size="large" color={activeAccent} />
-          <Text style={styles.loadingSubtitle}>Fetching your alerts...</Text>
+          <Text style={styles.loadingSubtitle}>{t("fetching_alerts", "Fetching your alerts...")}</Text>
         </View>
       ) : filteredNotifications.length === 0 ? (
         <ScrollView
@@ -825,17 +827,17 @@ export default function Notifications() {
           </View>
           <Text style={styles.emptyTitle}>
             {searchQuery
-              ? "No matching alerts"
+              ? t("no_matching_alerts", "No matching alerts")
               : activeCategory === "unread"
-              ? "You're all caught up! ✨"
-              : "No notifications yet"}
+              ? t("all_caught_up", "You're all caught up! ✨")
+              : t("no_notifications", "No notifications yet")}
           </Text>
           <Text style={styles.emptyDescription}>
             {searchQuery
-              ? `No alerts found for "${searchQuery}". Try a different keyword.`
+              ? `${t("no_matching_alerts", "No alerts found for")} "${searchQuery}".`
               : activeCategory === "unread"
-              ? "Zero unread alerts remaining. New messages, calls, and invites will appear here."
-              : "When your bunkmates message, call, or invite you to trips, they'll show up right here."}
+              ? t("zero_unread_alerts", "Zero unread alerts remaining. New messages, calls, and invites will appear here.")
+              : t("empty_notifications_desc", "When your bunkmates message, call, or invite you to trips, they'll show up right here.")}
           </Text>
 
           {activeCategory !== "all" && (
@@ -847,7 +849,7 @@ export default function Notifications() {
                 setSearchQuery("");
               }}
             >
-              <Text style={styles.emptyResetText}>View All Notifications</Text>
+              <Text style={styles.emptyResetText}>{t("view_all_notifications", "View All Notifications")}</Text>
             </TouchableOpacity>
           )}
         </ScrollView>
@@ -881,12 +883,11 @@ export default function Notifications() {
         </ScrollView>
       )}
 
-      {/* 6. DETAIL BOTTOM SHEET MODAL */}
-      <Modal
+      {/* 6. DETAIL BOTTOM SHEET DRAWER */}
+      <SwipeableDrawer
         visible={Boolean(selectedNotification)}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setSelectedNotification(null)}
+        onClose={() => setSelectedNotification(null)}
+        sheetStyle={[styles.detailSheetContainer, { paddingHorizontal: 0, paddingBottom: 0 }]}
       >
         {selectedNotification && (
           <NotificationDetailSheet
@@ -919,80 +920,74 @@ export default function Notifications() {
             }}
           />
         )}
-      </Modal>
+      </SwipeableDrawer>
 
-      {/* 7. MORE OPTIONS / MANAGEMENT MODAL */}
-      <Modal
+      {/* 7. MORE OPTIONS / MANAGEMENT DRAWER */}
+      <SwipeableDrawer
         visible={showOptionsModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowOptionsModal(false)}
+        onClose={() => setShowOptionsModal(false)}
+        sheetStyle={styles.optionsPopup}
       >
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowOptionsModal(false)}>
-          <View style={styles.optionsPopup}>
-            <View style={styles.optionsHandle} />
-            <Text style={styles.optionsTitle}>Notification Options</Text>
+        <Text style={styles.optionsTitle}>{t("notification_options", "Notification Options")}</Text>
 
-            <TouchableOpacity
-              style={styles.optionRow}
-              onPress={() => {
-                setShowOptionsModal(false);
-                markAllAsRead();
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.optionIconBox, { backgroundColor: "rgba(255, 255, 255, 0.12)" }]}>
-                <Ionicons name="checkmark-done" size={20} color="#ffffff" />
-              </View>
-              <View style={styles.optionTextBox}>
-                <Text style={styles.optionRowTitle}>Mark All as Read</Text>
-                <Text style={styles.optionRowSubtitle}>Clear all unread notification badges</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.optionRow}
-              onPress={() => {
-                setShowOptionsModal(false);
-                clearAllReadNotifications();
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.optionIconBox, { backgroundColor: "rgba(239, 68, 68, 0.15)" }]}>
-                <Ionicons name="trash-outline" size={20} color="#ef4444" />
-              </View>
-              <View style={styles.optionTextBox}>
-                <Text style={styles.optionRowTitle}>Clear Read Alerts</Text>
-                <Text style={styles.optionRowSubtitle}>Remove all opened notifications from list</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.optionRow}
-              onPress={() => {
-                setShowOptionsModal(false);
-                router.push("/general-settings" as any);
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.optionIconBox, { backgroundColor: "rgba(255, 255, 255, 0.08)" }]}>
-                <Ionicons name="settings-outline" size={20} color="#ffffff" />
-              </View>
-              <View style={styles.optionTextBox}>
-                <Text style={styles.optionRowTitle}>Alert & Sound Settings</Text>
-                <Text style={styles.optionRowSubtitle}>Configure app ringtone, vibration, and push</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.optionsCloseBtn}
-              onPress={() => setShowOptionsModal(false)}
-            >
-              <Text style={styles.optionsCloseText}>Cancel</Text>
-            </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.optionRow}
+          onPress={() => {
+            setShowOptionsModal(false);
+            markAllAsRead();
+          }}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.optionIconBox, { backgroundColor: "rgba(255, 255, 255, 0.12)" }]}>
+            <Ionicons name="checkmark-done" size={20} color="#ffffff" />
           </View>
-        </Pressable>
-      </Modal>
+          <View style={styles.optionTextBox}>
+            <Text style={styles.optionRowTitle}>{t("mark_all_read", "Mark All as Read")}</Text>
+            <Text style={styles.optionRowSubtitle}>{t("mark_all_read_desc", "Clear all unread notification badges")}</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.optionRow}
+          onPress={() => {
+            setShowOptionsModal(false);
+            clearAllReadNotifications();
+          }}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.optionIconBox, { backgroundColor: "rgba(239, 68, 68, 0.15)" }]}>
+            <Ionicons name="trash-outline" size={20} color="#ef4444" />
+          </View>
+          <View style={styles.optionTextBox}>
+            <Text style={styles.optionRowTitle}>{t("clear_read_alerts", "Clear Read Alerts")}</Text>
+            <Text style={styles.optionRowSubtitle}>{t("clear_read_alerts_desc", "Remove all opened notifications from list")}</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.optionRow}
+          onPress={() => {
+            setShowOptionsModal(false);
+            router.push("/settings/notification" as any);
+          }}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.optionIconBox, { backgroundColor: "rgba(255, 255, 255, 0.08)" }]}>
+            <Ionicons name="settings-outline" size={20} color="#ffffff" />
+          </View>
+          <View style={styles.optionTextBox}>
+            <Text style={styles.optionRowTitle}>{t("alert_sound_settings", "Alert & Sound Settings")}</Text>
+            <Text style={styles.optionRowSubtitle}>{t("alert_sound_settings_desc", "Configure app ringtone, vibration, and push")}</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.optionsCloseBtn}
+          onPress={() => setShowOptionsModal(false)}
+        >
+          <Text style={styles.optionsCloseText}>{t("cancel", "Cancel")}</Text>
+        </TouchableOpacity>
+      </SwipeableDrawer>
     </SafeAreaView>
   );
 }
@@ -1210,10 +1205,7 @@ function NotificationDetailSheet({
   const isPendingRequest = item.type === "friend_request" && item.status !== "accepted" && item.status !== "rejected";
 
   return (
-    <View style={styles.modalOverlay}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose} />
-
-      <View style={styles.detailSheetContainer}>
+    <View style={styles.detailSheetContainer}>
         {/* Top Drag Indicator */}
         <View style={styles.sheetHandleBar} />
 
@@ -1354,7 +1346,6 @@ function NotificationDetailSheet({
           </TouchableOpacity>
         </View>
       </View>
-    </View>
   );
 }
 

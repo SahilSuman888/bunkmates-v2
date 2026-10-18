@@ -22,15 +22,16 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useThemeToggle } from "../contexts/ThemeContext";
-import { useLanguage } from "../contexts/LanguageContext";
-import { useAppSettings } from "../contexts/AppSettingsContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
 import {
   COLOR_BLIND_OPTIONS,
   ColorBlindOption,
   ColorBlindType,
   getAccessibleHitSlop,
-} from "../theme/accessibility";
+} from "../../theme/accessibility";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 export default function AccessibilityScreen() {
   const router = useRouter();
@@ -503,100 +504,87 @@ export default function AccessibilityScreen() {
       </ScrollView>
 
       {/* ========================================================
-          MODAL: COLOR BLIND MODE PICKER (CVD)
+          DRAWER: COLOR BLIND MODE PICKER (CVD)
       ========================================================= */}
-      <Modal
+      <SwipeableDrawer
         visible={colorBlindModalVisible}
-        transparent
-        animationType={reduceMotion ? "none" : "slide"}
-        onRequestClose={() => setColorBlindModalVisible(false)}
+        onClose={() => setColorBlindModalVisible(false)}
+        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+            {t("Color Blind Mode")}
+          </Text>
           <Pressable
-            style={styles.modalBackdrop}
             onPress={() => setColorBlindModalVisible(false)}
+            hitSlop={hitSlop}
+            style={({ pressed }) => pressed && { opacity: 0.6 }}
             accessible={true}
-            accessibilityLabel="Dismiss modal"
             accessibilityRole="button"
-          />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
-                {t("Color Blind Mode")}
-              </Text>
-              <Pressable
-                onPress={() => setColorBlindModalVisible(false)}
-                hitSlop={hitSlop}
-                style={({ pressed }) => pressed && { opacity: 0.6 }}
-                accessible={true}
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-              >
-                <Ionicons name="close" size={22} color={colors.textPrimary} />
-              </Pressable>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
-              {COLOR_BLIND_OPTIONS.map((opt) => {
-                const isSelected = colorBlindMode === opt.id;
-                return (
-                  <Pressable
-                    key={opt.id}
-                    onPress={() => handleSelectColorBlind(opt)}
-                    style={({ pressed }) => [
-                      styles.modalOptionRow,
-                      isSelected && { backgroundColor: colors.activeRowBg },
-                      pressed && styles.pressed,
-                    ]}
-                    accessible={true}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: isSelected }}
-                    accessibilityLabel={`${opt.label}, ${opt.desc}`}
-                    hitSlop={hitSlop}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                        <Text
-                          style={[
-                            styles.modalOptionTitle,
-                            {
-                              color: colors.textPrimary,
-                              fontWeight: isSelected ? "700" : "500",
-                            },
-                          ]}
-                        >
-                          {opt.label}
-                        </Text>
-                        <View style={[styles.badgePill, { backgroundColor: colors.chipBg }]}>
-                          <Text style={[styles.badgePillText, { color: colors.textSecondary }]}>
-                            {opt.badge}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text style={[styles.modalOptionDesc, { color: colors.textSecondary }]}>
-                        {opt.desc}
-                      </Text>
-                      {/* Swatch Strip */}
-                      <View style={styles.modalSwatchStrip}>
-                        {opt.palettePreview.map((hex, idx) => (
-                          <View
-                            key={idx}
-                            style={[styles.modalSwatchDot, { backgroundColor: hex }]}
-                          />
-                        ))}
-                      </View>
-                    </View>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
+            accessibilityLabel="Close"
+          >
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Pressable>
         </View>
-      </Modal>
+
+        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
+          {COLOR_BLIND_OPTIONS.map((opt) => {
+            const isSelected = colorBlindMode === opt.id;
+            return (
+              <Pressable
+                key={opt.id}
+                onPress={() => handleSelectColorBlind(opt)}
+                style={({ pressed }) => [
+                  styles.modalOptionRow,
+                  isSelected && { backgroundColor: colors.activeRowBg },
+                  pressed && styles.pressed,
+                ]}
+                accessible={true}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: isSelected }}
+                accessibilityLabel={`${opt.label}, ${opt.desc}`}
+                hitSlop={hitSlop}
+              >
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Text
+                      style={[
+                        styles.modalOptionTitle,
+                        {
+                          color: colors.textPrimary,
+                          fontWeight: isSelected ? "700" : "500",
+                        },
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                    <View style={[styles.badgePill, { backgroundColor: colors.chipBg }]}>
+                      <Text style={[styles.badgePillText, { color: colors.textSecondary }]}>
+                        {opt.badge}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.modalOptionDesc, { color: colors.textSecondary }]}>
+                    {opt.desc}
+                  </Text>
+                  {/* Swatch Strip */}
+                  <View style={styles.modalSwatchStrip}>
+                    {opt.palettePreview.map((hex, idx) => (
+                      <View
+                        key={idx}
+                        style={[styles.modalSwatchDot, { backgroundColor: hex }]}
+                      />
+                    ))}
+                  </View>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
+                )}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </SwipeableDrawer>
     </SafeAreaView>
   );
 }

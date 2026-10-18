@@ -159,7 +159,7 @@ export default function InviteFriendScreen() {
         <Pressable
           onPress={() => {
             if (router.canGoBack()) router.back();
-            else router.replace("/ProfileSettings" as any);
+            else router.replace("/settings" as any);
           }}
           style={({ pressed }) => [
             styles.backButton,

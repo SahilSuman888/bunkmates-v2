@@ -20,11 +20,12 @@ import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { auth, db } from "../lib/firebase";
-import { useLanguage } from "../contexts/LanguageContext";
-import { useThemeToggle } from "../contexts/ThemeContext";
-import { ACCENT_COLORS } from "../theme/theme";
-import { SettingsActionModal } from "../components/ui/SettingsActionModal";
+import { auth, db } from "../../lib/firebase";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { ACCENT_COLORS } from "../../theme/theme";
+import { SettingsActionModal } from "./_components/SettingsActionModal";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 export interface DownloadedMap {
   id: string;
@@ -550,164 +551,154 @@ export default function OfflineDownloads() {
         </Animated.View>
       )}
 
-      {/* ── 1. Download New Map Region Modal ── */}
-      <Modal
+      {/* ── 1. Download New Map Region Drawer ── */}
+      <SwipeableDrawer
         visible={downloadModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDownloadModalVisible(false)}
+        onClose={() => setDownloadModalVisible(false)}
+        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
-              <Ionicons name="cloud-download-outline" size={22} color={colors.greyishWhite} />
-            </View>
+        <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
+          <Ionicons name="cloud-download-outline" size={22} color={colors.greyishWhite} />
+        </View>
 
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Download Map Region</Text>
-            <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              Save vector topographic tiles to navigate trails and cities with zero cellular signal.
-            </Text>
+        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>Download Map Region</Text>
+        <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
+          Save vector topographic tiles to navigate trails and cities with zero cellular signal.
+        </Text>
 
-            <ScrollView style={styles.downloadList} showsVerticalScrollIndicator={false}>
-              {AVAILABLE_MAPS_TO_DOWNLOAD.map((item) => {
-                const isAlreadyDownloaded = maps.some((m) =>
-                  m.name.toLowerCase().includes(item.name.toLowerCase())
-                );
-                const isCurrentlyDownloading = downloadingId === item.id;
+        <ScrollView style={styles.downloadList} showsVerticalScrollIndicator={false}>
+          {AVAILABLE_MAPS_TO_DOWNLOAD.map((item) => {
+            const isAlreadyDownloaded = maps.some((m) =>
+              m.name.toLowerCase().includes(item.name.toLowerCase())
+            );
+            const isCurrentlyDownloading = downloadingId === item.id;
 
-                return (
-                  <View
-                    key={item.id}
-                    style={[
-                      styles.downloadItemRow,
-                      { backgroundColor: colors.btnBg },
-                    ]}
-                  >
-                    <View style={{ flex: 1, paddingRight: 10 }}>
-                      <Text style={[styles.downloadItemName, { color: colors.textPrimary }]}>{item.name}</Text>
-                      <Text style={[styles.downloadItemSub, { color: colors.textSecondary }]}>
-                        {item.country} • {item.sizeMB} MB
-                      </Text>
-                    </View>
+            return (
+              <View
+                key={item.id}
+                style={[
+                  styles.downloadItemRow,
+                  { backgroundColor: colors.btnBg },
+                ]}
+              >
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={[styles.downloadItemName, { color: colors.textPrimary }]}>{item.name}</Text>
+                  <Text style={[styles.downloadItemSub, { color: colors.textSecondary }]}>
+                    {item.country} • {item.sizeMB} MB
+                  </Text>
+                </View>
 
-                    {isAlreadyDownloaded ? (
-                      <View style={styles.installedBadge}>
-                        <Ionicons name="checkmark" size={14} color="#10B981" />
-                        <Text style={styles.installedBadgeText}>Ready</Text>
-                      </View>
-                    ) : isCurrentlyDownloading ? (
-                      <View style={styles.downloadingWrap}>
-                        <ActivityIndicator size="small" color={colors.textPrimary} />
-                        <Text style={[styles.downloadingPct, { color: colors.textSecondary }]}>
-                          {Math.round(downloadProgress * 100)}%
-                        </Text>
-                      </View>
-                    ) : (
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.downloadPillBtn,
-                          { backgroundColor: isDark ? "#FFFFFF" : "#11141A" },
-                          pressed && styles.pressed,
-                        ]}
-                        onPress={() => handleDownloadMapRegion(item)}
-                      >
-                        <Text
-                          style={[
-                            styles.downloadPillBtnText,
-                            { color: isDark ? "#000000" : "#FFFFFF" },
-                          ]}
-                        >
-                          Download
-                        </Text>
-                      </Pressable>
-                    )}
+                {isAlreadyDownloaded ? (
+                  <View style={styles.installedBadge}>
+                    <Ionicons name="checkmark" size={14} color="#10B981" />
+                    <Text style={styles.installedBadgeText}>Ready</Text>
                   </View>
-                );
-              })}
-            </ScrollView>
+                ) : isCurrentlyDownloading ? (
+                  <View style={styles.downloadingWrap}>
+                    <ActivityIndicator size="small" color={colors.textPrimary} />
+                    <Text style={[styles.downloadingPct, { color: colors.textSecondary }]}>
+                      {Math.round(downloadProgress * 100)}%
+                    </Text>
+                  </View>
+                ) : (
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.downloadPillBtn,
+                      { backgroundColor: isDark ? "#FFFFFF" : "#11141A" },
+                      pressed && styles.pressed,
+                    ]}
+                    onPress={() => handleDownloadMapRegion(item)}
+                  >
+                    <Text
+                      style={[
+                        styles.downloadPillBtnText,
+                        { color: isDark ? "#000000" : "#FFFFFF" },
+                      ]}
+                    >
+                      Download
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            );
+          })}
+        </ScrollView>
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalCloseBtn,
-                { backgroundColor: colors.btnBg },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setDownloadModalVisible(false)}
-            >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>Close</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+        <Pressable
+          style={({ pressed }) => [
+            styles.modalCloseBtn,
+            { backgroundColor: colors.btnBg },
+            pressed && styles.pressed,
+          ]}
+          onPress={() => setDownloadModalVisible(false)}
+        >
+          <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>Close</Text>
+        </Pressable>
+      </SwipeableDrawer>
 
-      {/* ── 2. Offline Trip Details Modal ── */}
-      <Modal
+      {/* ── 2. Offline Trip Details Drawer ── */}
+      <SwipeableDrawer
         visible={selectedTripDetails !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSelectedTripDetails(null)}
+        onClose={() => setSelectedTripDetails(null)}
+        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
-              <Ionicons name="briefcase-outline" size={22} color={colors.greyishWhite} />
-            </View>
+        <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
+          <Ionicons name="briefcase-outline" size={22} color={colors.greyishWhite} />
+        </View>
 
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
-              {selectedTripDetails?.name}
+        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+          {selectedTripDetails?.name}
+        </Text>
+        <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
+          Offline package is downloaded and ready for offline use during your trip.
+        </Text>
+
+        {/* Trip Specs List */}
+        <View style={styles.tripSpecsColumn}>
+          <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
+            <Ionicons name="checkbox-outline" size={17} color={colors.greyishWhite} />
+            <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Packing Checklist</Text>
+            <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
+              {selectedTripDetails?.packlistCount} Items
             </Text>
-            <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              Offline package is downloaded and ready for offline use during your trip.
+          </View>
+
+          <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
+            <Ionicons name="calendar-outline" size={17} color={colors.greyishWhite} />
+            <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Full Itinerary</Text>
+            <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
+              {selectedTripDetails?.itineraryDays} Days
             </Text>
+          </View>
 
-            {/* Trip Specs List */}
-            <View style={styles.tripSpecsColumn}>
-              <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
-                <Ionicons name="checkbox-outline" size={17} color={colors.greyishWhite} />
-                <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Packing Checklist</Text>
-                <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
-                  {selectedTripDetails?.packlistCount} Items
-                </Text>
-              </View>
+          <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
+            <Ionicons name="people-outline" size={17} color={colors.greyishWhite} />
+            <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Bunkmates Contact Cards</Text>
+            <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
+              {selectedTripDetails?.bunkmatesCount} Travelers
+            </Text>
+          </View>
 
-              <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
-                <Ionicons name="calendar-outline" size={17} color={colors.greyishWhite} />
-                <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Full Itinerary</Text>
-                <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
-                  {selectedTripDetails?.itineraryDays} Days
-                </Text>
-              </View>
-
-              <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
-                <Ionicons name="people-outline" size={17} color={colors.greyishWhite} />
-                <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Bunkmates Contact Cards</Text>
-                <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
-                  {selectedTripDetails?.bunkmatesCount} Travelers
-                </Text>
-              </View>
-
-              <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
-                <Ionicons name="map-outline" size={17} color={colors.greyishWhite} />
-                <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Offline Area Map Tiles</Text>
-                <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
-                  {selectedTripDetails?.mapTilesMB} MB Cached
-                </Text>
-              </View>
-            </View>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalCloseBtn,
-                { backgroundColor: colors.btnBg },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setSelectedTripDetails(null)}
-            >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>Done</Text>
-            </Pressable>
+          <View style={[styles.tripSpecRow, { backgroundColor: colors.btnBg }]}>
+            <Ionicons name="map-outline" size={17} color={colors.greyishWhite} />
+            <Text style={[styles.tripSpecLabel, { color: colors.textSecondary }]}>Offline Area Map Tiles</Text>
+            <Text style={[styles.tripSpecValue, { color: colors.textPrimary }]}>
+              {selectedTripDetails?.mapTilesMB} MB Cached
+            </Text>
           </View>
         </View>
-      </Modal>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.modalCloseBtn,
+            { backgroundColor: colors.btnBg },
+            pressed && styles.pressed,
+          ]}
+          onPress={() => setSelectedTripDetails(null)}
+        >
+          <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>Done</Text>
+        </Pressable>
+      </SwipeableDrawer>
 
       {/* ── CLEAR TEMPORARY CACHE CONFIRMATION & SUCCESS FLOW (Matching Image 1 & 2) ── */}
       <SettingsActionModal
@@ -976,16 +967,16 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     width: "100%",
-    maxWidth: 390,
-    borderRadius: 28,
+    maxWidth: "100%",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     borderWidth: 0,
-    padding: 22,
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === "ios" ? 34 : 24,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 0,
   },
   modalTitle: {
     fontSize: 18,

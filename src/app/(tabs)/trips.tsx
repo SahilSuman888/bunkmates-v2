@@ -48,6 +48,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import Svg, { Circle } from "react-native-svg";
 import { useUserGroups } from "../../hooks/useUserGroups";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { useLanguage } from "../../contexts/LanguageContext";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SUGGESTED_CARD_WIDTH = Math.floor((SCREEN_WIDTH - 42) / 2);

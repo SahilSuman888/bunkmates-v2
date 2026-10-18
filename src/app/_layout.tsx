@@ -4,7 +4,7 @@ import { View, Platform, StatusBar } from "react-native";
 import { enableScreens, enableFreeze } from "react-native-screens";
 
 import { UserProvider } from "../contexts/UserContext";
-import { AppSettingsProvider } from "../contexts/AppSettingsContext";
+import { AppSettingsProvider, useAppSettings } from "../contexts/AppSettingsContext";
 import { LanguageProvider } from "../contexts/LanguageContext";
 
 import {
@@ -18,11 +18,17 @@ import { CallProvider } from "../contexts/CallContext";
 import NotificationsHandler from "../components/NotificationsHandler";
 import IncomingCallHandler from "../components/IncomingCallHandler";
 import OneSignalHandler from "../components/OneSignalHandler";
+import { AppAtmosphereBackground } from "../components/ui/AppAtmosphereBackground";
+import { InAppNotificationBanner } from "../components/ui/InAppNotificationBanner";
 import { GradientProvider } from "../contexts/GradientContext";
 import { initOneSignal } from "../lib/onesignal";
 
 // Initialize OneSignal & Android Notification Channels at module load
 initOneSignal();
+
+// Activate native screen management and background freeze for 60/120fps navigation
+enableScreens(true);
+enableFreeze(true);
 
 function LayoutContent() {
   const { themeColors, isDark, reduceAnimations, background } = useThemeToggle();
@@ -66,7 +72,6 @@ function LayoutContent() {
                         : "transparent",
                   },
                   animation: disableAnimations ? "none" : "slide_from_right",
-                  animationDuration: 180,
                   gestureEnabled: true,
                   fullScreenGestureEnabled: true,
                   freezeOnBlur: true,

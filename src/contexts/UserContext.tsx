@@ -28,7 +28,6 @@ interface UserProviderProps {
 }
 
 import { recordDeviceSessionInFirestore } from '../utils/sessionTracker';
-import { AppState } from 'react-native';
 
 export const UserProvider = ({ children }: UserProviderProps) => {
   const [user, setUser] = useState<any>(null);

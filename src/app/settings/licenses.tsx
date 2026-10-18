@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useThemeToggle } from "../contexts/ThemeContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 
 const libraries = [
   {

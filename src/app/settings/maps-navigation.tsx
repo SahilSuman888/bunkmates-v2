@@ -19,10 +19,11 @@ import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { auth, db } from "../lib/firebase";
-import { useThemeToggle } from "../contexts/ThemeContext";
-import { useLanguage } from "../contexts/LanguageContext";
-import { ACCENT_COLORS } from "../theme/theme";
+import { auth, db } from "../../lib/firebase";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { ACCENT_COLORS } from "../../theme/theme";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 type MapProvider = "Apple Maps" | "Google Maps" | "Waze";
 type StyleProfile = "Standard" | "Satellite" | "Terrain";
@@ -457,76 +458,71 @@ export default function MapsNavigation() {
         </Animated.View>
       )}
 
-      {/* ── Distance Units Selection Modal ── */}
-      <Modal
+      {/* ── Distance Units Selection Drawer ── */}
+      <SwipeableDrawer
         visible={distanceModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDistanceModalVisible(false)}
+        onClose={() => setDistanceModalVisible(false)}
+        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
-              <Ionicons name="arrow-forward-outline" size={22} color={colors.greyishWhite} />
-            </View>
-
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Distance Units")}</Text>
-            <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              {t("Select your preferred measurement units for route guidance and trail navigation.", "Select your preferred measurement units for route guidance and trail navigation.")}
-            </Text>
-
-            <View style={styles.modalListColumn}>
-              {DISTANCE_OPTIONS.map((opt) => {
-                const isSelected = distanceUnit === opt.id;
-                return (
-                  <Pressable
-                    key={opt.id}
-                    style={({ pressed }) => [
-                      styles.modalOptionItem,
-                      {
-                        backgroundColor: isSelected ? colors.insetBg : "transparent",
-                      },
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={() => handleSelectDistanceUnit(opt.id)}
-                  >
-                    <View style={{ flex: 1, paddingRight: 10 }}>
-                      <Text
-                        style={[
-                          styles.modalOptionText,
-                          {
-                            color: isSelected ? colors.activeText : colors.textPrimary,
-                            fontWeight: isSelected ? "700" : "600",
-                          },
-                        ]}
-                      >
-                        {t(opt.label)}
-                      </Text>
-                      <Text style={[styles.modalOptionSub, { color: colors.textSecondary }]}>
-                        {t(opt.desc)}
-                      </Text>
-                    </View>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalCloseBtn,
-                { backgroundColor: colors.insetBg },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setDistanceModalVisible(false)}
-            >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
-            </Pressable>
-          </View>
+        <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
+          <Ionicons name="arrow-forward-outline" size={22} color={colors.greyishWhite} />
         </View>
-      </Modal>
+
+        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Distance Units")}</Text>
+        <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
+          {t("Select your preferred measurement units for route guidance and trail navigation.", "Select your preferred measurement units for route guidance and trail navigation.")}
+        </Text>
+
+        <View style={styles.modalListColumn}>
+          {DISTANCE_OPTIONS.map((opt) => {
+            const isSelected = distanceUnit === opt.id;
+            return (
+              <Pressable
+                key={opt.id}
+                style={({ pressed }) => [
+                  styles.modalOptionItem,
+                  {
+                    backgroundColor: isSelected ? colors.insetBg : "transparent",
+                  },
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => handleSelectDistanceUnit(opt.id)}
+              >
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text
+                    style={[
+                      styles.modalOptionText,
+                      {
+                        color: isSelected ? colors.activeText : colors.textPrimary,
+                        fontWeight: isSelected ? "700" : "600",
+                      },
+                    ]}
+                  >
+                    {t(opt.label)}
+                  </Text>
+                  <Text style={[styles.modalOptionSub, { color: colors.textSecondary }]}>
+                    {t(opt.desc)}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.modalCloseBtn,
+            { backgroundColor: colors.insetBg },
+            pressed && styles.pressed,
+          ]}
+          onPress={() => setDistanceModalVisible(false)}
+        >
+          <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
+        </Pressable>
+      </SwipeableDrawer>
     </SafeAreaView>
   );
 }
@@ -702,16 +698,16 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     width: "100%",
-    maxWidth: 390,
-    borderRadius: 28,
+    maxWidth: "100%",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     borderWidth: 0,
-    padding: 22,
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === "ios" ? 34 : 24,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 0,
   },
   modalTitle: {
     fontSize: 18,

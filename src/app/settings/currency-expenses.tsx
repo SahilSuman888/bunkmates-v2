@@ -20,11 +20,12 @@ import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { auth, db } from "../lib/firebase";
-import { useThemeToggle } from "../contexts/ThemeContext";
-import { useAppSettings } from "../contexts/AppSettingsContext";
-import { useLanguage } from "../contexts/LanguageContext";
-import { ACCENT_COLORS } from "../theme/theme";
+import { auth, db } from "../../lib/firebase";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { ACCENT_COLORS } from "../../theme/theme";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 export interface CurrencyItem {
   code: string;
@@ -559,243 +560,228 @@ export default function CurrencyExpenses() {
         </Animated.View>
       )}
 
-      {/* ── 1. Base Currency Modal ── */}
-      <Modal
+      {/* ── 1. Base Currency Drawer ── */}
+      <SwipeableDrawer
         visible={currencyModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setCurrencyModalVisible(false)}
+        onClose={() => setCurrencyModalVisible(false)}
+        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Select Base Currency")}</Text>
-            <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              {t("All group logs, split calculations and savings will be computed in this currency.", "All group logs, split calculations and savings will be computed in this currency.")}
-            </Text>
+        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Select Base Currency")}</Text>
+        <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
+          {t("All group logs, split calculations and savings will be computed in this currency.", "All group logs, split calculations and savings will be computed in this currency.")}
+        </Text>
 
-            {/* Search input */}
-            <View style={[styles.searchBox, { backgroundColor: colors.searchBg }]}>
-              <Ionicons name="search-outline" size={18} color={colors.textSecondary} />
-              <TextInput
-                value={currencySearch}
-                onChangeText={setCurrencySearch}
-                placeholder={t("Search currency code or country...")}
-                placeholderTextColor={colors.textSecondary}
-                style={[styles.searchInput, { color: colors.textPrimary }]}
-                autoCapitalize="none"
-              />
-              {currencySearch.length > 0 && (
-                <Pressable onPress={() => setCurrencySearch("")} hitSlop={6}>
-                  <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
-                </Pressable>
-              )}
-            </View>
-
-            <ScrollView style={styles.currencyList} showsVerticalScrollIndicator={false}>
-              {filteredCurrencies.map((c) => {
-                const isSelected = baseCurrency.code === c.code;
-                return (
-                  <Pressable
-                    key={c.code}
-                    style={({ pressed }) => [
-                      styles.currencyItemRow,
-                      {
-                        backgroundColor: isSelected ? colors.insetBg : "transparent",
-                      },
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={() => handleSelectCurrency(c)}
-                  >
-                    <Text style={styles.currencyFlagEmoji}>{c.flag}</Text>
-                    <View style={styles.currencyItemMid}>
-                      <Text style={[styles.currencyItemName, { color: colors.textPrimary }]}>{t(c.name)}</Text>
-                      <Text style={[styles.currencyItemCode, { color: colors.textSecondary }]}>
-                        {c.code} ({c.symbol})
-                      </Text>
-                    </View>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalCloseBtn,
-                { backgroundColor: colors.insetBg },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setCurrencyModalVisible(false)}
-            >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
+        {/* Search input */}
+        <View style={[styles.searchBox, { backgroundColor: colors.searchBg }]}>
+          <Ionicons name="search-outline" size={18} color={colors.textSecondary} />
+          <TextInput
+            value={currencySearch}
+            onChangeText={setCurrencySearch}
+            placeholder={t("Search currency code or country...")}
+            placeholderTextColor={colors.textSecondary}
+            style={[styles.searchInput, { color: colors.textPrimary }]}
+            autoCapitalize="none"
+          />
+          {currencySearch.length > 0 && (
+            <Pressable onPress={() => setCurrencySearch("")} hitSlop={6}>
+              <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
             </Pressable>
-          </View>
+          )}
         </View>
-      </Modal>
 
-      {/* ── 2. Split Method Modal ── */}
-      <Modal
-        visible={splitModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSplitModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
-              <Ionicons name="pie-chart-outline" size={22} color={colors.greyishWhite} />
-            </View>
-
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Default Split Method")}</Text>
-            <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              {t("Choose the primary logic applied when you record new group shared expenses.", "Choose the primary logic applied when you record new group shared expenses.")}
-            </Text>
-
-            <View style={styles.modalListColumn}>
-              {SPLIT_METHODS.map((sm) => {
-                const isSelected = splitMethod === sm.id;
-                return (
-                  <Pressable
-                    key={sm.id}
-                    style={({ pressed }) => [
-                      styles.modalOptionItem,
-                      {
-                        backgroundColor: isSelected ? colors.insetBg : "transparent",
-                      },
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={() => handleSelectSplitMethod(sm.id)}
-                  >
-                    <View style={{ flex: 1, paddingRight: 10 }}>
-                      <Text
-                        style={[
-                          styles.modalOptionText,
-                          {
-                            color: isSelected ? colors.activeText : colors.textPrimary,
-                            fontWeight: isSelected ? "700" : "600",
-                          },
-                        ]}
-                      >
-                        {t(sm.title)}
-                      </Text>
-                      <Text style={[styles.modalOptionSub, { color: colors.textSecondary }]}>{t(sm.desc)}</Text>
-                    </View>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalCloseBtn,
-                { backgroundColor: colors.insetBg },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setSplitModalVisible(false)}
-            >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ── 3. Edit Savings Goal Modal ── */}
-      <Modal
-        visible={goalModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setGoalModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
-              <Ionicons name="wallet-outline" size={22} color={colors.greyishWhite} />
-            </View>
-
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Edit Monthly Savings Goal")}</Text>
-            <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              {t("Set a monthly target to fund your upcoming adventures and bunkmate trips.", "Set a monthly target to fund your upcoming adventures and bunkmate trips.")}
-            </Text>
-
-            {/* Quick preset amount chips */}
-            <View style={styles.presetChipsRow}>
-              {PRESET_GOALS.map((amt) => {
-                const isSelected = parseFloat(customGoalInput) === amt;
-                return (
-                  <Pressable
-                    key={amt}
-                    style={({ pressed }) => [
-                      styles.presetChip,
-                      {
-                        backgroundColor: isSelected ? colors.insetBg : "transparent",
-                      },
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={() => setCustomGoalInput(amt.toFixed(2))}
-                  >
-                    <Text
-                      style={[
-                        styles.presetChipText,
-                        {
-                          color: isSelected ? colors.activeText : colors.textPrimary,
-                          fontWeight: isSelected ? "700" : "500",
-                        },
-                      ]}
-                    >
-                      {baseCurrency.symbol} {amt}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {/* Numeric input */}
-            <View style={[styles.goalInputWrap, { backgroundColor: colors.searchBg }]}>
-              <Text style={[styles.goalInputPrefix, { color: colors.textPrimary }]}>{baseCurrency.symbol}</Text>
-              <TextInput
-                value={customGoalInput}
-                onChangeText={setCustomGoalInput}
-                keyboardType="numeric"
-                style={[styles.goalTextInput, { color: colors.textPrimary }]}
-                placeholder="0.00"
-                placeholderTextColor={colors.textSecondary}
-              />
-              <Text style={[styles.goalInputSuffix, { color: colors.textSecondary }]}>{baseCurrency.code}</Text>
-            </View>
-
-            {/* Action buttons */}
-            <View style={styles.modalActionRow}>
+        <ScrollView style={styles.currencyList} showsVerticalScrollIndicator={false}>
+          {filteredCurrencies.map((c) => {
+            const isSelected = baseCurrency.code === c.code;
+            return (
               <Pressable
+                key={c.code}
                 style={({ pressed }) => [
-                  styles.modalSecondaryBtn,
+                  styles.currencyItemRow,
+                  {
+                    backgroundColor: isSelected ? colors.insetBg : "transparent",
+                  },
                   pressed && styles.pressed,
                 ]}
-                onPress={() => setGoalModalVisible(false)}
+                onPress={() => handleSelectCurrency(c)}
               >
-                <Text style={[styles.modalCloseBtnText, { color: colors.textSecondary }]}>{t("Cancel")}</Text>
+                <Text style={styles.currencyFlagEmoji}>{c.flag}</Text>
+                <View style={styles.currencyItemMid}>
+                  <Text style={[styles.currencyItemName, { color: colors.textPrimary }]}>{t(c.name)}</Text>
+                  <Text style={[styles.currencyItemCode, { color: colors.textSecondary }]}>
+                    {c.code} ({c.symbol})
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
+                )}
               </Pressable>
+            );
+          })}
+        </ScrollView>
 
+        <Pressable
+          style={({ pressed }) => [
+            styles.modalCloseBtn,
+            { backgroundColor: colors.insetBg },
+            pressed && styles.pressed,
+          ]}
+          onPress={() => setCurrencyModalVisible(false)}
+        >
+          <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
+        </Pressable>
+      </SwipeableDrawer>
+
+      {/* ── 2. Split Method Drawer ── */}
+      <SwipeableDrawer
+        visible={splitModalVisible}
+        onClose={() => setSplitModalVisible(false)}
+        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
+      >
+        <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
+          <Ionicons name="pie-chart-outline" size={22} color={colors.greyishWhite} />
+        </View>
+
+        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Default Split Method")}</Text>
+        <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
+          {t("Choose the primary logic applied when you record new group shared expenses.", "Choose the primary logic applied when you record new group shared expenses.")}
+        </Text>
+
+        <View style={styles.modalListColumn}>
+          {SPLIT_METHODS.map((sm) => {
+            const isSelected = splitMethod === sm.id;
+            return (
               <Pressable
+                key={sm.id}
                 style={({ pressed }) => [
-                  styles.modalPrimaryBtn,
-                  { backgroundColor: isDark ? "#FFFFFF" : "#11141A" },
+                  styles.modalOptionItem,
+                  {
+                    backgroundColor: isSelected ? colors.insetBg : "transparent",
+                  },
                   pressed && styles.pressed,
                 ]}
-                onPress={handleSaveGoal}
+                onPress={() => handleSelectSplitMethod(sm.id)}
               >
-                <Text style={[styles.modalPrimaryBtnText, { color: isDark ? "#000000" : "#FFFFFF" }]}>
-                  {t("Save Goal")}
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text
+                    style={[
+                      styles.modalOptionText,
+                      {
+                        color: isSelected ? colors.activeText : colors.textPrimary,
+                        fontWeight: isSelected ? "700" : "600",
+                      },
+                    ]}
+                  >
+                    {t(sm.title)}
+                  </Text>
+                  <Text style={[styles.modalOptionSub, { color: colors.textSecondary }]}>{t(sm.desc)}</Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.modalCloseBtn,
+            { backgroundColor: colors.insetBg },
+            pressed && styles.pressed,
+          ]}
+          onPress={() => setSplitModalVisible(false)}
+        >
+          <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
+        </Pressable>
+      </SwipeableDrawer>
+
+      {/* ── 3. Edit Savings Goal Drawer ── */}
+      <SwipeableDrawer
+        visible={goalModalVisible}
+        onClose={() => setGoalModalVisible(false)}
+        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
+      >
+        <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
+          <Ionicons name="wallet-outline" size={22} color={colors.greyishWhite} />
+        </View>
+
+        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Edit Monthly Savings Goal")}</Text>
+        <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
+          {t("Set a monthly target to fund your upcoming adventures and bunkmate trips.", "Set a monthly target to fund your upcoming adventures and bunkmate trips.")}
+        </Text>
+
+        {/* Quick preset amount chips */}
+        <View style={styles.presetChipsRow}>
+          {PRESET_GOALS.map((amt) => {
+            const isSelected = parseFloat(customGoalInput) === amt;
+            return (
+              <Pressable
+                key={amt}
+                style={({ pressed }) => [
+                  styles.presetChip,
+                  {
+                    backgroundColor: isSelected ? colors.insetBg : "transparent",
+                  },
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => setCustomGoalInput(amt.toFixed(2))}
+              >
+                <Text
+                  style={[
+                    styles.presetChipText,
+                    {
+                      color: isSelected ? colors.activeText : colors.textPrimary,
+                      fontWeight: isSelected ? "700" : "500",
+                    },
+                  ]}
+                >
+                  {baseCurrency.symbol} {amt}
                 </Text>
               </Pressable>
-            </View>
-          </View>
+            );
+          })}
         </View>
-      </Modal>
+
+        {/* Numeric input */}
+        <View style={[styles.goalInputWrap, { backgroundColor: colors.searchBg }]}>
+          <Text style={[styles.goalInputPrefix, { color: colors.textPrimary }]}>{baseCurrency.symbol}</Text>
+          <TextInput
+            value={customGoalInput}
+            onChangeText={setCustomGoalInput}
+            keyboardType="numeric"
+            style={[styles.goalTextInput, { color: colors.textPrimary }]}
+            placeholder="0.00"
+            placeholderTextColor={colors.textSecondary}
+          />
+          <Text style={[styles.goalInputSuffix, { color: colors.textSecondary }]}>{baseCurrency.code}</Text>
+        </View>
+
+        {/* Action buttons */}
+        <View style={styles.modalActionRow}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.modalSecondaryBtn,
+              pressed && styles.pressed,
+            ]}
+            onPress={() => setGoalModalVisible(false)}
+          >
+            <Text style={[styles.modalCloseBtnText, { color: colors.textSecondary }]}>{t("Cancel")}</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.modalPrimaryBtn,
+              { backgroundColor: isDark ? "#FFFFFF" : "#11141A" },
+              pressed && styles.pressed,
+            ]}
+            onPress={handleSaveGoal}
+          >
+            <Text style={[styles.modalPrimaryBtnText, { color: isDark ? "#000000" : "#FFFFFF" }]}>
+              {t("Save Goal")}
+            </Text>
+          </Pressable>
+        </View>
+      </SwipeableDrawer>
     </SafeAreaView>
   );
 }
@@ -992,16 +978,16 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     width: "100%",
-    maxWidth: 390,
-    borderRadius: 28,
+    maxWidth: "100%",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     borderWidth: 0,
-    padding: 22,
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === "ios" ? 34 : 24,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 0,
   },
   modalTitle: {
     fontSize: 18,

@@ -22,19 +22,15 @@ import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { auth, db } from "../lib/firebase";
-import { useThemeToggle } from "../contexts/ThemeContext";
-import { useLanguage } from "../contexts/LanguageContext";
-import { useAppSettings } from "../contexts/AppSettingsContext";
-import { ACCENT_COLORS } from "../theme/theme";
+import { auth, db } from "../../lib/firebase";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { ACCENT_COLORS } from "../../theme/theme";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
+import { INDIAN_LANGUAGES, IndianLanguageOption } from "../../contexts/indianLanguagesData";
 
-export interface LanguageOption {
-  code: string;
-  name: string;
-  nativeName: string;
-  flag: string;
-  greeting: string;
-}
+export type LanguageOption = IndianLanguageOption;
 
 export interface RegionOption {
   code: string;
@@ -56,42 +52,10 @@ export interface FirstDayOption {
   weekDays: string[];
 }
 
-export const LANGUAGES: LanguageOption[] = [
-  { code: "en-US", name: "English (US)", nativeName: "English (United States)", flag: "🇺🇸", greeting: "Welcome to Bunkmates" },
-  { code: "en-GB", name: "English (UK)", nativeName: "English (United Kingdom)", flag: "🇬🇧", greeting: "Welcome to Bunkmates" },
-  { code: "en-IN", name: "English (IN)", nativeName: "English (India)", flag: "🇮🇳", greeting: "Welcome to Bunkmates" },
-  { code: "hi", name: "Hindi", nativeName: "हिन्दी", flag: "🇮🇳", greeting: "बंकमेट्स में आपका स्वागत है" },
-  { code: "es", name: "Spanish", nativeName: "Español", flag: "🇪🇸", greeting: "Bienvenido a Bunkmates" },
-  { code: "fr", name: "French", nativeName: "Français", flag: "🇫🇷", greeting: "Bienvenue sur Bunkmates" },
-  { code: "de", name: "German", nativeName: "Deutsch", flag: "🇩🇪", greeting: "Willkommen bei Bunkmates" },
-  { code: "ja", name: "Japanese", nativeName: "日本語", flag: "🇯🇵", greeting: "Bunkmatesへようこそ" },
-  { code: "zh-CN", name: "Chinese (Simplified)", nativeName: "简体中文", flag: "🇨🇳", greeting: "欢迎使用 Bunkmates" },
-  { code: "pt-BR", name: "Portuguese (Brazil)", nativeName: "Português", flag: "🇧🇷", greeting: "Bem-vindo ao Bunkmates" },
-  { code: "it", name: "Italian", nativeName: "Italiano", flag: "🇮🇹", greeting: "Benvenuto su Bunkmates" },
-  { code: "ar", name: "Arabic", nativeName: "العربية", flag: "🇦🇪", greeting: "مرحبًا بك في بانكميتس" },
-  { code: "ru", name: "Russian", nativeName: "Русский", flag: "🇷🇺", greeting: "Добро пожаловать в Bunkmates" },
-  { code: "ko", name: "Korean", nativeName: "한국어", flag: "🇰🇷", greeting: "Bunkmates에 오신 것을 환영합니다" },
-  { code: "nl", name: "Dutch", nativeName: "Nederlands", flag: "🇳🇱", greeting: "Welkom bij Bunkmates" },
-  { code: "bn", name: "Bengali", nativeName: "বাংলা", flag: "🇧🇩", greeting: "বাঙ্কমেইটসে স্বাগতম" },
-];
+export const LANGUAGES: LanguageOption[] = INDIAN_LANGUAGES;
 
 export const REGIONS: RegionOption[] = [
-  { code: "US", name: "United States", flag: "🇺🇸", defaultFirstDay: "Sunday", defaultDateFormat: "MM/DD/YYYY", default24Hour: false },
-  { code: "IN", name: "India", flag: "🇮🇳", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: false },
-  { code: "GB", name: "United Kingdom", flag: "🇬🇧", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
-  { code: "CA", name: "Canada", flag: "🇨🇦", defaultFirstDay: "Sunday", defaultDateFormat: "YYYY-MM-DD", default24Hour: false },
-  { code: "AU", name: "Australia", flag: "🇦🇺", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: false },
-  { code: "DE", name: "Germany", flag: "🇩🇪", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
-  { code: "FR", name: "France", flag: "🇫🇷", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
-  { code: "JP", name: "Japan", flag: "🇯🇵", defaultFirstDay: "Sunday", defaultDateFormat: "YYYY-MM-DD", default24Hour: true },
-  { code: "SG", name: "Singapore", flag: "🇸🇬", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
-  { code: "AE", name: "United Arab Emirates", flag: "🇦🇪", defaultFirstDay: "Saturday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
-  { code: "ES", name: "Spain", flag: "🇪🇸", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
-  { code: "IT", name: "Italy", flag: "🇮🇹", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
-  { code: "BR", name: "Brazil", flag: "🇧🇷", defaultFirstDay: "Sunday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
-  { code: "NZ", name: "New Zealand", flag: "🇳🇿", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: false },
-  { code: "CH", name: "Switzerland", flag: "🇨🇭", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
-  { code: "NL", name: "Netherlands", flag: "🇳🇱", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: true },
+  { code: "IN", name: "India (Default)", flag: "🇮🇳", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: false },
 ];
 
 export const DATE_FORMATS: DateFormatOption[] = [
@@ -167,13 +131,13 @@ export default function LanguageRegionSettings() {
   const [authLoading, setAuthLoading] = useState(true);
 
   // States matching reference image defaults
-  const [language, setLanguage] = useState<string>(contextLang || "English (US)");
-  const [languageCode, setLanguageCode] = useState<string>(contextLangCode || "en-US");
-  const [region, setRegion] = useState<string>("United States");
-  const [regionCode, setRegionCode] = useState<string>("US");
-  const [dateFormat, setDateFormat] = useState<string>("MM/DD/YYYY");
+  const [language, setLanguage] = useState<string>(contextLang || "English (India)");
+  const [languageCode, setLanguageCode] = useState<string>(contextLangCode || "en-IN");
+  const [region, setRegion] = useState<string>("India (Default)");
+  const [regionCode, setRegionCode] = useState<string>("IN");
+  const [dateFormat, setDateFormat] = useState<string>("DD/MM/YYYY");
   const [timeFormat24, setTimeFormat24] = useState<boolean>(false);
-  const [firstDayOfWeek, setFirstDayOfWeek] = useState<"Sunday" | "Monday" | "Saturday">("Sunday");
+  const [firstDayOfWeek, setFirstDayOfWeek] = useState<"Sunday" | "Monday" | "Saturday">("Monday");
 
   // Synchronize with global language context
   useEffect(() => {
@@ -302,8 +266,9 @@ export default function LanguageRegionSettings() {
           const parsed = JSON.parse(cached);
           if (parsed.language) setLanguage(parsed.language);
           if (parsed.languageCode) setLanguageCode(parsed.languageCode);
-          if (parsed.region) setRegion(parsed.region);
-          if (parsed.regionCode) setRegionCode(parsed.regionCode);
+          if (parsed.region && parsed.region.includes("India")) setRegion("India (Default)");
+          else setRegion("India (Default)");
+          setRegionCode("IN");
           if (parsed.dateFormat) setDateFormat(parsed.dateFormat);
           if (parsed.timeFormat24 !== undefined) setTimeFormat24(parsed.timeFormat24);
           if (parsed.firstDayOfWeek) setFirstDayOfWeek(parsed.firstDayOfWeek);
@@ -324,8 +289,8 @@ export default function LanguageRegionSettings() {
           const p = uData.localePreferences || {};
           if (p.language) setLanguage(p.language);
           if (p.languageCode) setLanguageCode(p.languageCode);
-          if (p.region) setRegion(p.region);
-          if (p.regionCode) setRegionCode(p.regionCode);
+          setRegion("India (Default)");
+          setRegionCode("IN");
           if (p.dateFormat) setDateFormat(p.dateFormat);
           if (p.timeFormat24 !== undefined) setTimeFormat24(p.timeFormat24);
           if (p.firstDayOfWeek) setFirstDayOfWeek(p.firstDayOfWeek);
@@ -624,14 +589,8 @@ export default function LanguageRegionSettings() {
             </View>
           </Pressable>
 
-          {/* Region */}
-          <Pressable
-            onPress={() => {
-              setRegionSearch("");
-              setRegionModalVisible(true);
-            }}
-            style={({ pressed }) => [styles.rowItem, pressed && styles.rowPressed]}
-          >
+          {/* Region (Fixed to India Default - Right arrow removed) */}
+          <View style={styles.rowItem}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Feather name="map" size={19} color={colors.greyishWhite} />
             </View>
@@ -641,10 +600,9 @@ export default function LanguageRegionSettings() {
               </Text>
               <View style={styles.rightGroup}>
                 <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>{region}</Text>
-                <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
               </View>
             </View>
-          </Pressable>
+          </View>
         </View>
 
         {/* ========================================================
@@ -712,7 +670,7 @@ export default function LanguageRegionSettings() {
                 <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>
                   {firstDayOfWeek === "Sunday" ? t("sunday", "Sunday") : firstDayOfWeek === "Monday" ? t("monday", "Monday") : t("saturday", "Saturday")}
                 </Text>
-                <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
+                <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
               </View>
             </View>
           </Pressable>
@@ -722,307 +680,290 @@ export default function LanguageRegionSettings() {
       </ScrollView>
 
       {/* ========================================================
-          MODAL 1: APP LANGUAGE PICKER
+          MODAL 1: LANGUAGE PICKER (SWIPEABLE DRAWER)
       ========================================================= */}
-      <Modal
+      <SwipeableDrawer
         visible={languageModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setLanguageModalVisible(false)}
+        onClose={() => setLanguageModalVisible(false)}
+        showHandle={false}
+        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setLanguageModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
-                {t("select_language", "Select App Language")}
-              </Text>
-              <Pressable
-                onPress={() => setLanguageModalVisible(false)}
-                style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
-              >
-                <Ionicons name="close" size={22} color={colors.textPrimary} />
-              </Pressable>
-            </View>
-
-            {/* Search Input */}
-            <View style={[styles.searchBox, { backgroundColor: colors.inputBg }]}>
-              <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
-              <TextInput
-                style={[styles.searchInput, { color: colors.textPrimary }]}
-                placeholder={t("search_languages", "Search languages...")}
-                placeholderTextColor={colors.textSecondary}
-                value={langSearch}
-                onChangeText={setLangSearch}
-                autoCorrect={false}
-              />
-              {langSearch.length > 0 && (
-                <Pressable onPress={() => setLangSearch("")}>
-                  <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
-                </Pressable>
-              )}
-            </View>
-
-            <FlatList
-              data={filteredLanguages}
-              keyExtractor={(item) => item.code}
-              showsVerticalScrollIndicator={false}
-              style={{ maxHeight: 380 }}
-              renderItem={({ item }) => {
-                const isSelected = language === item.name;
-                return (
-                  <Pressable
-                    onPress={() => handleSelectLanguage(item)}
-                    style={({ pressed }) => [
-                      styles.modalListItem,
-                      isSelected && { backgroundColor: colors.activeRowBg },
-                      pressed && { opacity: 0.7 },
-                    ]}
-                  >
-                    <Text style={styles.flagIcon}>{item.flag}</Text>
-                    <View style={styles.modalItemTextGroup}>
-                      <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
-                        {item.name}
-                      </Text>
-                      <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
-                        {item.nativeName} • "{item.greeting}"
-                      </Text>
-                    </View>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
-                    )}
-                  </Pressable>
-                );
-              }}
-            />
-          </View>
+        <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+            {t("select_language", "Select App Language")}
+          </Text>
+          <Pressable
+            onPress={() => setLanguageModalVisible(false)}
+            style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Pressable>
         </View>
-      </Modal>
+
+        {/* Search Input */}
+        <View style={[styles.searchBox, { backgroundColor: colors.inputBg }]}>
+          <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
+          <TextInput
+            style={[styles.searchInput, { color: colors.textPrimary }]}
+            placeholder={t("search_languages", "Search languages...")}
+            placeholderTextColor={colors.textSecondary}
+            value={langSearch}
+            onChangeText={setLangSearch}
+            autoCorrect={false}
+          />
+          {langSearch.length > 0 && (
+            <Pressable onPress={() => setLangSearch("")}>
+              <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+            </Pressable>
+          )}
+        </View>
+
+        <FlatList
+          data={filteredLanguages}
+          keyExtractor={(item) => item.code}
+          showsVerticalScrollIndicator={false}
+          style={{ maxHeight: 380 }}
+          renderItem={({ item }) => {
+            const isSelected = languageCode === item.code || language === item.name;
+            return (
+              <Pressable
+                onPress={() => handleSelectLanguage(item)}
+                style={({ pressed }) => [
+                  styles.modalListItem,
+                  isSelected && { backgroundColor: colors.activeRowBg },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Text style={styles.flagIcon}>{item.flag}</Text>
+                <View style={styles.modalItemTextGroup}>
+                  <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
+                    {item.name}
+                  </Text>
+                  <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
+                    {item.nativeName} • "{item.greeting}"
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
+                )}
+              </Pressable>
+            );
+          }}
+        />
+      </SwipeableDrawer>
 
       {/* ========================================================
           MODAL 2: REGION PICKER
       ========================================================= */}
-      <Modal
+      <SwipeableDrawer
         visible={regionModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setRegionModalVisible(false)}
+        onClose={() => setRegionModalVisible(false)}
+        showHandle={false}
+        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setRegionModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
-                {t("select_region", "Select Region")}
-              </Text>
-              <Pressable
-                onPress={() => setRegionModalVisible(false)}
-                style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
-              >
-                <Ionicons name="close" size={22} color={colors.textPrimary} />
-              </Pressable>
-            </View>
-
-            {/* Search Input */}
-            <View style={[styles.searchBox, { backgroundColor: colors.inputBg }]}>
-              <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
-              <TextInput
-                style={[styles.searchInput, { color: colors.textPrimary }]}
-                placeholder={t("search_region", "Search country or region...")}
-                placeholderTextColor={colors.textSecondary}
-                value={regionSearch}
-                onChangeText={setRegionSearch}
-                autoCorrect={false}
-              />
-              {regionSearch.length > 0 && (
-                <Pressable onPress={() => setRegionSearch("")}>
-                  <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
-                </Pressable>
-              )}
-            </View>
-
-            <FlatList
-              data={filteredRegions}
-              keyExtractor={(item) => item.code}
-              showsVerticalScrollIndicator={false}
-              style={{ maxHeight: 380 }}
-              renderItem={({ item }) => {
-                const isSelected = region === item.name;
-                return (
-                  <Pressable
-                    onPress={() => handleSelectRegion(item)}
-                    style={({ pressed }) => [
-                      styles.modalListItem,
-                      isSelected && { backgroundColor: colors.activeRowBg },
-                      pressed && { opacity: 0.7 },
-                    ]}
-                  >
-                    <Text style={styles.flagIcon}>{item.flag}</Text>
-                    <View style={styles.modalItemTextGroup}>
-                      <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
-                        {item.name}
-                      </Text>
-                      <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
-                        Format: {item.defaultDateFormat} • Starts {item.defaultFirstDay}
-                      </Text>
-                    </View>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
-                    )}
-                  </Pressable>
-                );
-              }}
-            />
-          </View>
+        <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+            {t("select_region", "Select Region")}
+          </Text>
+          <Pressable
+            onPress={() => setRegionModalVisible(false)}
+            style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Pressable>
         </View>
-      </Modal>
+
+        {/* Search Input */}
+        <View style={[styles.searchBox, { backgroundColor: colors.inputBg }]}>
+          <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
+          <TextInput
+            style={[styles.searchInput, { color: colors.textPrimary }]}
+            placeholder={t("search_region", "Search country or region...")}
+            placeholderTextColor={colors.textSecondary}
+            value={regionSearch}
+            onChangeText={setRegionSearch}
+            autoCorrect={false}
+          />
+          {regionSearch.length > 0 && (
+            <Pressable onPress={() => setRegionSearch("")}>
+              <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+            </Pressable>
+          )}
+        </View>
+
+        <FlatList
+          data={filteredRegions}
+          keyExtractor={(item) => item.code}
+          showsVerticalScrollIndicator={false}
+          style={{ maxHeight: 380 }}
+          renderItem={({ item }) => {
+            const isSelected = region === item.name;
+            return (
+              <Pressable
+                onPress={() => handleSelectRegion(item)}
+                style={({ pressed }) => [
+                  styles.modalListItem,
+                  isSelected && { backgroundColor: colors.activeRowBg },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Text style={styles.flagIcon}>{item.flag}</Text>
+                <View style={styles.modalItemTextGroup}>
+                  <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
+                    {item.name}
+                  </Text>
+                  <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
+                    Format: {item.defaultDateFormat} • Starts {item.defaultFirstDay}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
+                )}
+              </Pressable>
+            );
+          }}
+        />
+      </SwipeableDrawer>
 
       {/* ========================================================
           MODAL 3: DATE FORMAT PICKER (Dynamic live today's date sample)
       ========================================================= */}
-      <Modal
+      {/* ========================================================
+          MODAL 3: DATE FORMAT PICKER (SWIPEABLE DRAWER)
+      ========================================================= */}
+      <SwipeableDrawer
         visible={dateFormatModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setDateFormatModalVisible(false)}
+        onClose={() => setDateFormatModalVisible(false)}
+        showHandle={false}
+        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setDateFormatModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
-                {t("choose_date_format", "Choose Date Format")}
-              </Text>
-              <Pressable
-                onPress={() => setDateFormatModalVisible(false)}
-                style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
-              >
-                <Ionicons name="close" size={22} color={colors.textPrimary} />
-              </Pressable>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {DATE_FORMATS.map((item) => {
-                const isSelected = dateFormat === item.format;
-                const liveSample = formatDynamicDate(item.format, currentClock);
-                return (
-                  <Pressable
-                    key={item.format}
-                    onPress={() => handleSelectDateFormat(item)}
-                    style={({ pressed }) => [
-                      styles.modalListItem,
-                      isSelected && { backgroundColor: colors.activeRowBg },
-                      pressed && { opacity: 0.7 },
-                    ]}
-                  >
-                    <View style={[styles.iconBoxSmall, { backgroundColor: colors.iconBoxBg }]}>
-                      <Ionicons name="calendar-outline" size={17} color={colors.greyishWhite} />
-                    </View>
-                    <View style={styles.modalItemTextGroup}>
-                      <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
-                        {item.format}
-                      </Text>
-                      <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
-                        {t("today", "Today")}: {liveSample} • {item.label}
-                      </Text>
-                    </View>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
+        <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+            {t("choose_date_format", "Choose Date Format")}
+          </Text>
+          <Pressable
+            onPress={() => setDateFormatModalVisible(false)}
+            style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Pressable>
         </View>
-      </Modal>
+
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {DATE_FORMATS.map((item) => {
+            const isSelected = dateFormat === item.format;
+            const liveSample = formatDynamicDate(item.format, currentClock);
+            return (
+              <Pressable
+                key={item.format}
+                onPress={() => handleSelectDateFormat(item)}
+                style={({ pressed }) => [
+                  styles.modalListItem,
+                  isSelected && { backgroundColor: colors.activeRowBg },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <View style={[styles.iconBoxSmall, { backgroundColor: colors.iconBoxBg }]}>
+                  <Ionicons name="calendar-outline" size={17} color={colors.greyishWhite} />
+                </View>
+                <View style={styles.modalItemTextGroup}>
+                  <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
+                    {item.format}
+                  </Text>
+                  <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
+                    {t("today", "Today")}: {liveSample} • {item.label}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
+                )}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </SwipeableDrawer>
 
       {/* ========================================================
-          MODAL 4: FIRST DAY OF WEEK PICKER
+          MODAL 4: FIRST DAY OF WEEK PICKER (SWIPEABLE DRAWER)
       ========================================================= */}
-      <Modal
+      <SwipeableDrawer
         visible={firstDayModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setFirstDayModalVisible(false)}
+        onClose={() => setFirstDayModalVisible(false)}
+        showHandle={false}
+        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setFirstDayModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
-                {t("first_day_of_week", "First Day of Week")}
-              </Text>
-              <Pressable
-                onPress={() => setFirstDayModalVisible(false)}
-                style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
-              >
-                <Ionicons name="close" size={22} color={colors.textPrimary} />
-              </Pressable>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {FIRST_DAY_OPTIONS.map((item) => {
-                const isSelected = firstDayOfWeek === item.day;
-                return (
-                  <Pressable
-                    key={item.day}
-                    onPress={() => handleSelectFirstDay(item.day)}
-                    style={({ pressed }) => [
-                      styles.modalListItem,
-                      isSelected && { backgroundColor: colors.activeRowBg },
-                      pressed && { opacity: 0.7 },
-                    ]}
-                  >
-                    <View style={[styles.iconBoxSmall, { backgroundColor: colors.iconBoxBg }]}>
-                      <Ionicons name="today-outline" size={17} color={colors.greyishWhite} />
-                    </View>
-                    <View style={styles.modalItemTextGroup}>
-                      <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
-                        {item.day}
-                      </Text>
-                      <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
-                        {item.desc}
-                      </Text>
-                      {/* Mini week day sequence preview */}
-                      <View style={{ flexDirection: "row", gap: 4, marginTop: 4 }}>
-                        {item.weekDays.map((wd, i) => (
-                          <View
-                            key={wd}
-                            style={{
-                              paddingHorizontal: 4,
-                              paddingVertical: 1,
-                              borderRadius: 4,
-                              backgroundColor: i === 0 ? colors.switchActive : colors.chipBg,
-                            }}
-                          >
-                            <Text
-                              style={{
-                                fontSize: 9,
-                                fontWeight: "600",
-                                color: i === 0 ? "#FFFFFF" : colors.textSecondary,
-                              }}
-                            >
-                              {wd}
-                            </Text>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
+        <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+            {t("first_day_of_week", "First Day of Week")}
+          </Text>
+          <Pressable
+            onPress={() => setFirstDayModalVisible(false)}
+            style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Pressable>
         </View>
-      </Modal>
+
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {FIRST_DAY_OPTIONS.map((item) => {
+            const isSelected = firstDayOfWeek === item.day;
+            return (
+              <Pressable
+                key={item.day}
+                onPress={() => handleSelectFirstDay(item.day)}
+                style={({ pressed }) => [
+                  styles.modalListItem,
+                  isSelected && { backgroundColor: colors.activeRowBg },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <View style={[styles.iconBoxSmall, { backgroundColor: colors.iconBoxBg }]}>
+                  <Ionicons name="today-outline" size={17} color={colors.greyishWhite} />
+                </View>
+                <View style={styles.modalItemTextGroup}>
+                  <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
+                    {item.day}
+                  </Text>
+                  <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
+                    {item.desc}
+                  </Text>
+                  {/* Mini week day sequence preview */}
+                  <View style={{ flexDirection: "row", gap: 4, marginTop: 4 }}>
+                    {item.weekDays.map((wd, i) => (
+                      <View
+                        key={wd}
+                        style={{
+                          paddingHorizontal: 4,
+                          paddingVertical: 1,
+                          borderRadius: 4,
+                          backgroundColor: i === 0 ? colors.switchActive : colors.chipBg,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 9,
+                            fontWeight: "600",
+                            color: i === 0 ? "#FFFFFF" : colors.textSecondary,
+                          }}
+                        >
+                          {wd}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
+                )}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </SwipeableDrawer>
     </SafeAreaView>
   );
 }

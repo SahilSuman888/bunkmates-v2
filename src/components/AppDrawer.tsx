@@ -1,36 +1,44 @@
-import React, { ReactNode } from 'react';
-import { Modal, View, StyleSheet, TouchableWithoutFeedback } from 'react-native';
+import React, { ReactNode } from "react";
+import { StyleSheet, StyleProp, ViewStyle } from "react-native";
+import { SwipeableDrawer } from "./ui/SwipeableDrawer";
 
-interface AppDrawerProps {
+export interface AppDrawerProps {
   visible: boolean;
   onClose: () => void;
   children: ReactNode;
+  sheetStyle?: StyleProp<ViewStyle>;
+  handleColor?: string;
+  showHandle?: boolean;
 }
 
-export default function AppDrawer({ visible, onClose, children }: AppDrawerProps) {
+export default function AppDrawer({
+  visible,
+  onClose,
+  children,
+  sheetStyle,
+  handleColor,
+  showHandle = true,
+}: AppDrawerProps) {
   return (
-    <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.overlay} />
-      </TouchableWithoutFeedback>
-      <View style={styles.drawer}>{children}</View>
-    </Modal>
+    <SwipeableDrawer
+      visible={visible}
+      onClose={onClose}
+      showHandle={showHandle}
+      handleColor={handleColor}
+      sheetStyle={[styles.drawer, sheetStyle]}
+    >
+      {children}
+    </SwipeableDrawer>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
   drawer: {
-    position: 'absolute',
-    bottom: 0,
-    width: '100%',
-    maxHeight: '80%',
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 16,
+    backgroundColor: "#1c1c1e",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 20,
   },
 });

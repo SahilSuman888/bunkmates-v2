@@ -28,11 +28,12 @@ import {
   wallpaperList,
   WallpaperOption,
   DisappearingTimer,
-} from "../contexts/ChatSettingsContext";
-import { useThemeToggle } from "../contexts/ThemeContext";
-import { useLanguage } from "../contexts/LanguageContext";
-import { useAppSettings } from "../contexts/AppSettingsContext";
-import { SettingsActionModal } from "../components/ui/SettingsActionModal";
+} from "../../contexts/ChatSettingsContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { SettingsActionModal } from "./_components/SettingsActionModal";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 const { width } = Dimensions.get("window");
 const WALLPAPER_COLUMNS = 3;
@@ -596,113 +597,97 @@ export default function ChatSettingsScreen() {
       </ScrollView>
 
       {/* ========================================================
-          MODAL: WALLPAPER PICKER
+          MODAL: WALLPAPER PICKER (SWIPEABLE DRAWER)
       ========================================================= */}
-      <Modal
-        transparent
+      <SwipeableDrawer
         visible={showWallpaperModal}
-        animationType="slide"
-        onRequestClose={() => setShowWallpaperModal(false)}
+        onClose={() => setShowWallpaperModal(false)}
+        showHandle={false}
+        sheetStyle={[styles.wallpaperModalContent, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
+        <View style={[styles.handle, { backgroundColor: colors.chevron }]} />
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.modalSheetTitle, { color: colors.textPrimary }]}>
+            {t("Choose Chat Wallpaper")}
+          </Text>
           <Pressable
-            style={styles.modalBackdrop}
             onPress={() => setShowWallpaperModal(false)}
-          />
-          <View style={[styles.wallpaperModalContent, { backgroundColor: colors.card }]}>
-            <View style={[styles.handle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.modalSheetTitle, { color: colors.textPrimary }]}>
-                {t("Choose Chat Wallpaper")}
-              </Text>
-              <Pressable
-                onPress={() => setShowWallpaperModal(false)}
-                hitSlop={8}
-                style={({ pressed }) => pressed && { opacity: 0.6 }}
-              >
-                <Ionicons name="close" size={22} color={colors.textPrimary} />
-              </Pressable>
-            </View>
-
-            <FlatList
-              data={wallpaperList}
-              keyExtractor={(item) => item.id}
-              renderItem={renderWallpaperCell}
-              numColumns={WALLPAPER_COLUMNS}
-              contentContainerStyle={styles.wallpaperGrid}
-              showsVerticalScrollIndicator={false}
-            />
-          </View>
+            hitSlop={8}
+            style={({ pressed }) => pressed && { opacity: 0.6 }}
+          >
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Pressable>
         </View>
-      </Modal>
+
+        <FlatList
+          data={wallpaperList}
+          keyExtractor={(item) => item.id}
+          renderItem={renderWallpaperCell}
+          numColumns={WALLPAPER_COLUMNS}
+          contentContainerStyle={styles.wallpaperGrid}
+          showsVerticalScrollIndicator={false}
+        />
+      </SwipeableDrawer>
 
       {/* ========================================================
-          MODAL: DISAPPEARING MESSAGES TIMER PICKER
+          MODAL: DISAPPEARING MESSAGES TIMER PICKER (SWIPEABLE DRAWER)
       ========================================================= */}
-      <Modal
-        transparent
+      <SwipeableDrawer
         visible={showDisappearingModal}
-        animationType="slide"
-        onRequestClose={() => setShowDisappearingModal(false)}
+        onClose={() => setShowDisappearingModal(false)}
+        showHandle={false}
+        sheetStyle={[styles.bottomSheetModal, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
+        <View style={[styles.handle, { backgroundColor: colors.chevron }]} />
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.modalSheetTitle, { color: colors.textPrimary }]}>
+            {t("Disappearing Messages")}
+          </Text>
           <Pressable
-            style={styles.modalBackdrop}
             onPress={() => setShowDisappearingModal(false)}
-          />
-          <View style={[styles.bottomSheetModal, { backgroundColor: colors.card }]}>
-            <View style={[styles.handle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.modalSheetTitle, { color: colors.textPrimary }]}>
-                {t("Disappearing Messages")}
-              </Text>
-              <Pressable
-                onPress={() => setShowDisappearingModal(false)}
-                hitSlop={8}
-                style={({ pressed }) => pressed && { opacity: 0.6 }}
-              >
-                <Ionicons name="close" size={22} color={colors.textPrimary} />
-              </Pressable>
-            </View>
-
-            <Text style={[styles.modalSheetSubtitle, { color: colors.textSecondary }]}>
-              {t("When turned on, new messages sent in chats will automatically disappear after the selected duration.")}
-            </Text>
-
-            <View style={{ marginTop: 12 }}>
-              {DISAPPEARING_OPTIONS.map((opt) => {
-                const isSelected = disappearingTimer === opt.id;
-                return (
-                  <Pressable
-                    key={opt.id}
-                    style={({ pressed }) => [
-                      styles.modalOptionRow,
-                      isSelected && { backgroundColor: colors.insetBg },
-                      pressed && { opacity: 0.7 },
-                    ]}
-                    onPress={() => handleSelectDisappearing(opt)}
-                    accessible={true}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: isSelected }}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.modalOptionTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
-                        {opt.label}
-                      </Text>
-                      <Text style={[styles.modalOptionSubtitle, { color: colors.textSecondary }]}>
-                        {opt.desc}
-                      </Text>
-                    </View>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={22} color="#10B981" />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
+            hitSlop={8}
+            style={({ pressed }) => pressed && { opacity: 0.6 }}
+          >
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Pressable>
         </View>
-      </Modal>
+
+        <Text style={[styles.modalSheetSubtitle, { color: colors.textSecondary }]}>
+          {t("When turned on, new messages sent in chats will automatically disappear after the selected duration.")}
+        </Text>
+
+        <View style={{ marginTop: 12 }}>
+          {DISAPPEARING_OPTIONS.map((opt) => {
+            const isSelected = disappearingTimer === opt.id;
+            return (
+              <Pressable
+                key={opt.id}
+                style={({ pressed }) => [
+                  styles.modalOptionRow,
+                  isSelected && { backgroundColor: colors.insetBg },
+                  pressed && { opacity: 0.7 },
+                ]}
+                onPress={() => handleSelectDisappearing(opt)}
+                accessible={true}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: isSelected }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.modalOptionTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
+                    {opt.label}
+                  </Text>
+                  <Text style={[styles.modalOptionSubtitle, { color: colors.textSecondary }]}>
+                    {opt.desc}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={22} color="#10B981" />
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+      </SwipeableDrawer>
 
       {/* 1. Clear All Messages Modal */}
       <SettingsActionModal

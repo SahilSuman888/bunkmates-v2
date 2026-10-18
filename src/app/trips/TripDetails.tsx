@@ -46,6 +46,7 @@ import LinkDrawer from "../../components/trip_components/LinkDrawer";
 import SettingsDrawer from "../../components/trip_components/SettingsDrawer";
 
 import { useGroqAI } from "../../hooks/useGroqAI";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 import { functions } from "../../lib/firebase";
 import { httpsCallable } from "firebase/functions";
 
@@ -180,6 +181,7 @@ export default function TripDetails() {
   const user = auth.currentUser;
   const uid = user?.uid || null;
   const insets = useSafeAreaInsets();
+  const { themeColors, isDark, background } = useThemeToggle();
   const { groups = [] } = useUserGroups(uid) || {};
 
   /* ─── DATA STATE ─── */

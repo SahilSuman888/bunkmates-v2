@@ -2,8 +2,10 @@ import { Platform, NativeModules } from "react-native";
 
 let InCallManager: any = null;
 try {
-  const incall = require("react-native-incall-manager");
-  InCallManager = incall.default || incall;
+  if (NativeModules.InCallManager) {
+    const incall = require("react-native-incall-manager");
+    InCallManager = incall.default || incall;
+  }
 } catch (e) {
   console.log("[InCallManager] Native module not available or in Expo Go:", e);
 }
@@ -145,7 +147,7 @@ export class AudioRouteManager {
       }
     }
 
-    if (!InCallManager) return;
+    if (!InCallManager || !NativeModules.InCallManager) return;
     try {
       if (typeof InCallManager.stopRingtone === "function") {
         InCallManager.stopRingtone();
@@ -154,8 +156,10 @@ export class AudioRouteManager {
         InCallManager.stopRingback();
       }
       console.log("[InCallManager] react-native-incall-manager ringtone stopped");
-    } catch (err) {
-      console.warn("[InCallManager] stopRingtone error:", err);
+    } catch (err: any) {
+      if (!err?.message?.includes("null")) {
+        console.warn("[InCallManager] stopRingtone error:", err);
+      }
     }
   }
 }

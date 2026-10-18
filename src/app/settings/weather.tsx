@@ -19,11 +19,11 @@ import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { auth, db } from "../lib/firebase";
-import { useThemeToggle } from "../contexts/ThemeContext";
-import { useAppSettings } from "../contexts/AppSettingsContext";
-import { useLanguage } from "../contexts/LanguageContext";
-import { ACCENT_COLORS } from "../theme/theme";
+import { auth, db } from "../../lib/firebase";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { ACCENT_COLORS } from "../../theme/theme";
 
 type TempUnit = "°F" | "°C" | "K";
 type ForecastHorizon = "3 Days" | "5 Days" | "7 Days" | "10 Days";

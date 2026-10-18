@@ -4,24 +4,35 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
+import { INDIAN_TRANSLATIONS } from "./indianLanguagesData";
 
 export type LanguageCode =
   | "en-US"
   | "en-GB"
   | "en-IN"
   | "hi"
-  | "es"
-  | "fr"
-  | "de"
-  | "ja"
-  | "zh-CN"
-  | "pt-BR"
-  | "it"
-  | "ar"
-  | "ru"
-  | "ko"
-  | "nl"
-  | "bn";
+  | "bn"
+  | "te"
+  | "mr"
+  | "ta"
+  | "gu"
+  | "ur"
+  | "kn"
+  | "ml"
+  | "or"
+  | "pa"
+  | "as"
+  | "mai"
+  | "sat"
+  | "ks"
+  | "ne"
+  | "kok"
+  | "sd"
+  | "doi"
+  | "mni"
+  | "brx"
+  | "sa"
+  | string;
 
 // Dictionary of translations for core settings & UI keys
 export const TRANSLATIONS: Record<string, Record<string, string>> = {
@@ -19941,6 +19952,9 @@ export const TRANSLATIONS: Record<string, Record<string, string>> = {
   },
 };
 
+// Merge all native Indian languages into global TRANSLATIONS dictionary
+Object.assign(TRANSLATIONS, INDIAN_TRANSLATIONS);
+
 interface LanguageContextType {
   language: string;
   languageCode: LanguageCode;
@@ -19951,8 +19965,8 @@ interface LanguageContextType {
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [language, setLanguageState] = useState<string>("English (US)");
-  const [languageCode, setLanguageCodeState] = useState<LanguageCode>("en-US");
+  const [language, setLanguageState] = useState<string>("English (India)");
+  const [languageCode, setLanguageCodeState] = useState<LanguageCode>("en-IN");
   const [user, setUser] = useState<any>(null);
 
   // Auth observer
@@ -20027,41 +20041,64 @@ export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }
     [user]
   );
 
+  const resolveInDict = (dict: Record<string, string> | undefined, targetKey: string, def?: string): string | null => {
+    if (!dict) return null;
+    if (dict[targetKey]) return dict[targetKey];
+    const trimmed = targetKey.trim();
+    if (dict[trimmed]) return dict[trimmed];
+    const normalized = targetKey.replace(/\s+/g, " ").trim();
+    if (dict[normalized]) return dict[normalized];
+
+    const lower = targetKey.toLowerCase();
+    if (dict[lower]) return dict[lower];
+    if (dict[trimmed.toLowerCase()]) return dict[trimmed.toLowerCase()];
+    if (dict[normalized.toLowerCase()]) return dict[normalized.toLowerCase()];
+
+    // If key has snake_case like "accounts_security" or "app_language"
+    if (targetKey.includes("_")) {
+      const spaced = targetKey.replace(/_/g, " ").trim();
+      if (dict[spaced]) return dict[spaced];
+      if (dict[spaced.toLowerCase()]) return dict[spaced.toLowerCase()];
+      const titleCase = spaced.replace(/\b\w/g, (c) => c.toUpperCase());
+      if (dict[titleCase]) return dict[titleCase];
+    }
+
+    // Check defaultText variants
+    if (def) {
+      if (dict[def]) return dict[def];
+      const defTrimmed = def.trim();
+      if (dict[defTrimmed]) return dict[defTrimmed];
+      const defNorm = def.replace(/\s+/g, " ").trim();
+      if (dict[defNorm]) return dict[defNorm];
+      const defLower = def.toLowerCase();
+      if (dict[defLower]) return dict[defLower];
+      if (dict[defTrimmed.toLowerCase()]) return dict[defTrimmed.toLowerCase()];
+      if (dict[defNorm.toLowerCase()]) return dict[defNorm.toLowerCase()];
+    }
+
+    return null;
+  };
+
   const t = useCallback(
     (key: string, defaultText?: string): string => {
       if (!key) return defaultText || "";
-      const dict = TRANSLATIONS[languageCode] || TRANSLATIONS["en-US"];
-      if (dict) {
-        if (dict[key]) return dict[key];
-        const trimmed = key.trim();
-        if (dict[trimmed]) return dict[trimmed];
-        const normalized = key.replace(/\s+/g, " ").trim();
-        if (dict[normalized]) return dict[normalized];
-        if (defaultText) {
-          if (dict[defaultText]) return dict[defaultText];
-          if (dict[defaultText.trim()]) return dict[defaultText.trim()];
-        }
-        const lowerKey = key.toLowerCase();
-        if (dict[lowerKey]) return dict[lowerKey];
-        if (dict[trimmed.toLowerCase()]) return dict[trimmed.toLowerCase()];
-        if (dict[normalized.toLowerCase()]) return dict[normalized.toLowerCase()];
+
+      // 1. Check selected language dictionary
+      const activeDict = TRANSLATIONS[languageCode];
+      const directMatch = resolveInDict(activeDict, key, defaultText);
+      if (directMatch) return directMatch;
+
+      // 2. If it's an Indian regional language, check Hindi as primary Indian fallback
+      const isIndianLanguage = languageCode !== "en-US" && languageCode !== "en-GB" && languageCode !== "en-IN" && languageCode !== "hi";
+      if (isIndianLanguage) {
+        const hiMatch = resolveInDict(TRANSLATIONS["hi"], key, defaultText);
+        if (hiMatch) return hiMatch;
       }
-      const fallback = TRANSLATIONS["en-US"];
-      if (fallback) {
-        if (fallback[key]) return fallback[key];
-        const trimmed = key.trim();
-        if (fallback[trimmed]) return fallback[trimmed];
-        const normalized = key.replace(/\s+/g, " ").trim();
-        if (fallback[normalized]) return fallback[normalized];
-        if (defaultText) {
-          if (fallback[defaultText]) return fallback[defaultText];
-          if (fallback[defaultText.trim()]) return fallback[defaultText.trim()];
-        }
-        const lowerKey = key.toLowerCase();
-        if (fallback[lowerKey]) return fallback[lowerKey];
-        if (fallback[trimmed.toLowerCase()]) return fallback[trimmed.toLowerCase()];
-        if (fallback[normalized.toLowerCase()]) return fallback[normalized.toLowerCase()];
-      }
+
+      // 3. Fallback to English (India or US)
+      const enMatch = resolveInDict(TRANSLATIONS["en-IN"] || TRANSLATIONS["en-US"], key, defaultText);
+      if (enMatch) return enMatch;
+
       return defaultText || key;
     },
     [languageCode]

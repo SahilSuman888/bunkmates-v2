@@ -28,6 +28,7 @@ import { Image as ExpoImage } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useChatSettings, wallpaperList, DEFAULT_WALLPAPER_ASSET, getWallpaperSource } from "../../contexts/ChatSettingsContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useCall } from "../../contexts/CallContext";
 import { compressAndResizeImage } from "../../lib/imageCompressor";
 import * as ImagePicker from "expo-image-picker";
@@ -252,7 +253,6 @@ export default function ChatRoom() {
   }
   const chatId = user && friendId ? [user.uid, friendId].sort().join("_") : null;
 
-  const { wallpaper, theme: chatTheme } = useChatSettings();
   const [messages, setMessages] = useState<any[]>(
     () => (chatId && memoryChatMsgs[chatId]) || []
   );
@@ -262,6 +262,16 @@ export default function ChatRoom() {
   );
   const [replyTo, setReplyTo] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
+  const typingTimeoutRef = useRef<any>(null);
+
+  const getDisappearingExpiresAt = () => {
+    const nowMs = Date.now();
+    if (disappearingTimer === "24h") return nowMs + 24 * 3600 * 1000;
+    if (disappearingTimer === "7d") return nowMs + 7 * 24 * 3600 * 1000;
+    if (disappearingTimer === "30d") return nowMs + 30 * 24 * 3600 * 1000;
+    if (disappearingTimer === "90d") return nowMs + 90 * 24 * 60 * 60 * 1000;
+    return null;
+  };
 
   // Full Screen Image Modal State (WhatsApp style)
   const [selectedImageItem, setSelectedImageItem] = useState<any | null>(null);
@@ -1854,25 +1864,7 @@ export default function ChatRoom() {
           }
         }}
       />
-    </>
-  );
-
-  if (isCustomWallpaper && selectedWallpaper?.uri) {
-    return (
-      <ImageBackground
-        source={{ uri: selectedWallpaper.uri }}
-        style={[styles.container, { backgroundColor: chatBgColor }]}
-        resizeMode="cover"
-      >
-        {renderChatContent()}
-      </ImageBackground>
-    );
-  }
-
-  return (
-    <View style={[styles.container, { backgroundColor: chatBgColor }]}>
-      {renderChatContent()}
-    </View>
+    </ImageBackground>
   );
 }
 

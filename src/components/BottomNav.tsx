@@ -196,7 +196,7 @@ export default function BottomNav() {
             try {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             } catch (e) {}
-            router.push("/ProfileSettings" as any);
+            router.push("/settings" as any);
           }}
           hitSlop={8}
         >

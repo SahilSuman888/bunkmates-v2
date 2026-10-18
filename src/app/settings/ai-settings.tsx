@@ -31,10 +31,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
-import { db, auth } from "../lib/firebase";
-import { useLanguage } from "../contexts/LanguageContext";
-import { useThemeToggle } from "../contexts/ThemeContext";
-import { SettingsActionModal } from "../components/ui/SettingsActionModal";
+import { db, auth } from "../../lib/firebase";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { SettingsActionModal } from "./_components/SettingsActionModal";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const BASE_WIDTH = 375;

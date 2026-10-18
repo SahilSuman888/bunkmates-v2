@@ -32,11 +32,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import * as Clipboard from "expo-clipboard";
-import { auth, db } from "../lib/firebase";
-import { useThemeToggle } from "../contexts/ThemeContext";
-import { useAppSettings } from "../contexts/AppSettingsContext";
-import { useLanguage } from "../contexts/LanguageContext";
-import { SettingsActionModal } from "../components/ui/SettingsActionModal";
+import { auth, db } from "../../lib/firebase";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { SettingsActionModal } from "./_components/SettingsActionModal";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 
 type VisibilityOption = "public" | "private";
 
@@ -67,6 +69,7 @@ export default function PrivacyAndData() {
   // Clear Search History state
   const [showClearHistoryModal, setShowClearHistoryModal] = useState<boolean>(false);
   const [isClearingHistory, setIsClearingHistory] = useState<boolean>(false);
+  const [showLogoutModal, setShowLogoutModal] = useState<boolean>(false);
 
   // Helper for dynamic alpha tints
   const hexToRgba = (hex: string, alpha: number) => {
@@ -122,6 +125,8 @@ export default function PrivacyAndData() {
       pledgeIcon: "#10B981",
       pledgeTitle: isDark ? "#34D399" : "#059669",
       pledgeText: isDark ? "#A7F3D0" : "#4B5563",
+      logoutBorder: "transparent",
+      logoutBg: isDark ? "rgba(255, 90, 95, 0.10)" : "rgba(255, 90, 95, 0.06)",
     };
   }, [isDark, dynamicAccent, dynamicThemeColors]);
 
@@ -372,6 +377,13 @@ export default function PrivacyAndData() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+
+      {/* ── Top Floating Mask Gradient (Exact 6-Stop Dissolve matching chat) ── */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        height={Platform.OS === "android" ? 96 : 90}
+        zIndex={15}
+      />
 
       {/* ── Top Header: Exact circular button matching Settings page (modernHeaderBtn) ── */}
       <View style={styles.header}>
@@ -694,93 +706,108 @@ export default function PrivacyAndData() {
             </Text>
           </View>
         </View>
+
+        {/* ── 5. LOG OUT BUTTON ── */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.modernLogoutBtn,
+            {
+              borderColor: colors.logoutBorder,
+              backgroundColor: colors.logoutBg,
+            },
+            pressed && { opacity: 0.75 },
+          ]}
+          onPress={() => setShowLogoutModal(true)}
+        >
+          <Ionicons name="log-out-outline" size={20} color={colors.greyishWhite} />
+          <Text style={styles.modernLogoutText}>{t("logout", "Log Out")}</Text>
+        </Pressable>
+
+        <View style={{ height: 24 }} />
       </ScrollView>
 
-      {/* ── DOWNLOAD DATA MODAL ── */}
-      <Modal
+      {/* ── DOWNLOAD DATA SWIPEABLE DRAWER ── */}
+      <SwipeableDrawer
         visible={showExportModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowExportModal(false)}
+        onClose={() => setShowExportModal(false)}
+        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 46, height: 46, borderRadius: 23, marginBottom: 12, marginRight: 0 }]}>
-              <Ionicons name="cloud-download-outline" size={24} color={colors.greyishWhite} />
+        <View style={styles.drawerInner}>
+          <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 46, height: 46, borderRadius: 23, marginBottom: 12, marginRight: 0 }]}>
+            <Ionicons name="cloud-download-outline" size={24} color={colors.greyishWhite} />
+          </View>
+
+          <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Export Your Data")}</Text>
+          <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
+            {t("A comprehensive archive containing your account profile, trips, and privacy configurations.", "A comprehensive archive containing your account profile, trips, and privacy configurations.")}
+          </Text>
+
+          {isExporting ? (
+            <View style={styles.modalLoadingWrap}>
+              <ActivityIndicator size="small" color={colors.coral} />
+              <Text style={[styles.modalLoadingText, { color: colors.textSecondary }]}>{t("Compiling your data package...")}</Text>
             </View>
-
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Export Your Data")}</Text>
-            <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              {t("A comprehensive archive containing your account profile, trips, and privacy configurations.", "A comprehensive archive containing your account profile, trips, and privacy configurations.")}
-            </Text>
-
-            {isExporting ? (
-              <View style={styles.modalLoadingWrap}>
-                <ActivityIndicator size="small" color={colors.coral} />
-                <Text style={[styles.modalLoadingText, { color: colors.textSecondary }]}>{t("Compiling your data package...")}</Text>
+          ) : exportBundle ? (
+            <View style={[styles.exportInfoCard, { backgroundColor: colors.segmentBg, borderColor: colors.cardBorder }]}>
+              <View style={styles.exportInfoRow}>
+                <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>{t("Account UID:")}</Text>
+                <Text style={[styles.exportInfoVal, { color: colors.textPrimary }]}>{user?.uid ? `${user.uid.slice(0, 10)}...` : t("Active")}</Text>
               </View>
-            ) : exportBundle ? (
-              <View style={[styles.exportInfoCard, { backgroundColor: colors.segmentBg, borderColor: colors.cardBorder }]}>
-                <View style={styles.exportInfoRow}>
-                  <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>{t("Account UID:")}</Text>
-                  <Text style={[styles.exportInfoVal, { color: colors.textPrimary }]}>{user?.uid ? `${user.uid.slice(0, 10)}...` : t("Active")}</Text>
-                </View>
-                <View style={styles.exportInfoRow}>
-                  <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>{t("Saved Trips:")}</Text>
-                  <Text style={[styles.exportInfoVal, { color: colors.textPrimary }]}>{exportBundle.tripsSummary?.totalTrips ?? 0} {t("trips")}</Text>
-                </View>
-                <View style={styles.exportInfoRow}>
-                  <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>{t("Format & Size:")}</Text>
-                  <Text style={[styles.exportInfoVal, { color: colors.textPrimary }]}>JSON • {Math.max(1, Math.round(exportJsonString.length / 1024))} KB</Text>
-                </View>
+              <View style={styles.exportInfoRow}>
+                <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>{t("Saved Trips:")}</Text>
+                <Text style={[styles.exportInfoVal, { color: colors.textPrimary }]}>{exportBundle.tripsSummary?.totalTrips ?? 0} {t("trips")}</Text>
               </View>
-            ) : null}
-
-            <View style={styles.modalBtnColumn}>
-              {!isExporting && exportBundle && (
-                <>
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.modalActionBtn,
-                      { backgroundColor: colors.coral },
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={handleSaveExportFile}
-                  >
-                    <Ionicons name="share-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
-                    <Text style={styles.modalPrimBtnText}>{t("Save / Share File")}</Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.modalActionBtn,
-                      { backgroundColor: colors.segmentBg, borderWidth: 0 },
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={handleCopyExportJson}
-                  >
-                    <Ionicons name={copiedToClipboard ? "checkmark-circle" : "copy-outline"} size={17} color={colors.textPrimary} style={{ marginRight: 8 }} />
-                    <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>
-                      {copiedToClipboard ? t("Copied to Clipboard!") : t("Copy JSON to Clipboard")}
-                    </Text>
-                  </Pressable>
-                </>
-              )}
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalActionBtn,
-                  { backgroundColor: colors.segmentBg, borderWidth: 0 },
-                  pressed && styles.pressed,
-                ]}
-                onPress={() => setShowExportModal(false)}
-              >
-                <Text style={[styles.modalSecBtnText, { color: colors.textSecondary }]}>{t("Close")}</Text>
-              </Pressable>
+              <View style={styles.exportInfoRow}>
+                <Text style={[styles.exportInfoKey, { color: colors.textSecondary }]}>{t("Format & Size:")}</Text>
+                <Text style={[styles.exportInfoVal, { color: colors.textPrimary }]}>JSON • {Math.max(1, Math.round(exportJsonString.length / 1024))} KB</Text>
+              </View>
             </View>
+          ) : null}
+
+          <View style={styles.modalBtnColumn}>
+            {!isExporting && exportBundle && (
+              <>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.modalActionBtn,
+                    { backgroundColor: colors.coral },
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={handleSaveExportFile}
+                >
+                  <Ionicons name="share-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={styles.modalPrimBtnText}>{t("Save / Share File")}</Text>
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.modalActionBtn,
+                    { backgroundColor: colors.segmentBg, borderWidth: 0 },
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={handleCopyExportJson}
+                >
+                  <Ionicons name={copiedToClipboard ? "checkmark-circle" : "copy-outline"} size={17} color={colors.textPrimary} style={{ marginRight: 8 }} />
+                  <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>
+                    {copiedToClipboard ? t("Copied to Clipboard!") : t("Copy JSON to Clipboard")}
+                  </Text>
+                </Pressable>
+              </>
+            )}
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.modalActionBtn,
+                { backgroundColor: colors.segmentBg, borderWidth: 0 },
+                pressed && styles.pressed,
+              ]}
+              onPress={() => setShowExportModal(false)}
+            >
+              <Text style={[styles.modalSecBtnText, { color: colors.textSecondary }]}>{t("Close")}</Text>
+            </Pressable>
           </View>
         </View>
-      </Modal>
+      </SwipeableDrawer>
 
       {/* ── CLEAR SEARCH HISTORY CONFIRMATION & SUCCESS FLOW (Matching Image 1 & 2) ── */}
       <SettingsActionModal
@@ -822,6 +849,38 @@ export default function PrivacyAndData() {
         successButtonLabel={t("Done")}
         onDone={() => setShowClearHistoryModal(false)}
       />
+
+      {/* ── LOG OUT CONFIRMATION & SUCCESS FLOW ── */}
+      <SettingsActionModal
+        visible={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        iconType="logout"
+        title={t("logout", "Log Out")}
+        message={t(
+          "Are you sure you want to log out of BunkMates? You can log back into your account anytime."
+        )}
+        confirmLabel={t("logout", "Log Out")}
+        cancelLabel={t("Cancel")}
+        confirmColor={colors.coral}
+        onConfirm={async () => {
+          try {
+            await auth.signOut();
+            return true;
+          } catch (e) {
+            console.log("Signout error:", e);
+            return false;
+          }
+        }}
+        successTitle={t("Logged Out")}
+        successMessage={t(
+          "You have been safely signed out of your BunkMates profile. We hope to see you on your next trip soon!"
+        )}
+        successButtonLabel={t("Done")}
+        onDone={() => {
+          setShowLogoutModal(false);
+          router.replace("/(auth)/login" as any);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -833,7 +892,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  modernLogoutBtn: {
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 28,
+    marginBottom: 16,
+  },
+  modernLogoutText: {
+    color: "#FF5A5F",
+    fontWeight: "700",
+    fontSize: 15,
+    marginLeft: 8,
+  },
   scrollContent: {
+    paddingTop: (Platform.OS === "android" ? 64 : 58) + 10,
     paddingBottom: 40,
   },
   pressed: {
@@ -842,12 +918,18 @@ const styles = StyleSheet.create({
 
   // Header matching ProfileSettings & ProfileEdit exactly
   header: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 14,
     gap: 14,
+    zIndex: 20,
+    backgroundColor: "transparent",
   },
   modernHeaderBtn: {
     width: 42,
@@ -1003,18 +1085,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 24,
   },
+  drawerInner: {
+    width: "100%",
+    alignItems: "center",
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
   modalCard: {
     width: "100%",
-    maxWidth: 380,
-    borderRadius: 28,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     borderWidth: 0,
-    padding: 24,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 16,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 8,
   },
   modalTitle: {
     fontSize: 18,

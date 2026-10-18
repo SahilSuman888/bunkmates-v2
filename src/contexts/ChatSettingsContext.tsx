@@ -70,9 +70,21 @@ const bundledWallpaperSources: Record<string, ImageSourcePropType> = {
 };
 
 export const getWallpaperSource = (
-  wallpaperIdOrUri: string | null | undefined
+  wallpaperIdOrUri: string | number | ImageSourcePropType | null | undefined
 ): ImageSourcePropType => {
   if (!wallpaperIdOrUri || wallpaperIdOrUri === "default") {
+    return DEFAULT_WALLPAPER_ASSET;
+  }
+
+  // If already a resolved asset number (from require) or ImageURISource object
+  if (typeof wallpaperIdOrUri === "number") {
+    return wallpaperIdOrUri;
+  }
+  if (typeof wallpaperIdOrUri === "object") {
+    return wallpaperIdOrUri as ImageSourcePropType;
+  }
+
+  if (typeof wallpaperIdOrUri !== "string") {
     return DEFAULT_WALLPAPER_ASSET;
   }
 

@@ -1,8 +1,7 @@
-import { BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
 import { PlatformPressable } from '@react-navigation/elements';
 import { triggerAppHaptic } from '../contexts/AppSettingsContext';
 
-export function HapticTab(props: BottomTabBarButtonProps) {
+export function HapticTab(props: any) {
   return (
     <PlatformPressable
       {...props}

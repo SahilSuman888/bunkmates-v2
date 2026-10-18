@@ -16,6 +16,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useUser } from "../contexts/UserContext";
+import { useLanguage } from "../contexts/LanguageContext";
+import { useThemeToggle } from "../contexts/ThemeContext";
 import { db } from "../lib/firebase";
 import Animated, { FadeIn } from "react-native-reanimated";
 import {
@@ -635,6 +637,7 @@ function UserDrawerContent({ user, onClose }: { user: any; onClose: () => void }
 // Place Drawer Content
 function PlaceDrawerContent({ place, onClose }: { place: any; onClose: () => void }) {
   const router = useRouter();
+  const { t } = useLanguage();
   const fallbackUrl = place.fallbackImageUrl || getFallbackPhoto(place.category || place.type || "", place.name || "");
   const initialUri = place.imageUrl || place.imageThumbnail || place.images?.[0] || fallbackUrl;
   const [currentImage, setCurrentImage] = useState<string>(initialUri);

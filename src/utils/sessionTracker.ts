@@ -16,6 +16,8 @@ export interface DeviceSession {
   lastActive: string;
   isActive: boolean;
   os?: string;
+  ipAddress?: string;
+  userAgent?: string;
   lastActiveTimestamp?: number;
 }
 

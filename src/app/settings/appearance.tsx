@@ -18,15 +18,13 @@ import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { auth, db } from "../lib/firebase";
+import { auth, db } from "../../lib/firebase";
 import {
   useThemeToggle,
-  BackgroundMode,
   LocationMode,
   FontSize,
-} from "../contexts/ThemeContext";
-import { useLanguage } from "../contexts/LanguageContext";
-import { AtmospherePreviewBox } from "../components/ui/AppAtmosphereBackground";
+} from "../../contexts/ThemeContext";
+import { useLanguage } from "../../contexts/LanguageContext";
 
 const SWATCH_PALETTE = [
   { key: "coral", color: "#FF5A5F", label: "Sunset Coral" },
@@ -40,12 +38,6 @@ const SWATCH_PALETTE = [
   { key: "aqua", color: "#00897b", label: "Deep Aqua" },
 ];
 
-const BACKGROUND_SWATCHES = {
-  neutral: ["#0c0c0c", "#1c1c1e", "#2c2c2e", "#3a3a3c"],
-  cool: ["#001f3f", "#003566", "#00557f", "#0077b6"],
-  warm: ["#482314", "#6d3b20", "#8c4b2f", "#a55c3f"],
-  vibrant: ["#d500f9", "#aa00ff", "#6200ea", "#304ffe"],
-};
 
 export default function AppearanceScreen() {
   const router = useRouter();
@@ -62,8 +54,6 @@ export default function AppearanceScreen() {
     accent,
     setAccent,
     accentColor,
-    background,
-    setBackground,
     locationMode,
     setLocationMode,
     fontSize,
@@ -139,14 +129,6 @@ export default function AppearanceScreen() {
 
   const handleToggleReduceAnimations = (val: boolean) => {
     setReduceAnimations(val);
-  };
-
-  const handleSelectBgMode = (modeVal: BackgroundMode) => {
-    setBackground({ ...background, mode: modeVal });
-  };
-
-  const handlePickBgColor = (cat: "neutral" | "cool" | "warm" | "vibrant", colorHex: string) => {
-    setBackground({ mode: background.mode, color: colorHex, category: cat });
   };
 
   const handleSelectLocationMode = (loc: LocationMode) => {
@@ -435,93 +417,7 @@ export default function AppearanceScreen() {
           </View>
         </View>
 
-        {/* ── 4. BACKGROUND CANVAS & ATMOSPHERE (With Live Mini Canvas Preview) ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader, fontSize: scaleFont(12) }]}>
-          {t("BACKGROUND CANVAS & ATMOSPHERE")}
-        </Text>
-        <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
-          {/* Live Canvas Atmosphere Preview Box */}
-          <View style={styles.atmospherePreviewContainer}>
-            <AtmospherePreviewBox
-              mode={background.mode}
-              color={background.color}
-              isDark={isDark}
-              style={styles.atmospherePreviewBox}
-            />
-            <View style={styles.atmospherePreviewMeta}>
-              <View style={[styles.atmosphereStatusPill, { backgroundColor: "rgba(0,0,0,0.65)" }]}>
-                <Ionicons name="color-palette-outline" size={13} color="#FFFFFF" />
-                <Text style={[styles.atmospherePillText, { fontSize: scaleFont(11.5) }]}>
-                  {background.mode.toUpperCase()} CANVAS
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <Text style={[styles.blockLabel, { color: colors.textPrimary, fontSize: scaleFont(14.5), marginTop: 14 }]}>
-            Canvas Style
-          </Text>
-          <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg, marginBottom: 16 }]}>
-            {(["solid", "gradient", "mesh"] as BackgroundMode[]).map((bm) => {
-              const isSelected = background.mode === bm;
-              return (
-                <Pressable
-                  key={bm}
-                  style={[
-                    styles.segmentItem,
-                    isSelected && [
-                      styles.segmentItemActive,
-                      { backgroundColor: colors.segmentActiveBg },
-                    ],
-                  ]}
-                  onPress={() => handleSelectBgMode(bm)}
-                >
-                  <Text
-                    style={[
-                      styles.segmentText,
-                      { fontSize: scaleFont(13) },
-                      isSelected
-                        ? [styles.segmentTextActive, { color: colors.activeText }]
-                        : { color: colors.textSecondary },
-                    ]}
-                  >
-                    {bm.charAt(0).toUpperCase() + bm.slice(1)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <Text style={[styles.blockLabel, { color: colors.textPrimary, fontSize: scaleFont(14.5), marginBottom: 10 }]}>
-            Atmosphere Palette Hue
-          </Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bgSwatchesRow}>
-            {Object.entries(BACKGROUND_SWATCHES).flatMap(([cat, arr]) =>
-              arr.map((cHex) => {
-                const isSelected = background.color === cHex;
-                return (
-                  <Pressable
-                    key={cHex}
-                    style={({ pressed }) => [
-                      styles.bgSwatchCircle,
-                      { backgroundColor: cHex },
-                      isSelected && [
-                        styles.bgSwatchSelectedRing,
-                        { borderColor: isDark ? "#FFFFFF" : "#000000" },
-                      ],
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={() => handlePickBgColor(cat as any, cHex)}
-                  >
-                    {isSelected && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
-                  </Pressable>
-                );
-              })
-            )}
-          </ScrollView>
-        </View>
-
-        {/* ── 5. LOCATION PRIVACY MODE ── */}
+        {/* ── 4. LOCATION PRIVACY MODE ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader, fontSize: scaleFont(12) }]}>
           {t("LOCATION PRIVACY MODE")}
         </Text>
@@ -783,55 +679,6 @@ const styles = StyleSheet.create({
   },
   liveTypeBody: {
     lineHeight: 17,
-  },
-
-  // Atmosphere Preview
-  atmospherePreviewContainer: {
-    height: 100,
-    borderRadius: 18,
-    overflow: "hidden",
-    marginBottom: 6,
-    position: "relative",
-  },
-  atmospherePreviewBox: {
-    width: "100%",
-    height: "100%",
-  },
-  atmospherePreviewMeta: {
-    position: "absolute",
-    bottom: 8,
-    left: 8,
-  },
-  atmosphereStatusPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  atmospherePillText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
-    letterSpacing: 0.4,
-  },
-
-  // Background Atmosphere Swatches
-  bgSwatchesRow: {
-    flexDirection: "row",
-    gap: 10,
-    paddingVertical: 4,
-  },
-  bgSwatchCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  bgSwatchSelectedRing: {
-    borderWidth: 2,
-    transform: [{ scale: 1.15 }],
   },
 
   // Row inside card
