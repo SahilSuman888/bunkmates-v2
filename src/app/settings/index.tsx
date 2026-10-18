@@ -4,7 +4,7 @@ import {
   Feather, // **@** Added Feather for profile edit pen icon
 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import {
   collection,
   doc,
@@ -562,18 +562,19 @@ export default function ProfileSettings() {
     return () => clearTimeout(timer);
   }, [authLoading, user]);
 
-  // Restore developer mode on this device, matching the web version's
-  // localStorage-based developer-mode behavior.
-  useEffect(() => {
-    let mounted = true;
-    AsyncStorage.getItem("isDeveloper").then((value) => {
-      if (mounted && value === "true") setIsDeveloper(true);
-    });
-    return () => {
-      mounted = false;
-      if (tapTimer.current) clearTimeout(tapTimer.current);
-    };
-  }, []);
+  // Restore developer mode on this device, and refresh whenever screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+      AsyncStorage.getItem("isDeveloper").then((value) => {
+        if (mounted) setIsDeveloper(value === "true");
+      });
+      return () => {
+        mounted = false;
+        if (tapTimer.current) clearTimeout(tapTimer.current);
+      };
+    }, [])
+  );
 
   const [verifyingKey, setVerifyingKey] = useState(false);
 
@@ -1088,7 +1089,7 @@ export default function ProfileSettings() {
             icon: "code-slash-outline",
             onPress: () => {
               setIsSearching(false);
-              setCurrentPage("developers");
+              router.push("/settings/developers" as any);
             },
           } as SearchableSetting,
         ]
@@ -2853,9 +2854,12 @@ export default function ProfileSettings() {
           {isDeveloper && (
             <SettingRow
               icon="code-slash-outline"
+              iconBg="rgba(0, 230, 176, 0.15)"
+              iconColor="#00e6b0"
               title={tr("Developer Tools & Sandbox")}
               subtitle={tr("Access internal tools, sandboxes, and developer routes")}
-              onPress={() => setCurrentPage("developers")}
+              badge="DEV"
+              onPress={() => router.push("/settings/developers" as any)}
             />
           )}
           {/* About BunkMates placed at the very end of Settings */}
@@ -2867,6 +2871,53 @@ export default function ProfileSettings() {
             onPress={() => smoothNavigate("/settings/about")}
           />
         </View>
+
+        {/* BunkMates App Version Footer with Developer Tap Easter Egg */}
+        <Pressable
+          onPress={async () => {
+            try {
+              Haptics.selectionAsync();
+            } catch (e) {}
+            if (isDeveloper) {
+              router.push("/settings/developers" as any);
+              return;
+            }
+            const next = tapCount + 1;
+            setTapCount(next);
+            if (tapTimer.current) clearTimeout(tapTimer.current);
+            tapTimer.current = setTimeout(() => setTapCount(0), 2000);
+            if (next >= 5) {
+              setTapCount(0);
+              setIsDeveloper(true);
+              await AsyncStorage.setItem("isDeveloper", "true");
+              try {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              } catch (e) {}
+              Alert.alert(
+                "🎉 Developer Mode",
+                "Developer Mode Unlocked! Developer Tools are now available.",
+                [
+                  { text: "Later" },
+                  { text: "Open Developer Tools", onPress: () => router.push("/settings/developers" as any) },
+                ]
+              );
+            }
+          }}
+          hitSlop={12}
+          style={{ alignItems: "center", paddingVertical: 18, marginBottom: 12 }}
+        >
+          <Text style={{ fontSize: 12, color: textSecondary, fontWeight: "500" }}>
+            BunkMates v3.4.1 (Build 4108)
+          </Text>
+          {isDeveloper && (
+            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4, gap: 5 }}>
+              <Ionicons name="code-slash" size={12} color="#00e6b0" />
+              <Text style={{ fontSize: 11, color: "#00e6b0", fontWeight: "700" }}>
+                Developer Mode Active
+              </Text>
+            </View>
+          )}
+        </Pressable>
           </>
         )}
         </Animated.ScrollView>
