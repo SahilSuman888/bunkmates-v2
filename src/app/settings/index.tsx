@@ -5,6 +5,7 @@ import {
 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useFocusEffect } from "expo-router";
+import * as Haptics from "expo-haptics";
 import {
   collection,
   doc,
@@ -2906,7 +2907,7 @@ export default function ProfileSettings() {
           hitSlop={12}
           style={{ alignItems: "center", paddingVertical: 18, marginBottom: 12 }}
         >
-          <Text style={{ fontSize: 12, color: textSecondary, fontWeight: "500" }}>
+          <Text style={{ fontSize: 12, color: colors.textSecondary, fontWeight: "500" }}>
             BunkMates v3.4.1 (Build 4108)
           </Text>
           {isDeveloper && (
