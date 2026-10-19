@@ -139,18 +139,11 @@ export default function LanguageRegionSettings() {
   const [timeFormat24, setTimeFormat24] = useState<boolean>(false);
   const [firstDayOfWeek, setFirstDayOfWeek] = useState<"Sunday" | "Monday" | "Saturday">("Monday");
 
-  const [prevContextLang, setPrevContextLang] = useState(contextLang);
-  const [prevContextLangCode, setPrevContextLangCode] = useState(contextLangCode);
-
-  // Synchronize with global language context
-  if (contextLang !== prevContextLang) {
-    setPrevContextLang(contextLang);
+  // Synchronize with global language context cleanly via useEffect
+  useEffect(() => {
     if (contextLang) setLanguage(contextLang);
-  }
-  if (contextLangCode !== prevContextLangCode) {
-    setPrevContextLangCode(contextLangCode);
     if (contextLangCode) setLanguageCode(contextLangCode);
-  }
+  }, [contextLang, contextLangCode]);
 
   // Dynamic ticking clock state (ticks every second)
   const [currentClock, setCurrentClock] = useState<Date>(new Date());
@@ -318,7 +311,7 @@ export default function LanguageRegionSettings() {
     return () => unsubscribe();
   }, [user, authLoading]);
 
-  // Persistence handler
+  // Persistence handler with dot-notation merge
   const savePreferences = async (updated: Partial<{
     language: string;
     languageCode: string;
@@ -328,38 +321,32 @@ export default function LanguageRegionSettings() {
     timeFormat24: boolean;
     firstDayOfWeek: "Sunday" | "Monday" | "Saturday";
   }>) => {
-    const current = {
-      language,
-      languageCode,
-      region,
-      regionCode,
-      dateFormat,
-      timeFormat24,
-      firstDayOfWeek,
-      ...updated,
-    };
-
     updateLocalePreferences(updated as any);
-    AsyncStorage.setItem("@bunkmates_locale_preferences", JSON.stringify(current)).catch(() => {});
+    AsyncStorage.getItem("@bunkmates_locale_preferences").then((cached) => {
+      const existing = cached ? JSON.parse(cached) : {};
+      const current = { ...existing, ...updated };
+      AsyncStorage.setItem("@bunkmates_locale_preferences", JSON.stringify(current)).catch(() => {});
+    }).catch(() => {});
 
     if (user) {
       const userDocRef = doc(db, "users", user.uid);
-      updateDoc(userDocRef, {
-        localePreferences: current,
-        updatedAt: new Date().toISOString(),
-      }).catch((e) => {
+      const updates: any = { updatedAt: new Date().toISOString() };
+      Object.keys(updated).forEach((k) => {
+        updates[`localePreferences.${k}`] = (updated as any)[k];
+      });
+      updateDoc(userDocRef, updates).catch((e) => {
         console.log("Firestore write error:", e);
       });
     }
   };
 
   // Selection handlers with dynamic smart logic
-  const handleSelectLanguage = async (lang: LanguageOption) => {
+  const handleSelectLanguage = (lang: LanguageOption) => {
+    setLanguageModalVisible(false);
     setLanguage(lang.name);
     setLanguageCode(lang.code);
-    await changeLanguage(lang.name, lang.code as any);
-    await savePreferences({ language: lang.name, languageCode: lang.code });
-    setLanguageModalVisible(false);
+    changeLanguage(lang.name, lang.code as any).catch(() => {});
+    savePreferences({ language: lang.name, languageCode: lang.code }).catch(() => {});
     triggerToast(`${t("app_language", "Language")}: ${lang.name}`);
   };
 
@@ -706,10 +693,10 @@ export default function LanguageRegionSettings() {
       <SwipeableDrawer
         visible={languageModalVisible}
         onClose={() => setLanguageModalVisible(false)}
-        showHandle={false}
+        showHandle={true}
+        enableSheetDrag={false}
         sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
         <View style={styles.sheetHeader}>
           <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
             {t("select_language", "Select App Language")}
@@ -780,10 +767,10 @@ export default function LanguageRegionSettings() {
       <SwipeableDrawer
         visible={regionModalVisible}
         onClose={() => setRegionModalVisible(false)}
-        showHandle={false}
+        showHandle={true}
+        enableSheetDrag={false}
         sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
         <View style={styles.sheetHeader}>
           <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
             {t("select_region", "Select Region")}
@@ -849,18 +836,15 @@ export default function LanguageRegionSettings() {
       </SwipeableDrawer>
 
       {/* ========================================================
-          MODAL 3: DATE FORMAT PICKER (Dynamic live today's date sample)
-      ========================================================= */}
-      {/* ========================================================
           MODAL 3: DATE FORMAT PICKER (SWIPEABLE DRAWER)
       ========================================================= */}
       <SwipeableDrawer
         visible={dateFormatModalVisible}
         onClose={() => setDateFormatModalVisible(false)}
-        showHandle={false}
+        showHandle={true}
+        enableSheetDrag={false}
         sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
         <View style={styles.sheetHeader}>
           <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
             {t("choose_date_format", "Choose Date Format")}
@@ -913,10 +897,10 @@ export default function LanguageRegionSettings() {
       <SwipeableDrawer
         visible={firstDayModalVisible}
         onClose={() => setFirstDayModalVisible(false)}
-        showHandle={false}
+        showHandle={true}
+        enableSheetDrag={false}
         sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
         <View style={styles.sheetHeader}>
           <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
             {t("first_day_of_week", "First Day of Week")}

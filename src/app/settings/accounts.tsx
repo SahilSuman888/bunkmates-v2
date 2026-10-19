@@ -220,6 +220,15 @@ export default function AccountAndSecurity() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await auth.signOut();
+      router.replace("/(auth)/login" as any);
+    } catch (error) {
+      console.log("Logout error:", error);
+    }
+  };
+
   if (authLoading && !user) {
     return (
       <View style={[styles.loader, { backgroundColor: colors.bg }]}>
@@ -390,8 +399,47 @@ export default function AccountAndSecurity() {
           </Pressable>
         </View>
 
-        {/* ── 6. DANGER ZONE (Soft pink/coral card, solid circle icon, red title & sub) ── */}
-        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("DANGER ZONE")}</Text>
+        {/* ── 6. ACCOUNT ACTIONS & DANGER ZONE ── */}
+        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("ACCOUNT ACTIONS")}</Text>
+
+        {/* Log Out */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.dangerCard,
+            { backgroundColor: isDark ? "rgba(255, 90, 95, 0.10)" : "rgba(255, 90, 95, 0.06)", borderColor: "transparent", marginBottom: 12 },
+            pressed && styles.pressed,
+          ]}
+          onPress={() => {
+            Alert.alert(
+              t("Log Out", "Log Out"),
+              t("Are you sure you want to log out of BunkMates?"),
+              [
+                { text: t("Cancel", "Cancel"), style: "cancel" },
+                {
+                  text: t("Log Out", "Log Out"),
+                  style: "destructive",
+                  onPress: handleLogout,
+                },
+              ]
+            );
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={t("Log Out")}
+        >
+          <View style={[styles.dangerCircleIcon, { backgroundColor: isDark ? "rgba(255, 90, 95, 0.20)" : "rgba(255, 90, 95, 0.12)" }]}>
+            <Ionicons name="log-out-outline" size={20} color="#FF5A5F" />
+          </View>
+          <View style={styles.rowMid}>
+            <Text style={[styles.rowTitle, { color: "#FF5A5F", fontWeight: "700" }]}>
+              {t("Log Out", "Log Out")}
+            </Text>
+            <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+              {t("Sign out of your active session on this device")}
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={20} color="#FF5A5F" />
+        </Pressable>
+
         <Pressable
           style={({ pressed }) => [
             styles.dangerCard,

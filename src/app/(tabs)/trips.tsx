@@ -212,7 +212,7 @@ export default function TripsScreen() {
   const insets = useSafeAreaInsets();
   const user = auth.currentUser;
   const { formatCurrency, formatDate, hidePastTrips } = useAppSettings();
-  const { t } = useLanguage();
+  const { t: tr } = useLanguage();
   const { isDark, themeColors, accentColor, accent, scaleFont, fontScale } = useThemeToggle();
 
   const isBrightAccent =
@@ -1817,8 +1817,8 @@ export default function TripsScreen() {
             {/* 1. Sleek Ambient Header */}
             <View style={s.topHeaderRow}>
               <View>
-                <Text style={s.welcomeSubText}>{greetingWord.toUpperCase()} • READY TO EXPLORE?</Text>
-                <Text style={s.mainGreeting}>Where next, {userFirstName}?</Text>
+                <Text style={s.welcomeSubText}>{greetingWord.toUpperCase()} • {tr("READY TO EXPLORE?", "READY TO EXPLORE?")}</Text>
+                <Text style={s.mainGreeting}>{tr("Where next", "Where next")}, {userFirstName}?</Text>
               </View>
               <View style={s.topHeaderRight}>
                 <NotificationBell />
@@ -2224,12 +2224,12 @@ export default function TripsScreen() {
                     { key: "Pinned", count: pinnedCount, icon: "bookmark" },
                     { key: "Past", count: pastCount, icon: "checkmark-circle" },
                   ] as const
-                ).map((t) => {
-                  const active = activeTab === t.key;
+                ).map((tabItem) => {
+                  const active = activeTab === tabItem.key;
                   return (
                     <Pressable
-                      key={t.key}
-                      onPress={() => setActiveTab(t.key as any)}
+                      key={tabItem.key}
+                      onPress={() => setActiveTab(tabItem.key as any)}
                       style={[
                         s.statusTabPill,
                         active && [
@@ -2239,7 +2239,7 @@ export default function TripsScreen() {
                       ]}
                     >
                       <Ionicons
-                        name={t.icon as any}
+                        name={tabItem.icon as any}
                         size={14}
                         color={active ? onAccentTextColor : "rgba(255, 255, 255, 0.45)"}
                       />
@@ -2252,7 +2252,7 @@ export default function TripsScreen() {
                           ],
                         ]}
                       >
-                        {t.key}
+                        {tr(tabItem.key, tabItem.key)}
                       </Text>
                       <View
                         style={[
@@ -2276,7 +2276,7 @@ export default function TripsScreen() {
                             ],
                           ]}
                         >
-                          {t.count}
+                          {tabItem.count}
                         </Text>
                       </View>
                     </Pressable>

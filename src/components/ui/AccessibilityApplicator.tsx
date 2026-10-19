@@ -9,6 +9,7 @@
 import React, { useEffect, useRef } from 'react';
 import ReactNative, { Text as RNText, View, AccessibilityInfo, Platform } from 'react-native';
 import { useThemeToggle } from '../../contexts/ThemeContext';
+import { useLanguage, TRANSLATIONS } from '../../contexts/LanguageContext';
 
 export interface AccessibilityState {
   boldText: boolean;
@@ -16,6 +17,42 @@ export interface AccessibilityState {
   largeTouchTargets: boolean;
   reduceTransparency: boolean;
   highContrastMode: boolean;
+}
+
+let currentGlobalLangCode = 'en-IN';
+
+export function setGlobalLanguageCode(code: string) {
+  currentGlobalLangCode = code;
+}
+
+function translateNode(node: any, langCode: string): any {
+  if (!node) return node;
+  if (typeof node === 'string') {
+    const trimmed = node.trim();
+    if (!trimmed || trimmed.length <= 1) return node;
+    const dict = TRANSLATIONS[langCode];
+    if (dict) {
+      if (dict[node]) return dict[node];
+      if (dict[trimmed]) return dict[trimmed];
+      const lower = trimmed.toLowerCase();
+      if (dict[lower]) return dict[lower];
+    }
+    // Indian language fallback to Hindi if not found
+    if (langCode !== 'en-US' && langCode !== 'en-GB' && langCode !== 'en-IN' && langCode !== 'hi') {
+      const hiDict = TRANSLATIONS['hi'];
+      if (hiDict) {
+        if (hiDict[node]) return hiDict[node];
+        if (hiDict[trimmed]) return hiDict[trimmed];
+        const lower = trimmed.toLowerCase();
+        if (hiDict[lower]) return hiDict[lower];
+      }
+    }
+    return node;
+  }
+  if (Array.isArray(node)) {
+    return node.map((child) => translateNode(child, langCode));
+  }
+  return node;
 }
 
 const globalAccessibilityState: AccessibilityState = {
@@ -256,6 +293,11 @@ try {
         accessible = true;
       }
 
+      let finalChildren = props.children;
+      if (currentGlobalLangCode && currentGlobalLangCode !== 'en-US' && currentGlobalLangCode !== 'en-IN') {
+        finalChildren = translateNode(props.children, currentGlobalLangCode);
+      }
+
       return (
         <OriginalText
           {...props}
@@ -263,7 +305,9 @@ try {
           style={finalStyle}
           accessible={accessible}
           allowFontScaling={props.allowFontScaling ?? true}
-        />
+        >
+          {finalChildren}
+        </OriginalText>
       );
     });
 
@@ -333,8 +377,15 @@ export const AccessibilityApplicator: React.FC<{ children?: React.ReactNode }> =
     }
   }, [screenReaderCompat]);
 
-  // Dynamic root key guarantees that the entire navigation and component tree
-  // completely remounts and re-evaluates styles in real time whenever accessibility toggles.
+  let currentLang = 'en-IN';
+  try {
+    const langCtx = useLanguage();
+    if (langCtx?.languageCode) currentLang = langCtx.languageCode;
+  } catch (_) {}
+  currentGlobalLangCode = currentLang;
+
+  // Root key for structural accessibility changes (bold, contrast, targets)
+  // Preserves tree mounting during language switches so drawers and screens don't flicker/unmount
   const rootKey = `acc-root-b:${boldText}-hc:${highContrastMode}-lt:${largeTouchTargets}-rt:${reduceTransparency}`;
 
   return (

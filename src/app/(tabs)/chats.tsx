@@ -740,7 +740,7 @@ export default function ChatsScreen() {
       {/* ── TOP HEADER (Clean, Professional, WhatsApp Reference) ── */}
       <View style={[s.topHeader, { paddingTop: insets.top + 8 }]}>
         <View>
-          <Text style={[s.headerTitleText, { color: themeColors.text, fontSize: scaleFont(26) }]}>Chats</Text>
+          <Text style={[s.headerTitleText, { color: themeColors.text, fontSize: scaleFont(26) }]}>{t("Chats", "Chats")}</Text>
           <Text style={[s.headerSubtitleText, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>
             {activeScope === "Private"
               ? `${displayedList.length} locked chats`
@@ -845,12 +845,12 @@ export default function ChatsScreen() {
         >
           {(
             [
-              { key: "All", label: "All", count: 0 },
-              { key: "Unread", label: "Unread", count: totalUnreadCount },
-              { key: "Group", label: "Group", count: groupCountBadge },
-              { key: "Favourites", label: "Favourites", count: favouriteCountBadge },
-              { key: "Private", label: "Private", count: privateCountBadge },
-              { key: "Calls", label: "Calls", count: groupedCallHistory.length },
+              { key: "All", label: t("All", "All"), count: 0 },
+              { key: "Unread", label: t("Unread", "Unread"), count: totalUnreadCount },
+              { key: "Group", label: t("Group", "Group"), count: groupCountBadge },
+              { key: "Favourites", label: t("Favourites", "Favourites"), count: favouriteCountBadge },
+              { key: "Private", label: t("Private", "Private"), count: privateCountBadge },
+              { key: "Calls", label: t("Calls", "Calls"), count: groupedCallHistory.length },
             ] as const
           ).map((scope) => {
             const isSelected = activeScope === scope.key;

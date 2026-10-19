@@ -31,6 +31,7 @@ export interface SwipeableDrawerProps {
   closeOnBackdropPress?: boolean;
   avoidKeyboard?: boolean;
   maxHeight?: number | string;
+  enableSheetDrag?: boolean;
 }
 
 export function SwipeableDrawer({
@@ -46,20 +47,12 @@ export function SwipeableDrawer({
   closeOnBackdropPress = true,
   avoidKeyboard = true,
   maxHeight = "90%",
+  enableSheetDrag = false,
 }: SwipeableDrawerProps) {
   const insets = useSafeAreaInsets();
   const [modalVisible, setModalVisible] = useState(visible);
-  const [prevVisible, setPrevVisible] = useState(visible);
   const [translateY] = useState(() => new Animated.Value(SCREEN_HEIGHT));
   const isClosingRef = useRef(false);
-
-  // Sync modalVisible state on visible prop transition
-  if (visible !== prevVisible) {
-    setPrevVisible(visible);
-    if (visible) {
-      setModalVisible(true);
-    }
-  }
 
   // Directly interpolate backdrop opacity from translateY on UI thread — ZERO JS bridge overhead
   const backdropOpacity = useMemo(
@@ -72,8 +65,8 @@ export function SwipeableDrawer({
     [translateY]
   );
 
-  // Ultra-smooth native dismiss animation
-  const dismissAnimated = useCallback(() => {
+  // User-initiated dismiss (via backdrop tap, grab drag-down, or Android hardware back)
+  const handleUserDismiss = useCallback(() => {
     if (isClosingRef.current) return;
     isClosingRef.current = true;
     Animated.timing(translateY, {
@@ -88,9 +81,12 @@ export function SwipeableDrawer({
     });
   }, [onClose, translateY]);
 
-  // Handle visibility changes with physics-based spring
+  // Handle visibility transitions from props
+  const prevVisibleRef = useRef(visible);
   useEffect(() => {
-    if (visible) {
+    if (visible && !prevVisibleRef.current) {
+      prevVisibleRef.current = true;
+      setModalVisible(true);
       isClosingRef.current = false;
       translateY.setValue(SCREEN_HEIGHT);
       Animated.spring(translateY, {
@@ -101,27 +97,40 @@ export function SwipeableDrawer({
         overshootClamping: true,
         useNativeDriver: true,
       }).start();
-    } else if (modalVisible && !isClosingRef.current) {
-      dismissAnimated();
+    } else if (!visible && prevVisibleRef.current) {
+      prevVisibleRef.current = false;
+      // Programmatic dismiss initiated by parent
+      if (!isClosingRef.current) {
+        isClosingRef.current = true;
+        Animated.timing(translateY, {
+          toValue: SCREEN_HEIGHT,
+          duration: 180,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start(() => {
+          setModalVisible(false);
+          isClosingRef.current = false;
+        });
+      }
     }
-  }, [visible, modalVisible, dismissAnimated, translateY]);
+  }, [visible, translateY]);
 
   // Handle Android hardware back button
   useEffect(() => {
     if (!modalVisible) return;
     const backSub = BackHandler.addEventListener("hardwareBackPress", () => {
-      dismissAnimated();
+      handleUserDismiss();
       return true;
     });
     return () => backSub.remove();
-  }, [modalVisible, dismissAnimated]);
+  }, [modalVisible, handleUserDismiss]);
 
-  const dismissAnimatedRef = useRef(dismissAnimated);
+  const handleUserDismissRef = useRef(handleUserDismiss);
   const dismissThresholdRef = useRef(dismissThreshold);
   useEffect(() => {
-    dismissAnimatedRef.current = dismissAnimated;
+    handleUserDismissRef.current = handleUserDismiss;
     dismissThresholdRef.current = dismissThreshold;
-  }, [dismissAnimated, dismissThreshold]);
+  }, [handleUserDismiss, dismissThreshold]);
 
   // Dedicated PanResponder for the top Grab Handle area — fluid 60/120fps gesture
   // eslint-disable-next-line react-hooks/refs
@@ -140,7 +149,7 @@ export function SwipeableDrawer({
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy > dismissThresholdRef.current || gestureState.vy > 0.45) {
-          dismissAnimatedRef.current();
+          handleUserDismissRef.current();
         } else {
           Animated.spring(translateY, {
             toValue: 0,
@@ -172,7 +181,7 @@ export function SwipeableDrawer({
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy > dismissThresholdRef.current || gestureState.vy > 0.45) {
-          dismissAnimatedRef.current();
+          handleUserDismissRef.current();
         } else {
           Animated.spring(translateY, {
             toValue: 0,
@@ -193,7 +202,7 @@ export function SwipeableDrawer({
     <View style={[styles.overlayContainer, containerStyle]}>
       {/* Animated Backdrop with native interpolated opacity */}
       <TouchableWithoutFeedback
-        onPress={closeOnBackdropPress ? dismissAnimated : undefined}
+        onPress={closeOnBackdropPress ? handleUserDismiss : undefined}
       >
         <Animated.View
           style={[
@@ -205,7 +214,7 @@ export function SwipeableDrawer({
 
       {/* Swipeable Drawer Sheet */}
       <Animated.View
-        {...sheetPanResponder.panHandlers}
+        {...(enableSheetDrag ? sheetPanResponder.panHandlers : {})}
         style={[
           styles.drawerSheet,
           {
@@ -233,7 +242,7 @@ export function SwipeableDrawer({
       visible={modalVisible}
       transparent
       animationType="none"
-      onRequestClose={dismissAnimated}
+      onRequestClose={handleUserDismiss}
       statusBarTranslucent
     >
       {avoidKeyboard ? (
