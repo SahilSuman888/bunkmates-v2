@@ -30,7 +30,6 @@ import {
 } from "../../utils/sessionTracker";
 import { SettingsActionModal } from "./_components/SettingsActionModal";
 import { SwipeableDrawer } from "./_components/SwipeableDrawer";
-import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 
 export default function LinkedDevicesScreen() {
   const router = useRouter();
@@ -259,6 +258,7 @@ export default function LinkedDevicesScreen() {
 
   const formatTimestamp = (ts?: number) => {
     if (!ts) return "Recently";
+    // eslint-disable-next-line react-hooks/purity
     const diffMin = Math.floor((Date.now() - ts) / 60000);
     if (diffMin < 1) return "Just now";
     if (diffMin < 60) return `${diffMin}m ago`;
@@ -297,14 +297,7 @@ export default function LinkedDevicesScreen() {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
 
-      {/* ── Top Floating Mask Gradient (Exact 6-Stop Dissolve matching chat) ── */}
-      <SettingsHeaderGradientMask
-        backgroundColor={colors.bg}
-        height={Platform.OS === "android" ? 92 : 86}
-        zIndex={15}
-      />
-
-      {/* ── Top Floating Header Bar ── */}
+      {/* ── Top Header: Circular button matching Settings page ── */}
       <View style={styles.header}>
         <Pressable
           onPress={() => router.back()}
@@ -313,7 +306,7 @@ export default function LinkedDevicesScreen() {
             { backgroundColor: colors.card, borderColor: colors.cardBorder },
             pressed && styles.pressed,
           ]}
-          hitSlop={6}
+          hitSlop={8}
           accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
@@ -323,8 +316,12 @@ export default function LinkedDevicesScreen() {
         </Text>
         <Pressable
           onPress={handleManualRefresh}
-          hitSlop={6}
-          style={styles.refreshBtn}
+          hitSlop={8}
+          style={({ pressed }) => [
+            styles.modernHeaderBtn,
+            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            pressed && styles.pressed,
+          ]}
           accessibilityLabel="Refresh sessions"
         >
           {isSyncing ? (
@@ -718,18 +715,12 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.72 },
 
   header: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === "android" ? 12 : 6,
-    paddingBottom: 10,
-    minHeight: 56,
-    zIndex: 20,
-    backgroundColor: "transparent",
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 14,
+    gap: 14,
   },
   modernHeaderBtn: {
     width: 42,
@@ -738,7 +729,6 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 10,
   },
   headerTitle: {
     flex: 1,
@@ -746,16 +736,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: -0.3,
   },
-  refreshBtn: {
-    width: 42,
-    height: 42,
-    justifyContent: "center",
-    alignItems: "center",
-  },
 
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: (Platform.OS === "android" ? 64 : 58) + 10,
+    paddingHorizontal: 20,
+    paddingTop: 8,
     paddingBottom: 48,
   },
 

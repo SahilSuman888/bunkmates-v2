@@ -48,13 +48,13 @@ type KeyStatus = "idle" | "valid" | "invalid";
 export default function AISettingsScreen() {
   const router = useRouter();
   const { t } = useLanguage();
-  const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
+  const { themeColors, isDark, accentColor, onAccentTextColor, scaleFont, background } = useThemeToggle();
   const isAtmosphere = background.mode !== "solid";
   const uid = auth.currentUser?.uid || null;
 
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(uid));
   const [validating, setValidating] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [status, setStatus] = useState<KeyStatus>("idle");
@@ -65,7 +65,6 @@ export default function AISettingsScreen() {
   /* ─── Real-time Firestore listener (same as bunk-mates-master Profile.js) ─── */
   useEffect(() => {
     if (!uid) {
-      setLoading(false);
       return;
     }
 
@@ -171,31 +170,33 @@ export default function AISettingsScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: isAtmosphere ? "transparent" : themeColors.background }]} edges={["top", "left", "right"]}>
+      {/* ── HEADER ── */}
+      <View style={styles.header}>
+        <Pressable
+          onPress={() => router.back()}
+          style={({ pressed }) => [styles.backButton, { backgroundColor: themeColors.card }, pressed && styles.pressed]}
+          hitSlop={8}
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="arrow-back" size={20} color={themeColors.text} />
+        </Pressable>
+
+        <View style={styles.headerText}>
+          <View style={styles.titleRow}>
+            <Text style={[styles.sparkle, { color: accentColor }]}>✦</Text>
+            <Text style={[styles.title, { color: themeColors.text, fontSize: scaleFont(20) }]}>{t("AI Features")}</Text>
+          </View>
+          <Text style={[styles.subtitle, { color: themeColors.textSecondary, fontSize: scaleFont(11) }]}>
+            {t("Configure Groq API Key & AI settings", "Configure Groq API Key & cross-device AI synchronization")}
+          </Text>
+        </View>
+      </View>
+
       <ScrollView
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.content}
       >
-        {/* ── HEADER ── */}
-        <View style={styles.header}>
-          <Pressable
-            onPress={() => router.back()}
-            style={({ pressed }) => [styles.backButton, { backgroundColor: isDark ? "#202024" : "#F4F5F7" }, pressed && styles.pressed]}
-          >
-            <Ionicons name="arrow-back" size={rs(18)} color={themeColors.text} />
-          </Pressable>
-
-          <View style={styles.headerText}>
-            <View style={styles.titleRow}>
-              <Text style={[styles.sparkle, { color: accentColor }]}>✦</Text>
-              <Text style={[styles.title, { color: themeColors.text, fontSize: scaleFont(20) }]}>{t("AI Features")}</Text>
-            </View>
-            <Text style={[styles.subtitle, { color: themeColors.textSecondary, fontSize: scaleFont(11) }]}>
-              {t("Configure Groq API Key & AI settings", "Configure Groq API Key & cross-device AI synchronization")}
-            </Text>
-          </View>
-        </View>
-
         {/* ── GROQ KEY CARD ── */}
         <View style={[styles.card, { backgroundColor: themeColors.card }]}>
           <View style={styles.cardTitleRow}>
@@ -242,17 +243,21 @@ export default function AISettingsScreen() {
               disabled={validating}
               style={({ pressed }) => [
                 styles.saveButton,
-                { backgroundColor: accentColor },
+                {
+                  backgroundColor: accentColor,
+                  borderWidth: (accentColor?.toLowerCase() === "#ffffff" || accentColor === "white") && !isDark ? 1.5 : 0,
+                  borderColor: "#111827",
+                },
                 validating && styles.disabledButton,
                 pressed && styles.pressed,
               ]}
             >
               {validating ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={onAccentTextColor} />
               ) : (
                 <>
-                  <MaterialCommunityIcons name="creation" size={rs(15)} color="#FFFFFF" />
-                  <Text style={[styles.saveText, { color: "#FFFFFF" }]}>{t("Save & Validate Key")}</Text>
+                  <MaterialCommunityIcons name="creation" size={rs(15)} color={onAccentTextColor} />
+                  <Text style={[styles.saveText, { color: onAccentTextColor }]}>{t("Save & Validate Key")}</Text>
                 </>
               )}
             </Pressable>
@@ -310,7 +315,7 @@ export default function AISettingsScreen() {
             </View>
           ) : (
             <Text style={[styles.statusMessage, { color: themeColors.textSecondary }]}>
-              No models loaded. Click "Save & Validate Key" above to fetch your available Groq
+              No models loaded. Click &ldquo;Save &amp; Validate Key&rdquo; above to fetch your available Groq
               models.
             </Text>
           )}
@@ -384,31 +389,32 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: rs(20),
-    paddingTop: rs(18),
+    paddingTop: rs(10),
     paddingBottom: rs(60),
   },
 
   /* Header */
   header: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: rs(24),
+    alignItems: "center",
+    paddingHorizontal: rs(20),
+    paddingTop: 8,
+    paddingBottom: 14,
+    gap: 14,
   },
   backButton: {
     width: 42,
     height: 42,
     borderRadius: 21,
     borderWidth: 0,
-    backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 14,
   },
-  headerText: { flex: 1, paddingTop: rs(1) },
+  headerText: { flex: 1 },
   titleRow: { flexDirection: "row", alignItems: "center" },
   sparkle: { color: "#00e6b0", fontSize: rs(18), fontWeight: "900", marginRight: rs(4) },
   title: { color: "#eeeeee", fontSize: rs(20), fontWeight: "900" },
-  subtitle: { color: "#888", fontSize: rs(11), lineHeight: rs(16), marginTop: rs(4) },
+  subtitle: { color: "#888", fontSize: rs(11), lineHeight: rs(16), marginTop: rs(2) },
 
   /* Card */
   card: {

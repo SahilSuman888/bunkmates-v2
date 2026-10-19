@@ -159,7 +159,7 @@ export interface ChatSettingsContextType extends ChatPreferences {
 
   // Archive & Storage Management
   archivedChatIds: string[];
-  isChatArchived: (chatId: string) => boolean;
+  isChatArchived: (chatId?: string | null) => boolean;
   toggleArchiveChat: (chatId: string) => Promise<void>;
   clearedAt: string | null;
   deletedAt: string | null;
@@ -302,10 +302,13 @@ export const ChatSettingsProvider = ({ children }: { children: ReactNode }) => {
       if (user) {
         try {
           const userDocRef = doc(db, "users", user.uid);
-          await updateDoc(userDocRef, {
-            chatPreferences: prefs,
+          const updates: Record<string, any> = {
             updatedAt: new Date().toISOString(),
+          };
+          Object.entries(prefs).forEach(([key, val]) => {
+            updates[`chatPreferences.${key}`] = val;
           });
+          await updateDoc(userDocRef, updates);
         } catch (e) {
           console.log("Firestore write chatPreferences error:", e);
         }
@@ -334,7 +337,7 @@ export const ChatSettingsProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const isChatArchived = useCallback(
-    (chatId: string) => archivedChatIds.includes(chatId),
+    (chatId?: string | null) => Boolean(chatId && archivedChatIds.includes(chatId)),
     [archivedChatIds]
   );
 

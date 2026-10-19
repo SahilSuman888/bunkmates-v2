@@ -180,7 +180,8 @@ interface TypeConfig {
   label: string;
 }
 
-function getTypeConfig(type?: string): TypeConfig {
+function getTypeConfig(type?: string, accent?: string): TypeConfig {
+  const dynamicAccent = accent || "#f9971f";
   switch (type) {
     case "chat":
       return {
@@ -199,8 +200,8 @@ function getTypeConfig(type?: string): TypeConfig {
     case "call":
       return {
         icon: "call",
-        color: "#ffffff", // Pure white luxury accent
-        badgeBg: "rgba(255, 255, 255, 0.14)",
+        color: "#10b981", // Emerald call accent
+        badgeBg: "rgba(16, 185, 129, 0.15)",
         label: "Incoming Call",
       };
     case "missed_call":
@@ -213,14 +214,14 @@ function getTypeConfig(type?: string): TypeConfig {
     case "friend_request":
       return {
         icon: "person-add",
-        color: "#ffffff", // Pure white luxury accent
+        color: dynamicAccent,
         badgeBg: "rgba(255, 255, 255, 0.14)",
         label: "Friend Request",
       };
     case "friend_accepted":
       return {
         icon: "people",
-        color: "#ffffff", // Pure white luxury accent
+        color: dynamicAccent,
         badgeBg: "rgba(255, 255, 255, 0.14)",
         label: "New Friend",
       };
@@ -248,7 +249,7 @@ function getTypeConfig(type?: string): TypeConfig {
     default:
       return {
         icon: "notifications",
-        color: "#f9971f", // Bunkmates orange
+        color: dynamicAccent,
         badgeBg: "rgba(249, 151, 31, 0.15)",
         label: "Alert",
       };
@@ -262,7 +263,7 @@ function getTypeConfig(type?: string): TypeConfig {
 export default function Notifications() {
   const router = useRouter();
   const params = useLocalSearchParams<{ notificationId?: string }>();
-  const { themeColors, accentColor } = useThemeToggle();
+  const { themeColors, accentColor, onAccentTextColor, isDark, scaleFont } = useThemeToggle();
   const { t } = useLanguage();
 
   // State
@@ -622,32 +623,43 @@ export default function Notifications() {
      RENDER
   ============================================================ */
 
-  const activeAccent = "#ffffff";
+  /* ============================================================
+     RENDER
+  ============================================================ */
+
+  const activeAccent = accentColor || (isDark ? "#ffffff" : "#111827");
+  const onAccentColor = onAccentTextColor || (isDark ? "#000000" : "#ffffff");
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: "#09090b" }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle="light-content" backgroundColor="#09090b" />
+    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={["top", "left", "right"]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={themeColors.background} />
 
       {/* 1. TOP HEADER BAR */}
-      <View style={styles.header}>
+      <View style={[styles.header, { borderBottomColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.06)" }]}>
         <View style={styles.headerLeft}>
           <TouchableOpacity
             onPress={() => {
               haptic("light");
               router.back();
             }}
-            style={styles.circleIconButton}
+            style={[
+              styles.circleIconButton,
+              {
+                backgroundColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
+                borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
+              },
+            ]}
             activeOpacity={0.7}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Feather name="arrow-left" size={20} color="#ffffff" />
+            <Feather name="arrow-left" size={20} color={themeColors.text} />
           </TouchableOpacity>
 
           <View style={styles.headerTitleRow}>
-            <Text style={styles.headerTitle}>{t("notifications", "Notifications")}</Text>
+            <Text style={[styles.headerTitle, { color: themeColors.text, fontSize: scaleFont(20) }]}>{t("notifications", "Notifications")}</Text>
             {unreadCount > 0 && (
-              <View style={[styles.unreadCountPill, { backgroundColor: "#ffffff" }]}>
-                <Text style={styles.unreadCountText}>{unreadCount}</Text>
+              <View style={[styles.unreadCountPill, { backgroundColor: activeAccent }]}>
+                <Text style={[styles.unreadCountText, { color: onAccentColor, fontSize: scaleFont(11) }]}>{unreadCount}</Text>
               </View>
             )}
           </View>
@@ -662,21 +674,34 @@ export default function Notifications() {
             }}
             style={[
               styles.circleIconButton,
-              searchOpen && { backgroundColor: "rgba(255,255,255,0.15)", borderColor: "#ffffff" },
+              {
+                backgroundColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
+                borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
+              },
+              searchOpen && {
+                backgroundColor: isDark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.08)",
+                borderColor: activeAccent,
+              },
             ]}
             activeOpacity={0.7}
           >
-            <Ionicons name={searchOpen ? "close" : "search"} size={18} color="#ffffff" />
+            <Ionicons name={searchOpen ? "close" : "search"} size={18} color={themeColors.text} />
           </TouchableOpacity>
 
           {unreadCount > 0 && (
             <TouchableOpacity
               onPress={markAllAsRead}
-              style={[styles.actionPillButton, { borderColor: "rgba(255, 255, 255, 0.25)" }]}
+              style={[
+                styles.actionPillButton,
+                {
+                  borderColor: isDark ? "rgba(255, 255, 255, 0.25)" : "rgba(0, 0, 0, 0.15)",
+                  backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+                },
+              ]}
               activeOpacity={0.75}
             >
-              <Ionicons name="checkmark-done" size={15} color="#ffffff" style={{ marginRight: 4 }} />
-              <Text style={[styles.actionPillText, { color: "#ffffff" }]}>{t("read_all", "Read All")}</Text>
+              <Ionicons name="checkmark-done" size={15} color={activeAccent} style={{ marginRight: 4 }} />
+              <Text style={[styles.actionPillText, { color: themeColors.text, fontSize: scaleFont(12) }]}>{t("read_all", "Read All")}</Text>
             </TouchableOpacity>
           )}
 
@@ -685,10 +710,16 @@ export default function Notifications() {
               haptic("light");
               setShowOptionsModal(true);
             }}
-            style={styles.circleIconButton}
+            style={[
+              styles.circleIconButton,
+              {
+                backgroundColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
+                borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
+              },
+            ]}
             activeOpacity={0.7}
           >
-            <Feather name="more-horizontal" size={20} color="#ffffff" />
+            <Feather name="more-horizontal" size={20} color={themeColors.text} />
           </TouchableOpacity>
         </View>
       </View>
@@ -696,21 +727,29 @@ export default function Notifications() {
       {/* 2. EXPANDABLE SEARCH BAR */}
       {searchOpen && (
         <View style={styles.searchBarWrapper}>
-          <View style={styles.searchBarInner}>
-            <Ionicons name="search" size={16} color="rgba(255,255,255,0.4)" style={{ marginRight: 8 }} />
+          <View
+            style={[
+              styles.searchBarInner,
+              {
+                backgroundColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
+                borderColor: isDark ? "rgba(255, 255, 255, 0.09)" : "rgba(0, 0, 0, 0.08)",
+              },
+            ]}
+          >
+            <Ionicons name="search" size={16} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
             <TextInput
               placeholder={t("search_notifications", "Search notifications or senders...")}
-              placeholderTextColor="rgba(255,255,255,0.4)"
+              placeholderTextColor={themeColors.textSecondary}
               value={searchQuery}
               onChangeText={setSearchQuery}
-              style={styles.searchInput}
+              style={[styles.searchInput, { color: themeColors.text, fontSize: scaleFont(14) }]}
               autoFocus
               autoCapitalize="none"
               clearButtonMode="while-editing"
             />
             {searchQuery.length > 0 && (
               <TouchableOpacity onPress={() => setSearchQuery("")} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Ionicons name="close-circle" size={16} color="rgba(255,255,255,0.5)" />
+                <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
               </TouchableOpacity>
             )}
           </View>
@@ -730,6 +769,10 @@ export default function Notifications() {
             count={notifications.length}
             active={activeCategory === "all"}
             accent={activeAccent}
+            onAccentTextColor={onAccentColor}
+            isDark={isDark}
+            themeColors={themeColors}
+            scaleFont={scaleFont}
             onPress={() => {
               haptic("light");
               setActiveCategory("all");
@@ -741,6 +784,10 @@ export default function Notifications() {
             count={unreadCount}
             active={activeCategory === "unread"}
             accent={activeAccent}
+            onAccentTextColor={onAccentColor}
+            isDark={isDark}
+            themeColors={themeColors}
+            scaleFont={scaleFont}
             highlight={unreadCount > 0}
             onPress={() => {
               haptic("light");
@@ -752,6 +799,10 @@ export default function Notifications() {
             icon="chatbubbles-outline"
             active={activeCategory === "messages"}
             accent={activeAccent}
+            onAccentTextColor={onAccentColor}
+            isDark={isDark}
+            themeColors={themeColors}
+            scaleFont={scaleFont}
             onPress={() => {
               haptic("light");
               setActiveCategory("messages");
@@ -762,6 +813,10 @@ export default function Notifications() {
             icon="call-outline"
             active={activeCategory === "calls"}
             accent={activeAccent}
+            onAccentTextColor={onAccentColor}
+            isDark={isDark}
+            themeColors={themeColors}
+            scaleFont={scaleFont}
             onPress={() => {
               haptic("light");
               setActiveCategory("calls");
@@ -772,6 +827,10 @@ export default function Notifications() {
             icon="person-add-outline"
             active={activeCategory === "requests"}
             accent={activeAccent}
+            onAccentTextColor={onAccentColor}
+            isDark={isDark}
+            themeColors={themeColors}
+            scaleFont={scaleFont}
             onPress={() => {
               haptic("light");
               setActiveCategory("requests");
@@ -782,6 +841,10 @@ export default function Notifications() {
             icon="notifications-outline"
             active={activeCategory === "system"}
             accent={activeAccent}
+            onAccentTextColor={onAccentColor}
+            isDark={isDark}
+            themeColors={themeColors}
+            scaleFont={scaleFont}
             onPress={() => {
               haptic("light");
               setActiveCategory("system");
@@ -793,19 +856,27 @@ export default function Notifications() {
       {/* 4. UNREAD STATUS QUICK BANNER */}
       {unreadCount > 0 && activeCategory !== "unread" && (
         <View style={styles.unreadBannerContainer}>
-          <View style={[styles.unreadBanner, { borderColor: "rgba(255,255,255,0.12)" }]}>
+          <View
+            style={[
+              styles.unreadBanner,
+              {
+                backgroundColor: isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.03)",
+                borderColor: isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)",
+              },
+            ]}
+          >
             <View style={styles.unreadBannerLeft}>
-              <View style={[styles.pulseDot, { backgroundColor: "#ffffff" }]} />
-              <Text style={styles.unreadBannerText}>
-                <Text style={{ fontWeight: "800", color: "#ffffff" }}>{unreadCount} {t("unread", "unread")}</Text> {t("notifications", "notifications")}
+              <View style={[styles.pulseDot, { backgroundColor: activeAccent }]} />
+              <Text style={[styles.unreadBannerText, { color: themeColors.textSecondary, fontSize: scaleFont(12.5) }]}>
+                <Text style={{ fontWeight: "800", color: themeColors.text }}>{unreadCount} {t("unread", "unread")}</Text> {t("notifications", "notifications")}
               </Text>
             </View>
             <TouchableOpacity
               onPress={markAllAsRead}
               activeOpacity={0.7}
-              style={[styles.bannerActionBtn, { backgroundColor: "rgba(255, 255, 255, 0.15)" }]}
+              style={[styles.bannerActionBtn, { backgroundColor: activeAccent }]}
             >
-              <Text style={[styles.bannerActionText, { color: "#ffffff" }]}>{t("mark_all_read", "Mark all read")}</Text>
+              <Text style={[styles.bannerActionText, { color: onAccentColor, fontSize: scaleFont(11.5) }]}>{t("mark_all_read", "Mark all read")}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -815,24 +886,24 @@ export default function Notifications() {
       {loading ? (
         <View style={styles.centerLoading}>
           <ActivityIndicator size="large" color={activeAccent} />
-          <Text style={styles.loadingSubtitle}>{t("fetching_alerts", "Fetching your alerts...")}</Text>
+          <Text style={[styles.loadingSubtitle, { color: themeColors.textSecondary, fontSize: scaleFont(13) }]}>{t("fetching_alerts", "Fetching your alerts...")}</Text>
         </View>
       ) : filteredNotifications.length === 0 ? (
         <ScrollView
           contentContainerStyle={styles.emptyContainer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={activeAccent} />}
         >
-          <View style={styles.emptyGlowCircle}>
-            <Ionicons name="notifications-off-outline" size={38} color="rgba(255,255,255,0.4)" />
+          <View style={[styles.emptyGlowCircle, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.04)", borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)" }]}>
+            <Ionicons name="notifications-off-outline" size={38} color={themeColors.textSecondary} />
           </View>
-          <Text style={styles.emptyTitle}>
+          <Text style={[styles.emptyTitle, { color: themeColors.text, fontSize: scaleFont(18) }]}>
             {searchQuery
               ? t("no_matching_alerts", "No matching alerts")
               : activeCategory === "unread"
               ? t("all_caught_up", "You're all caught up! ✨")
               : t("no_notifications", "No notifications yet")}
           </Text>
-          <Text style={styles.emptyDescription}>
+          <Text style={[styles.emptyDescription, { color: themeColors.textSecondary, fontSize: scaleFont(13) }]}>
             {searchQuery
               ? `${t("no_matching_alerts", "No alerts found for")} "${searchQuery}".`
               : activeCategory === "unread"
@@ -842,14 +913,14 @@ export default function Notifications() {
 
           {activeCategory !== "all" && (
             <TouchableOpacity
-              style={[styles.emptyResetBtn, { backgroundColor: "rgba(255,255,255,0.08)" }]}
+              style={[styles.emptyResetBtn, { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" }]}
               onPress={() => {
                 haptic("light");
                 setActiveCategory("all");
                 setSearchQuery("");
               }}
             >
-              <Text style={styles.emptyResetText}>{t("view_all_notifications", "View All Notifications")}</Text>
+              <Text style={[styles.emptyResetText, { color: themeColors.text, fontSize: scaleFont(12.5) }]}>{t("view_all_notifications", "View All Notifications")}</Text>
             </TouchableOpacity>
           )}
         </ScrollView>
@@ -862,8 +933,8 @@ export default function Notifications() {
           {groupedSections.map((section) => (
             <View key={section.title} style={styles.sectionBlock}>
               <View style={styles.sectionHeaderRow}>
-                <Text style={styles.sectionTitle}>{section.title.toUpperCase()}</Text>
-                <View style={styles.sectionDivider} />
+                <Text style={[styles.sectionTitle, { color: themeColors.textSecondary, fontSize: scaleFont(11) }]}>{section.title.toUpperCase()}</Text>
+                <View style={[styles.sectionDivider, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.05)" }]} />
               </View>
 
               {section.data.map((item) => (
@@ -871,6 +942,10 @@ export default function Notifications() {
                   key={item.id}
                   item={item}
                   accent={activeAccent}
+                  onAccentTextColor={onAccentColor}
+                  isDark={isDark}
+                  themeColors={themeColors}
+                  scaleFont={scaleFont}
                   onPress={() => handleNotificationPress(item)}
                   onToggleRead={() => toggleReadStatus(item)}
                   onDelete={() => deleteSingleNotification(item.id)}
@@ -887,12 +962,16 @@ export default function Notifications() {
       <SwipeableDrawer
         visible={Boolean(selectedNotification)}
         onClose={() => setSelectedNotification(null)}
-        sheetStyle={[styles.detailSheetContainer, { paddingHorizontal: 0, paddingBottom: 0 }]}
+        sheetStyle={[styles.detailSheetContainer, { paddingHorizontal: 0, paddingBottom: 0, backgroundColor: themeColors.card, borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)" }]}
       >
         {selectedNotification && (
           <NotificationDetailSheet
             item={selectedNotification}
             accent={activeAccent}
+            onAccentTextColor={onAccentColor}
+            isDark={isDark}
+            themeColors={themeColors}
+            scaleFont={scaleFont}
             onClose={() => setSelectedNotification(null)}
             onAccept={() => handleAcceptFriendRequest(selectedNotification)}
             onReject={() => handleRejectFriendRequest(selectedNotification)}
@@ -926,29 +1005,29 @@ export default function Notifications() {
       <SwipeableDrawer
         visible={showOptionsModal}
         onClose={() => setShowOptionsModal(false)}
-        sheetStyle={styles.optionsPopup}
+        sheetStyle={[styles.optionsPopup, { backgroundColor: themeColors.card, borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)" }]}
       >
-        <Text style={styles.optionsTitle}>{t("notification_options", "Notification Options")}</Text>
+        <Text style={[styles.optionsTitle, { color: themeColors.text, fontSize: scaleFont(16) }]}>{t("notification_options", "Notification Options")}</Text>
 
         <TouchableOpacity
-          style={styles.optionRow}
+          style={[styles.optionRow, { borderBottomColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.05)" }]}
           onPress={() => {
             setShowOptionsModal(false);
             markAllAsRead();
           }}
           activeOpacity={0.7}
         >
-          <View style={[styles.optionIconBox, { backgroundColor: "rgba(255, 255, 255, 0.12)" }]}>
-            <Ionicons name="checkmark-done" size={20} color="#ffffff" />
+          <View style={[styles.optionIconBox, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.06)" }]}>
+            <Ionicons name="checkmark-done" size={20} color={activeAccent} />
           </View>
           <View style={styles.optionTextBox}>
-            <Text style={styles.optionRowTitle}>{t("mark_all_read", "Mark All as Read")}</Text>
-            <Text style={styles.optionRowSubtitle}>{t("mark_all_read_desc", "Clear all unread notification badges")}</Text>
+            <Text style={[styles.optionRowTitle, { color: themeColors.text, fontSize: scaleFont(14.5) }]}>{t("mark_all_read", "Mark All as Read")}</Text>
+            <Text style={[styles.optionRowSubtitle, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>{t("mark_all_read_desc", "Clear all unread notification badges")}</Text>
           </View>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.optionRow}
+          style={[styles.optionRow, { borderBottomColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.05)" }]}
           onPress={() => {
             setShowOptionsModal(false);
             clearAllReadNotifications();
@@ -959,33 +1038,33 @@ export default function Notifications() {
             <Ionicons name="trash-outline" size={20} color="#ef4444" />
           </View>
           <View style={styles.optionTextBox}>
-            <Text style={styles.optionRowTitle}>{t("clear_read_alerts", "Clear Read Alerts")}</Text>
-            <Text style={styles.optionRowSubtitle}>{t("clear_read_alerts_desc", "Remove all opened notifications from list")}</Text>
+            <Text style={[styles.optionRowTitle, { color: themeColors.text, fontSize: scaleFont(14.5) }]}>{t("clear_read_alerts", "Clear Read Alerts")}</Text>
+            <Text style={[styles.optionRowSubtitle, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>{t("clear_read_alerts_desc", "Remove all opened notifications from list")}</Text>
           </View>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.optionRow}
+          style={[styles.optionRow, { borderBottomColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.05)" }]}
           onPress={() => {
             setShowOptionsModal(false);
             router.push("/settings/notification" as any);
           }}
           activeOpacity={0.7}
         >
-          <View style={[styles.optionIconBox, { backgroundColor: "rgba(255, 255, 255, 0.08)" }]}>
-            <Ionicons name="settings-outline" size={20} color="#ffffff" />
+          <View style={[styles.optionIconBox, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)" }]}>
+            <Ionicons name="settings-outline" size={20} color={themeColors.text} />
           </View>
           <View style={styles.optionTextBox}>
-            <Text style={styles.optionRowTitle}>{t("alert_sound_settings", "Alert & Sound Settings")}</Text>
-            <Text style={styles.optionRowSubtitle}>{t("alert_sound_settings_desc", "Configure app ringtone, vibration, and push")}</Text>
+            <Text style={[styles.optionRowTitle, { color: themeColors.text, fontSize: scaleFont(14.5) }]}>{t("alert_sound_settings", "Alert & Sound Settings")}</Text>
+            <Text style={[styles.optionRowSubtitle, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>{t("alert_sound_settings_desc", "Configure app ringtone, vibration, and push")}</Text>
           </View>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.optionsCloseBtn}
+          style={[styles.optionsCloseBtn, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.07)" : "rgba(0, 0, 0, 0.06)" }]}
           onPress={() => setShowOptionsModal(false)}
         >
-          <Text style={styles.optionsCloseText}>{t("cancel", "Cancel")}</Text>
+          <Text style={[styles.optionsCloseText, { color: themeColors.text, fontSize: scaleFont(13.5) }]}>{t("cancel", "Cancel")}</Text>
         </TouchableOpacity>
       </SwipeableDrawer>
     </SafeAreaView>
@@ -1002,6 +1081,10 @@ function CategoryChip({
   count,
   active,
   accent,
+  onAccentTextColor,
+  isDark,
+  themeColors,
+  scaleFont,
   highlight,
   onPress,
 }: {
@@ -1010,6 +1093,10 @@ function CategoryChip({
   count?: number;
   active: boolean;
   accent: string;
+  onAccentTextColor: string;
+  isDark: boolean;
+  themeColors: any;
+  scaleFont: (size: number) => number;
   highlight?: boolean;
   onPress: () => void;
 }) {
@@ -1018,24 +1105,62 @@ function CategoryChip({
       onPress={onPress}
       style={[
         styles.categoryChip,
-        active && styles.categoryChipActive,
+        {
+          backgroundColor: active
+            ? accent
+            : isDark
+            ? "rgba(255, 255, 255, 0.05)"
+            : "rgba(0, 0, 0, 0.04)",
+          borderColor: active
+            ? accent
+            : isDark
+            ? "rgba(255, 255, 255, 0.08)"
+            : "rgba(0, 0, 0, 0.08)",
+        },
       ]}
     >
       <Ionicons
         name={icon}
         size={13}
-        color={active ? "#000000" : highlight ? "#ffffff" : "rgba(255,255,255,0.65)"}
+        color={active ? onAccentTextColor : highlight ? accent : themeColors.textSecondary}
         style={{ marginRight: 6 }}
       />
-      <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>{label}</Text>
+      <Text
+        style={[
+          styles.categoryChipText,
+          {
+            color: active ? onAccentTextColor : themeColors.textSecondary,
+            fontSize: scaleFont(12),
+          },
+          active && { fontWeight: "800", color: onAccentTextColor },
+        ]}
+      >
+        {label}
+      </Text>
       {typeof count === "number" && count > 0 && (
         <View
           style={[
             styles.chipBadge,
-            active ? styles.chipBadgeActive : styles.chipBadgeInactive,
+            {
+              backgroundColor: active
+                ? onAccentTextColor === "#FFFFFF"
+                  ? "rgba(0, 0, 0, 0.25)"
+                  : "rgba(0, 0, 0, 0.12)"
+                : isDark
+                ? "rgba(255, 255, 255, 0.12)"
+                : "rgba(0, 0, 0, 0.07)",
+            },
           ]}
         >
-          <Text style={[styles.chipBadgeText, { color: active ? "#ffffff" : "#ffffff" }]}>
+          <Text
+            style={[
+              styles.chipBadgeText,
+              {
+                color: active ? onAccentTextColor : themeColors.text,
+                fontSize: scaleFont(10),
+              },
+            ]}
+          >
             {count > 99 ? "99+" : count}
           </Text>
         </View>
@@ -1051,6 +1176,10 @@ function CategoryChip({
 function NotificationCard({
   item,
   accent,
+  onAccentTextColor,
+  isDark,
+  themeColors,
+  scaleFont,
   onPress,
   onToggleRead,
   onDelete,
@@ -1059,6 +1188,10 @@ function NotificationCard({
 }: {
   item: NotificationItem;
   accent: string;
+  onAccentTextColor: string;
+  isDark: boolean;
+  themeColors: any;
+  scaleFont: (size: number) => number;
   onPress: () => void;
   onToggleRead: () => void;
   onDelete: () => void;
@@ -1066,7 +1199,7 @@ function NotificationCard({
   onReject: () => void;
 }) {
   const isUnread = !item.seen;
-  const typeConfig = getTypeConfig(item.type);
+  const typeConfig = getTypeConfig(item.type, accent);
   const isFriendRequest = item.type === "friend_request";
   const isPendingRequest = isFriendRequest && item.status !== "accepted" && item.status !== "rejected";
   const cleanBody = stripHtml(item.content || item.message || "New activity notification");
@@ -1076,17 +1209,32 @@ function NotificationCard({
       onPress={onPress}
       style={({ pressed }) => [
         styles.cardContainer,
-        isUnread && styles.cardUnread,
+        {
+          backgroundColor: isUnread
+            ? isDark
+              ? "rgba(30, 30, 36, 0.95)"
+              : "#FFFFFF"
+            : isDark
+            ? "rgba(22, 22, 26, 0.7)"
+            : "rgba(0, 0, 0, 0.02)",
+          borderColor: isUnread
+            ? isDark
+              ? "rgba(255, 255, 255, 0.12)"
+              : "rgba(0, 0, 0, 0.1)"
+            : isDark
+            ? "rgba(255, 255, 255, 0.06)"
+            : "rgba(0, 0, 0, 0.04)",
+        },
         pressed && styles.cardPressed,
       ]}
     >
       {/* Left Active Glow Indicator Strip */}
-      {isUnread && <View style={[styles.unreadStrip, { backgroundColor: "#ffffff" }]} />}
+      {isUnread && <View style={[styles.unreadStrip, { backgroundColor: accent }]} />}
 
       {/* Avatar Container with Type Badge */}
       <View style={styles.avatarWrapper}>
         {item.pic ? (
-          <Image source={{ uri: item.pic }} style={styles.cardAvatar} />
+          <Image source={{ uri: item.pic }} style={[styles.cardAvatar, { backgroundColor: isDark ? "#202024" : "#E2E8F0" }]} />
         ) : (
           <View style={[styles.cardAvatarFallback, { backgroundColor: typeConfig.badgeBg }]}>
             <Ionicons name={typeConfig.icon} size={20} color={typeConfig.color} />
@@ -1094,7 +1242,7 @@ function NotificationCard({
         )}
 
         {/* Small floating corner icon */}
-        <View style={[styles.avatarMiniBadge, { backgroundColor: typeConfig.color }]}>
+        <View style={[styles.avatarMiniBadge, { backgroundColor: typeConfig.color, borderColor: themeColors.background }]}>
           <Ionicons
             name={typeConfig.icon}
             size={10}
@@ -1106,13 +1254,29 @@ function NotificationCard({
       {/* Main Content */}
       <View style={styles.cardContent}>
         <View style={styles.cardHeaderRow}>
-          <Text numberOfLines={1} style={[styles.cardTitle, isUnread && styles.cardTitleUnread]}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.cardTitle,
+              { color: themeColors.text, fontSize: scaleFont(14) },
+              isUnread && { fontWeight: "800", color: themeColors.text },
+            ]}
+          >
             {item.title || item.senderName || typeConfig.label}
           </Text>
-          <Text style={styles.cardTimeText}>{formatRelativeTime(item.timestamp)}</Text>
+          <Text style={[styles.cardTimeText, { color: themeColors.textSecondary, fontSize: scaleFont(11) }]}>
+            {formatRelativeTime(item.timestamp)}
+          </Text>
         </View>
 
-        <Text numberOfLines={2} style={[styles.cardMessage, isUnread && styles.cardMessageUnread]}>
+        <Text
+          numberOfLines={2}
+          style={[
+            styles.cardMessage,
+            { color: themeColors.textSecondary, fontSize: scaleFont(12.5) },
+            isUnread && { color: themeColors.text },
+          ]}
+        >
           {cleanBody}
         </Text>
 
@@ -1124,11 +1288,11 @@ function NotificationCard({
                 e.stopPropagation();
                 onAccept();
               }}
-              style={[styles.primaryActionBtn, { backgroundColor: "#ffffff" }]}
+              style={[styles.primaryActionBtn, { backgroundColor: accent }]}
               activeOpacity={0.8}
             >
-              <Ionicons name="checkmark" size={14} color="#000000" style={{ marginRight: 4 }} />
-              <Text style={[styles.primaryActionText, { color: "#000000" }]}>Accept</Text>
+              <Ionicons name="checkmark" size={14} color={onAccentTextColor} style={{ marginRight: 4 }} />
+              <Text style={[styles.primaryActionText, { color: onAccentTextColor, fontSize: scaleFont(11) }]}>Accept</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -1136,22 +1300,28 @@ function NotificationCard({
                 e.stopPropagation();
                 onReject();
               }}
-              style={styles.secondaryActionBtn}
+              style={[
+                styles.secondaryActionBtn,
+                {
+                  backgroundColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
+                  borderColor: "rgba(239, 68, 68, 0.25)",
+                },
+              ]}
               activeOpacity={0.8}
             >
               <Ionicons name="close" size={14} color="#ff6b6b" style={{ marginRight: 4 }} />
-              <Text style={styles.secondaryActionText}>Decline</Text>
+              <Text style={[styles.secondaryActionText, { fontSize: scaleFont(11) }]}>Decline</Text>
             </TouchableOpacity>
           </View>
         ) : item.type === "chat" && isUnread ? (
           <View style={styles.inlineActionHint}>
-            <Ionicons name="return-down-forward" size={13} color="#38bdf8" style={{ marginRight: 4 }} />
-            <Text style={[styles.inlineActionText, { color: "#38bdf8" }]}>Tap to reply</Text>
+            <Ionicons name="return-down-forward" size={13} color={accent} style={{ marginRight: 4 }} />
+            <Text style={[styles.inlineActionText, { color: accent, fontSize: scaleFont(11.5) }]}>Tap to reply</Text>
           </View>
         ) : item.type === "missed_call" ? (
           <View style={styles.inlineActionHint}>
-            <Ionicons name="call" size={12} color="#ffffff" style={{ marginRight: 4 }} />
-            <Text style={[styles.inlineActionText, { color: "#ffffff" }]}>Missed call • Tap to callback</Text>
+            <Ionicons name="call" size={12} color="#ef4444" style={{ marginRight: 4 }} />
+            <Text style={[styles.inlineActionText, { color: "#ef4444", fontSize: scaleFont(11.5) }]}>Missed call • Tap to callback</Text>
           </View>
         ) : null}
       </View>
@@ -1159,7 +1329,7 @@ function NotificationCard({
       {/* Right Quick Actions (Read indicator / Delete) */}
       <View style={styles.cardRightActions}>
         {isUnread ? (
-          <View style={[styles.unreadDot, { backgroundColor: "#ffffff" }]} />
+          <View style={[styles.unreadDot, { backgroundColor: accent }]} />
         ) : (
           <TouchableOpacity
             onPress={(e) => {
@@ -1169,7 +1339,11 @@ function NotificationCard({
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             style={styles.cardDeleteIcon}
           >
-            <Ionicons name="close-circle-outline" size={17} color="rgba(255,255,255,0.25)" />
+            <Ionicons
+              name="close-circle-outline"
+              size={17}
+              color={themeColors.textSecondary}
+            />
           </TouchableOpacity>
         )}
       </View>
@@ -1184,6 +1358,10 @@ function NotificationCard({
 function NotificationDetailSheet({
   item,
   accent,
+  onAccentTextColor,
+  isDark,
+  themeColors,
+  scaleFont,
   onClose,
   onAccept,
   onReject,
@@ -1193,6 +1371,10 @@ function NotificationDetailSheet({
 }: {
   item: NotificationItem;
   accent: string;
+  onAccentTextColor: string;
+  isDark: boolean;
+  themeColors: any;
+  scaleFont: (size: number) => number;
   onClose: () => void;
   onAccept: () => void;
   onReject: () => void;
@@ -1200,20 +1382,20 @@ function NotificationDetailSheet({
   onToggleRead: () => void;
   onOpenTarget: () => void;
 }) {
-  const typeConfig = getTypeConfig(item.type);
+  const typeConfig = getTypeConfig(item.type, accent);
   const cleanBody = stripHtml(item.content || item.message || "No content provided");
   const isPendingRequest = item.type === "friend_request" && item.status !== "accepted" && item.status !== "rejected";
 
   return (
-    <View style={styles.detailSheetContainer}>
+    <View style={[styles.detailSheetContainer, { backgroundColor: themeColors.card, borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)" }]}>
         {/* Top Drag Indicator */}
-        <View style={styles.sheetHandleBar} />
+        <View style={[styles.sheetHandleBar, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.2)" }]} />
 
         {/* Header Row */}
-        <View style={styles.sheetHeader}>
+        <View style={[styles.sheetHeader, { borderBottomColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.06)" }]}>
           <View style={styles.sheetHeaderAvatarRow}>
             {item.pic ? (
-              <Image source={{ uri: item.pic }} style={styles.sheetAvatar} />
+              <Image source={{ uri: item.pic }} style={[styles.sheetAvatar, { backgroundColor: isDark ? "#202024" : "#E2E8F0" }]} />
             ) : (
               <View style={[styles.sheetAvatarFallback, { backgroundColor: typeConfig.badgeBg }]}>
                 <Ionicons name={typeConfig.icon} size={26} color={typeConfig.color} />
@@ -1222,34 +1404,37 @@ function NotificationDetailSheet({
 
             <View style={{ flex: 1, marginLeft: 12 }}>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <Text style={styles.sheetSenderName} numberOfLines={1}>
+                <Text style={[styles.sheetSenderName, { color: themeColors.text, fontSize: scaleFont(16) }]} numberOfLines={1}>
                   {item.title || item.senderName || "BunkMates Alert"}
                 </Text>
               </View>
               <View style={{ flexDirection: "row", alignItems: "center", marginTop: 3 }}>
                 <View style={[styles.sheetTypeBadge, { backgroundColor: typeConfig.badgeBg }]}>
                   <Ionicons name={typeConfig.icon} size={11} color={typeConfig.color} style={{ marginRight: 4 }} />
-                  <Text style={[styles.sheetTypeBadgeText, { color: typeConfig.color }]}>{typeConfig.label}</Text>
+                  <Text style={[styles.sheetTypeBadgeText, { color: typeConfig.color, fontSize: scaleFont(11) }]}>{typeConfig.label}</Text>
                 </View>
-                <Text style={styles.sheetTimeText}>• {formatRelativeTime(item.timestamp)}</Text>
+                <Text style={[styles.sheetTimeText, { color: themeColors.textSecondary, fontSize: scaleFont(11.5) }]}>• {formatRelativeTime(item.timestamp)}</Text>
               </View>
             </View>
           </View>
 
-          <TouchableOpacity onPress={onClose} style={styles.sheetCloseButton}>
-            <Ionicons name="close" size={20} color="#ffffff" />
+          <TouchableOpacity
+            onPress={onClose}
+            style={[styles.sheetCloseButton, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)" }]}
+          >
+            <Ionicons name="close" size={20} color={themeColors.text} />
           </TouchableOpacity>
         </View>
 
         {/* Timestamp Meta */}
-        <View style={styles.exactTimeBox}>
-          <Ionicons name="time-outline" size={13} color="rgba(255,255,255,0.4)" style={{ marginRight: 6 }} />
-          <Text style={styles.exactTimeText}>{formatExactDateTime(item.timestamp)}</Text>
+        <View style={[styles.exactTimeBox, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.02)" : "rgba(0, 0, 0, 0.02)", borderBottomColor: isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.04)" }]}>
+          <Ionicons name="time-outline" size={13} color={themeColors.textSecondary} style={{ marginRight: 6 }} />
+          <Text style={[styles.exactTimeText, { color: themeColors.textSecondary, fontSize: scaleFont(11.5) }]}>{formatExactDateTime(item.timestamp)}</Text>
         </View>
 
         {/* Message Content Box */}
         <ScrollView style={styles.sheetScroll} showsVerticalScrollIndicator={false}>
-          <Text style={styles.sheetMessageText}>{cleanBody}</Text>
+          <Text style={[styles.sheetMessageText, { color: themeColors.text, fontSize: scaleFont(15) }]}>{cleanBody}</Text>
 
           {/* Action Box for Requests */}
           {isPendingRequest && (
@@ -1259,11 +1444,11 @@ function NotificationDetailSheet({
                   onAccept();
                   onClose();
                 }}
-                style={[styles.sheetAcceptBtn, { backgroundColor: "#ffffff" }]}
+                style={[styles.sheetAcceptBtn, { backgroundColor: accent }]}
                 activeOpacity={0.8}
               >
-                <Ionicons name="checkmark-circle" size={18} color="#000000" style={{ marginRight: 6 }} />
-                <Text style={[styles.sheetActionBtnText, { color: "#000000" }]}>Accept Friend Request</Text>
+                <Ionicons name="checkmark-circle" size={18} color={onAccentTextColor} style={{ marginRight: 6 }} />
+                <Text style={[styles.sheetActionBtnText, { color: onAccentTextColor, fontSize: scaleFont(13) }]}>Accept Friend Request</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1275,7 +1460,7 @@ function NotificationDetailSheet({
                 activeOpacity={0.8}
               >
                 <Ionicons name="close-circle" size={18} color="#ff6b6b" style={{ marginRight: 6 }} />
-                <Text style={[styles.sheetActionBtnText, { color: "#ff6b6b" }]}>Decline</Text>
+                <Text style={[styles.sheetActionBtnText, { color: "#ff6b6b", fontSize: scaleFont(13) }]}>Decline</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1284,52 +1469,52 @@ function NotificationDetailSheet({
           {item.type === "chat" && item.senderId && (
             <TouchableOpacity
               onPress={onOpenTarget}
-              style={[styles.sheetPrimaryCta, { backgroundColor: "#0284c7" }]}
+              style={[styles.sheetPrimaryCta, { backgroundColor: accent }]}
               activeOpacity={0.8}
             >
-              <Ionicons name="chatbubble" size={17} color="#ffffff" style={{ marginRight: 8 }} />
-              <Text style={styles.sheetPrimaryCtaText}>Open Conversation</Text>
+              <Ionicons name="chatbubble" size={17} color={onAccentTextColor} style={{ marginRight: 8 }} />
+              <Text style={[styles.sheetPrimaryCtaText, { color: onAccentTextColor, fontSize: scaleFont(14) }]}>Open Conversation</Text>
             </TouchableOpacity>
           )}
 
           {item.type === "missed_call" && item.senderId && (
             <TouchableOpacity
               onPress={onOpenTarget}
-              style={[styles.sheetPrimaryCta, { backgroundColor: "#ffffff" }]}
+              style={[styles.sheetPrimaryCta, { backgroundColor: accent }]}
               activeOpacity={0.8}
             >
-              <Ionicons name="call" size={17} color="#000000" style={{ marginRight: 8 }} />
-              <Text style={[styles.sheetPrimaryCtaText, { color: "#000000" }]}>Call Back</Text>
+              <Ionicons name="call" size={17} color={onAccentTextColor} style={{ marginRight: 8 }} />
+              <Text style={[styles.sheetPrimaryCtaText, { color: onAccentTextColor, fontSize: scaleFont(14) }]}>Call Back</Text>
             </TouchableOpacity>
           )}
 
           {item.tripId && (
             <TouchableOpacity
               onPress={onOpenTarget}
-              style={[styles.sheetPrimaryCta, { backgroundColor: "#ffffff" }]}
+              style={[styles.sheetPrimaryCta, { backgroundColor: accent }]}
               activeOpacity={0.8}
             >
-              <Ionicons name="airplane" size={17} color="#000000" style={{ marginRight: 8 }} />
-              <Text style={[styles.sheetPrimaryCtaText, { color: "#000000" }]}>View Trip Details</Text>
+              <Ionicons name="airplane" size={17} color={onAccentTextColor} style={{ marginRight: 8 }} />
+              <Text style={[styles.sheetPrimaryCtaText, { color: onAccentTextColor, fontSize: scaleFont(14) }]}>View Trip Details</Text>
             </TouchableOpacity>
           )}
         </ScrollView>
 
         {/* Footer Actions */}
-        <View style={styles.sheetFooter}>
+        <View style={[styles.sheetFooter, { borderTopColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.06)" }]}>
           <TouchableOpacity
             onPress={() => {
               onToggleRead();
             }}
-            style={styles.sheetSecondaryBtn}
+            style={[styles.sheetSecondaryBtn, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.04)", borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)" }]}
           >
             <Ionicons
               name={item.seen ? "mail-unread-outline" : "checkmark-circle-outline"}
               size={16}
-              color="rgba(255,255,255,0.7)"
+              color={themeColors.textSecondary}
               style={{ marginRight: 6 }}
             />
-            <Text style={styles.sheetSecondaryBtnText}>
+            <Text style={[styles.sheetSecondaryBtnText, { color: themeColors.textSecondary, fontSize: scaleFont(12.5) }]}>
               {item.seen ? "Mark Unread" : "Mark as Read"}
             </Text>
           </TouchableOpacity>
@@ -1339,10 +1524,10 @@ function NotificationDetailSheet({
               onDelete();
               onClose();
             }}
-            style={[styles.sheetSecondaryBtn, { borderColor: "rgba(239,68,68,0.3)" }]}
+            style={[styles.sheetSecondaryBtn, { borderColor: "rgba(239,68,68,0.3)", backgroundColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.04)" }]}
           >
             <Ionicons name="trash-outline" size={16} color="#ef4444" style={{ marginRight: 6 }} />
-            <Text style={[styles.sheetSecondaryBtnText, { color: "#ef4444" }]}>Delete</Text>
+            <Text style={[styles.sheetSecondaryBtnText, { color: "#ef4444", fontSize: scaleFont(12.5) }]}>Delete</Text>
           </TouchableOpacity>
         </View>
       </View>

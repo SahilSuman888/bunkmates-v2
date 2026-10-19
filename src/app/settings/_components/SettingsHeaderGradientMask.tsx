@@ -69,6 +69,7 @@ export const SettingsHeaderGradientMask: React.FC<SettingsHeaderGradientMaskProp
     );
   }
 );
+SettingsHeaderGradientMask.displayName = "SettingsHeaderGradientMask";
 
 const styles = StyleSheet.create({
   mask: {

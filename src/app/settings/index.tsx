@@ -4,7 +4,7 @@ import {
   Feather, // **@** Added Feather for profile edit pen icon
 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
 import {
   collection,
@@ -255,6 +255,8 @@ const SettingRow = React.memo(function SettingRow({
   );
 });
 
+let lastNavigateTime = 0;
+
 export default function ProfileSettings() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -270,14 +272,11 @@ export default function ProfileSettings() {
   const { language: activeLanguage, t: tr } = useLanguage();
 
   // **@** Snappy, instant navigation helper with minimal 200ms double-tap protection
-  const isNavigatingRef = useRef(false);
   const smoothNavigate = useCallback(
     (route: string) => {
-      if (isNavigatingRef.current) return;
-      isNavigatingRef.current = true;
-      setTimeout(() => {
-        isNavigatingRef.current = false;
-      }, 200);
+      const now = Date.now();
+      if (now - lastNavigateTime < 200) return;
+      lastNavigateTime = now;
       router.push(route as any);
     },
     [router]
@@ -311,8 +310,17 @@ export default function ProfileSettings() {
 
   const [loading, setLoading] = useState(true);
 
-  const [currentPage, setCurrentPage] =
-    useState<SettingsPage>("main");
+  const params = useLocalSearchParams<{ page?: string }>();
+  const [currentPage, setCurrentPage] = useState<SettingsPage>(() =>
+    params?.page === "developers" ? "developers" : "main"
+  );
+  const [prevParamPage, setPrevParamPage] = useState(params?.page);
+  if (params?.page !== prevParamPage) {
+    setPrevParamPage(params?.page);
+    if (params?.page === "developers") {
+      setCurrentPage("developers");
+    }
+  }
 
   const [qrTab, setQrTab] = useState<"my" | "scan">("my");
   const [scanned, setScanned] = useState(false);
@@ -359,6 +367,28 @@ export default function ProfileSettings() {
       type: "",
     });
 
+  // Keep profile synchronized with real-time userData
+  useEffect(() => {
+    if (userData) {
+      setProfile({
+        name: userData.name || userData.displayName || user?.displayName || "",
+        username: userData.username || "",
+        email: userData.email || user?.email || "",
+        mobile: userData.mobile || userData.phone || user?.phoneNumber || "",
+        bio: userData.bio || "",
+        photoURL: userData.photoURL || user?.photoURL || "",
+        type: userData.type || "Member",
+      });
+    } else if (user) {
+      setProfile((prev) => ({
+        ...prev,
+        name: user.displayName || "",
+        email: user.email || "",
+        photoURL: user.photoURL || "",
+      }));
+    }
+  }, [userData, user]);
+
   // **@** Dynamic theme integration matching system or user preference
   // Helper for dynamic alpha tints
   const hexToRgba = (hex: string, alpha: number) => {
@@ -393,26 +423,39 @@ export default function ProfileSettings() {
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
   // **@** Pure SOLID DYNAMIC COLORS (Zero glassmorphism in Settings, strictly solid dynamic cards)
-  const colors = useMemo(() => ({
-    bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
-    card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
-    cardBorder: "transparent",
-    divider: dynamicThemeColors?.divider ?? (isDark ? "#242428" : "#E6E7EB"),
-    textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
-    textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
-    sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
-    coral: dynamicAccent,
-    coralAccent: dynamicAccent,
-    coralBg: hexToRgba(dynamicAccent, isDark ? 0.16 : 0.09),
-    greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
-    iconBoxBg: isDark ? "#222226" : "#F3F4F6", // Solid neutral container
-    chevron: isDark ? "#555860" : "#B4B9C2",
-    logoutBorder: "transparent",
-    logoutBg: isDark ? "rgba(255, 90, 95, 0.10)" : "rgba(255, 90, 95, 0.06)",
-  }), [isDark, dynamicAccent, dynamicThemeColors]);
+  const colors = useMemo(() => {
+    const isWhiteAccent =
+      dynamicAccent === "white" ||
+      dynamicAccent === "navWhite" ||
+      dynamicAccent === "#FFFFFF" ||
+      dynamicAccent === "#ffffff" ||
+      dynamicAccent?.toLowerCase() === "#ffffff";
+
+    const effectiveAccent = isWhiteAccent
+      ? (isDark ? "#FFFFFF" : "#111827")
+      : dynamicAccent;
+
+    return {
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      divider: dynamicThemeColors?.divider ?? (isDark ? "#242428" : "#E6E7EB"),
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      coral: effectiveAccent,
+      coralAccent: effectiveAccent,
+      coralBg: hexToRgba(effectiveAccent, isDark ? 0.16 : 0.09),
+      greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6", // Solid neutral container
+      chevron: isDark ? "#555860" : "#B4B9C2",
+      logoutBorder: "transparent",
+      logoutBg: isDark ? "rgba(255, 90, 95, 0.10)" : "rgba(255, 90, 95, 0.06)",
+    };
+  }, [isDark, dynamicAccent, dynamicThemeColors]);
 
   // **@** Track scroll position for header mask gradient reveal on slide/scroll
-  const scrollY = useRef(new Animated.Value(0)).current;
+  const [scrollY] = useState(() => new Animated.Value(0));
 
   const headerMaskOpacity = useMemo(
     () =>
@@ -581,7 +624,7 @@ export default function ProfileSettings() {
 
   const handleBuildTap = () => {
     if (isDeveloper) {
-      setCurrentPage("developers");
+      smoothNavigate("/settings/developers");
       return;
     }
 
@@ -618,7 +661,7 @@ export default function ProfileSettings() {
         await AsyncStorage.setItem("isDeveloper", "true");
         setShowDevDialog(false);
         setEnteredKey("");
-        setCurrentPage("developers");
+        smoothNavigate("/settings/developers");
         Alert.alert("Developer Mode", "🧑‍💻 Developer Mode Unlocked!");
       } else {
         Alert.alert("Invalid Developer Key", "The developer key is incorrect.");
@@ -632,7 +675,7 @@ export default function ProfileSettings() {
   };
 
   const openDeveloperPage = () => {
-    setCurrentPage("developers");
+    smoothNavigate("/settings/developers");
   };
 
   // Start the camera automatically whenever the QR scanner is active.
@@ -702,7 +745,7 @@ export default function ProfileSettings() {
     }
 
     if (currentPage === "developers") {
-      setCurrentPage("appInfo");
+      setCurrentPage("main");
       return;
     }
 
@@ -744,19 +787,23 @@ export default function ProfileSettings() {
   // =========================================================
 
   const displayName =
+    userData?.name ||
+    userData?.displayName ||
     profile.name ||
+    user?.displayName ||
     "Mohit Sharma";
 
   const username =
+    userData?.username ||
     profile.username ||
     displayName
       .toLowerCase()
       .replace(/\s+/g, "_");
 
   const backgroundImage =
+    userData?.photoURL ||
     profile?.photoURL ||
     user?.photoURL ||
-    userData?.photoURL ||
     "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&auto=format&fit=crop&q=80";
 
   // **@** Stable Context value so all SettingRow instances re-render only when theme properties change
@@ -848,6 +895,79 @@ export default function ProfileSettings() {
       },
     },
 
+    // APP SETTINGS
+    {
+      id: "appearance",
+      category: "APP SETTINGS",
+      title: "Appearance",
+      subtitle: "Theme color, dark mode & light mode",
+      keywords: ["appearance", "theme", "dark mode", "light mode", "color", "display"],
+      rightText:
+        themeMode === "system"
+          ? "System (Auto)"
+          : themeMode === "dark"
+          ? "Dark Mode"
+          : "Light Mode",
+      icon: "color-filter-outline",
+      onPress: () => {
+        setIsSearching(false);
+        smoothNavigate("/settings/appearance");
+      },
+    },
+    {
+      id: "language-region",
+      category: "APP SETTINGS",
+      title: "Language & Region",
+      subtitle: `${selectedLanguage}, locale formats`,
+      keywords: ["language", "region", "country", "english", "locale", "timezone", "hindi", "date", "time"],
+      rightText: selectedLanguage,
+      icon: "globe-outline",
+      onPress: () => {
+        setIsSearching(false);
+        smoothNavigate("/settings/language-region");
+      },
+    },
+    {
+      id: "accessibility",
+      category: "APP SETTINGS",
+      title: "Accessibility",
+      subtitle: "High contrast, motion, touch targets & color blind filters",
+      keywords: ["accessibility", "font", "contrast", "size", "zoom", "reader", "haptic", "motion", "color blind", "vision"],
+      icon: "accessibility-outline",
+      onPress: () => {
+        setIsSearching(false);
+        smoothNavigate("/settings/accessibility");
+      },
+    },
+    {
+      id: "chats",
+      category: "APP SETTINGS",
+      title: "Chats",
+      subtitle: "Theme, Wallpapers, and Chat Settings",
+      keywords: ["chats", "chat", "messages", "wallpaper", "chat theme", "bubbles"],
+      icon: "chatbubble-ellipses-outline",
+      onPress: () => {
+        setIsSearching(false);
+        smoothNavigate("/settings/chat-settings");
+      },
+    },
+
+    {
+      id: "ai-features",
+      category: "APP SETTINGS",
+      title: "AI Features",
+      subtitle: "Configure Groq API Key & AI settings",
+      keywords: ["ai", "groq", "artificial intelligence", "api key", "bot", "assistant", "model", "smart"],
+      icon: "sparkles",
+      iconColor: colors.greyishWhite,
+      iconBg: colors.iconBoxBg,
+      onPress: () => {
+        setIsSearching(false);
+        smoothNavigate("/settings/ai-settings");
+      },
+    },
+
+    // TRIP EXPERIENCE
     {
       id: "notifications",
       category: "TRIP EXPERIENCE",
@@ -931,78 +1051,7 @@ export default function ProfileSettings() {
         setIsSearching(false);
         smoothNavigate("/trips");
       },
-    },
-
-    // APP SETTINGS
-    {
-      id: "appearance",
-      category: "APP SETTINGS",
-      title: "Appearance",
-      subtitle: "Theme color, dark mode & light mode",
-      keywords: ["appearance", "theme", "dark mode", "light mode", "color", "display"],
-      rightText:
-        themeMode === "system"
-          ? "System (Auto)"
-          : themeMode === "dark"
-          ? "Dark Mode"
-          : "Light Mode",
-      icon: "color-filter-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/appearance");
-      },
-    },
-    {
-      id: "language-region",
-      category: "APP SETTINGS",
-      title: "Language & Region",
-      subtitle: `${selectedLanguage}, locale formats`,
-      keywords: ["language", "region", "country", "english", "locale", "timezone", "hindi", "date", "time"],
-      rightText: selectedLanguage,
-      icon: "globe-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/language-region");
-      },
-    },
-    {
-      id: "accessibility",
-      category: "APP SETTINGS",
-      title: "Accessibility",
-      subtitle: "High contrast, motion, touch targets & color blind filters",
-      keywords: ["accessibility", "font", "contrast", "size", "zoom", "reader", "haptic", "motion", "color blind", "vision"],
-      icon: "accessibility-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/accessibility");
-      },
-    },
-    {
-      id: "chats",
-      category: "APP SETTINGS",
-      title: "Chats",
-      subtitle: "Theme, Wallpapers, and Chat Settings",
-      keywords: ["chats", "chat", "messages", "wallpaper", "chat theme", "bubbles"],
-      icon: "chatbubble-ellipses-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/chat-settings");
-      },
-    },
-
-    {
-      id: "ai-features",
-      category: "APP SETTINGS",
-      title: "AI Features",
-      subtitle: "Configure Groq API Key & AI settings",
-      keywords: ["ai", "groq", "artificial intelligence", "api key", "bot", "assistant", "model", "smart"],
-      icon: "sparkles",
-      iconColor: colors.greyishWhite,
-      iconBg: colors.iconBoxBg,
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/ai-settings");
-      },
+      
     },
 
     // SUPPORT
@@ -1090,7 +1139,7 @@ export default function ProfileSettings() {
             icon: "code-slash-outline",
             onPress: () => {
               setIsSearching(false);
-              router.push("/settings/developers" as any);
+              smoothNavigate("/settings/developers");
             },
           } as SearchableSetting,
         ]
@@ -1546,7 +1595,7 @@ export default function ProfileSettings() {
           <Pressable
             onPress={() =>
               Linking.openURL(
-                "https://bunkmateshome.vercel.app/privacy-policy"
+                "https://app-beta.bunkmates.xyz/privacy-policy"
               )
             }
             style={styles.legalButton}
@@ -1563,7 +1612,7 @@ export default function ProfileSettings() {
           <Pressable
             onPress={() =>
               Linking.openURL(
-                "https://bunkmateshome.vercel.app/terms"
+                "https://app.bunkmates.xyz/terms"
               )
             }
             style={styles.legalButton}
@@ -1573,7 +1622,7 @@ export default function ProfileSettings() {
                 styles.legalButtonText
               }
             >
-              Terms of Service
+              Terms & Condition
             </Text>
           </Pressable>
 
@@ -1594,34 +1643,18 @@ export default function ProfileSettings() {
             <Pressable
               onPress={() =>
                 Linking.openURL(
-                  "mailto:team.bunkmates@gmail.com"
+                  "https://www.linkedin.com/company/bunkmates/?viewAsMember=true"
                 )
               }
               style={
                 styles.socialButton
               }
+              accessibilityLabel="LinkedIn"
             >
               <Ionicons
-                name="mail"
-                size={17}
-                color="#fff"
-              />
-            </Pressable>
-
-            <Pressable
-              onPress={() =>
-                Linking.openURL(
-                  "https://www.instagram.com/bunkmates.app"
-                )
-              }
-              style={
-                styles.socialButton
-              }
-            >
-              <Ionicons
-                name="logo-instagram"
-                size={17}
-                color="#fff"
+                name="logo-linkedin"
+                size={18}
+                color="#0A66C2"
               />
             </Pressable>
 
@@ -1634,11 +1667,30 @@ export default function ProfileSettings() {
               style={
                 styles.socialButton
               }
+              accessibilityLabel="YouTube"
             >
               <Ionicons
                 name="logo-youtube"
-                size={17}
-                color="#fff"
+                size={18}
+                color="#FF0000"
+              />
+            </Pressable>
+
+            <Pressable
+              onPress={() =>
+                Linking.openURL(
+                  "https://www.instagram.com/bunkmates.app/"
+                )
+              }
+              style={
+                styles.socialButton
+              }
+              accessibilityLabel="Instagram"
+            >
+              <Ionicons
+                name="logo-instagram"
+                size={18}
+                color="#E4405F"
               />
             </Pressable>
           </View>
@@ -2581,7 +2633,7 @@ export default function ProfileSettings() {
                     { color: colors.textSecondary },
                   ]}
                 >
-                  We couldn't find any settings matching "{searchQuery}". Try searching for theme, security, currency, or notifications.
+                  We couldn&apos;t find any settings matching &ldquo;{searchQuery}&rdquo;. Try searching for theme, security, currency, or notifications.
                 </Text>
                 <Pressable
                   style={({ pressed }) => [
@@ -2612,7 +2664,7 @@ export default function ProfileSettings() {
               accessibilityLabel="Edit Profile"
             >
               <Image
-                source={{ uri: profile.photoURL || backgroundImage }}
+                source={{ uri: userData?.photoURL || profile.photoURL || user?.photoURL || backgroundImage }}
                 style={styles.modernProfileAvatar}
               />
               <View style={styles.modernProfileDetails}>
@@ -2623,7 +2675,7 @@ export default function ProfileSettings() {
                   ]}
                   numberOfLines={1}
                 >
-                  {profile.name || user?.displayName || "Sasha Miller"}
+                  {userData?.name || userData?.displayName || profile.name || user?.displayName || "Sasha Miller"}
                 </Text>
                 <Text
                   style={[
@@ -2632,10 +2684,11 @@ export default function ProfileSettings() {
                   ]}
                   numberOfLines={1}
                 >
-                  {profile.email ||
+                  {userData?.email ||
+                    profile.email ||
                     user?.email ||
-                    (profile.username
-                      ? `${profile.username.toLowerCase()}@bunkmates.com`
+                    (userData?.username || profile.username
+                      ? `${(userData?.username || profile.username).toLowerCase()}@bunkmates.com`
                       : "sasha.explorer@bunkmates.com")}
                 </Text>
               </View>
@@ -2667,7 +2720,7 @@ export default function ProfileSettings() {
           <SettingRow
             icon="shield-checkmark-outline"
             title={tr("accounts_security", "Account & Security")}
-            subtitle={tr("Password, Two-factor auth, session logs")}
+            subtitle={tr("Password, Two-factor auth & security")}
             onPress={() => smoothNavigate("/settings/accounts")}
           />
           <SettingRow
@@ -2687,63 +2740,7 @@ export default function ProfileSettings() {
         </View>
 
         {/* =====================================================
-            2. TRIP EXPERIENCE
-        ====================================================== */}
-        <Text
-          style={[
-            styles.modernSectionHeading,
-            { color: colors.sectionHeader },
-          ]}
-        >
-          {tr("trip_experience_section", "TRIP EXPERIENCE")}
-        </Text>
-        <View
-          style={[
-            styles.modernCardGroup,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
-          ]}
-        >
-          <SettingRow
-            icon="notifications-outline"
-            title={tr("notifications", "Notifications")}
-            subtitle={tr("Trip updates, chat pings, alerts")}
-            onPress={() => smoothNavigate("/settings/notification")}
-          />
-          <SettingRow
-            icon="compass-outline"
-            title={tr("trip_preferences", "Trip Preferences")}
-            subtitle={tr("Dietary rules, accommodation styles, travel pace")}
-            onPress={() => smoothNavigate("/settings/trip-preference")}
-          />
-          <SettingRow
-            icon="cash-outline"
-            title={tr("currency_expenses", "Currency & Expenses")}
-            subtitle={tr("Default Split bills, home currency USD")}
-            onPress={() => smoothNavigate("/settings/currency-expenses")}
-          />
-          <SettingRow
-            icon="cloud-download-outline"
-            title={tr("offline_downloads", "Offline & Downloads")}
-            subtitle={tr("Storage management, offline maps")}
-            onPress={() => smoothNavigate("/settings/offline-downloads")}
-          />
-          <SettingRow
-            icon="location-outline"
-            title={tr("maps_navigation", "Maps & Navigation")}
-            subtitle={tr("Offline cache, route preferences")}
-            onPress={() => smoothNavigate("/settings/maps-navigation")}
-          />
-          <SettingRow
-            icon="partly-sunny-outline"
-            title={tr("weather", "Weather")}
-            subtitle={tr("Local weather forecasts & rain warnings")}
-            isLast
-            onPress={() => smoothNavigate("/settings/weather")}
-          />
-        </View>
-
-        {/* =====================================================
-            3. APP SETTINGS (Includes photo items + existing v2 items)
+            2. APP SETTINGS (Includes photo items + existing v2 items)
         ====================================================== */}
         <Text
           style={[
@@ -2798,6 +2795,62 @@ export default function ProfileSettings() {
             subtitle={tr("Configure Groq API Key & AI settings")}
             isLast
             onPress={() => smoothNavigate("/settings/ai-settings")}
+          />
+        </View>
+
+        {/* =====================================================
+            3. TRIP EXPERIENCE
+        ====================================================== */}
+        <Text
+          style={[
+            styles.modernSectionHeading,
+            { color: colors.sectionHeader },
+          ]}
+        >
+          {tr("trip_experience_section", "TRIP EXPERIENCE")}
+        </Text>
+        <View
+          style={[
+            styles.modernCardGroup,
+            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+          ]}
+        >
+          <SettingRow
+            icon="notifications-outline"
+            title={tr("notifications", "Notifications")}
+            subtitle={tr("Trip updates, chat pings, alerts")}
+            onPress={() => smoothNavigate("/settings/notification")}
+          />
+          <SettingRow
+            icon="compass-outline"
+            title={tr("trip_preferences", "Trip Preferences")}
+            subtitle={tr("Dietary rules, accommodation styles, travel pace")}
+            onPress={() => smoothNavigate("/settings/trip-preference")}
+          />
+          <SettingRow
+            icon="cash-outline"
+            title={tr("currency_expenses", "Currency & Expenses")}
+            subtitle={tr("Default Split bills, home currency USD")}
+            onPress={() => smoothNavigate("/settings/currency-expenses")}
+          />
+          <SettingRow
+            icon="cloud-download-outline"
+            title={tr("offline_downloads", "Offline & Downloads")}
+            subtitle={tr("Storage management, offline maps")}
+            onPress={() => smoothNavigate("/settings/offline-downloads")}
+          />
+          <SettingRow
+            icon="location-outline"
+            title={tr("maps_navigation", "Maps & Navigation")}
+            subtitle={tr("Offline cache, route preferences")}
+            onPress={() => smoothNavigate("/settings/maps-navigation")}
+          />
+          <SettingRow
+            icon="partly-sunny-outline"
+            title={tr("weather", "Weather")}
+            subtitle={tr("Local weather forecasts & rain warnings")}
+            isLast
+            onPress={() => smoothNavigate("/settings/weather")}
           />
         </View>
 
@@ -2860,7 +2913,7 @@ export default function ProfileSettings() {
               title={tr("Developer Tools & Sandbox")}
               subtitle={tr("Access internal tools, sandboxes, and developer routes")}
               badge="DEV"
-              onPress={() => router.push("/settings/developers" as any)}
+              onPress={() => smoothNavigate("/settings/developers")}
             />
           )}
           {/* About BunkMates placed at the very end of Settings */}
@@ -2873,37 +2926,39 @@ export default function ProfileSettings() {
           />
         </View>
 
+        {/* =====================================================
+            LOG OUT BUTTON
+        ====================================================== */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.modernLogoutBtn,
+            { backgroundColor: colors.logoutBg },
+            pressed && { opacity: 0.75 },
+          ]}
+          onPress={() => {
+            Alert.alert(
+              tr("logout_confirm_title", "Log Out"),
+              tr("logout_confirm_msg", "Are you sure you want to log out of BunkMates?"),
+              [
+                { text: tr("cancel", "Cancel"), style: "cancel" },
+                {
+                  text: tr("logout", "Log Out"),
+                  style: "destructive",
+                  onPress: handleLogout,
+                },
+              ]
+            );
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={tr("logout", "Log Out")}
+        >
+          <Ionicons name="log-out-outline" size={19} color="#FF5A5F" />
+          <Text style={styles.modernLogoutText}>{tr("logout", "Log Out")}</Text>
+        </Pressable>
+
         {/* BunkMates App Version Footer with Developer Tap Easter Egg */}
         <Pressable
-          onPress={async () => {
-            try {
-              Haptics.selectionAsync();
-            } catch (e) {}
-            if (isDeveloper) {
-              router.push("/settings/developers" as any);
-              return;
-            }
-            const next = tapCount + 1;
-            setTapCount(next);
-            if (tapTimer.current) clearTimeout(tapTimer.current);
-            tapTimer.current = setTimeout(() => setTapCount(0), 2000);
-            if (next >= 5) {
-              setTapCount(0);
-              setIsDeveloper(true);
-              await AsyncStorage.setItem("isDeveloper", "true");
-              try {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              } catch (e) {}
-              Alert.alert(
-                "🎉 Developer Mode",
-                "Developer Mode Unlocked! Developer Tools are now available.",
-                [
-                  { text: "Later" },
-                  { text: "Open Developer Tools", onPress: () => router.push("/settings/developers" as any) },
-                ]
-              );
-            }
-          }}
+          onPress={handleBuildTap}
           hitSlop={12}
           style={{ alignItems: "center", paddingVertical: 18, marginBottom: 12 }}
         >
@@ -2923,6 +2978,7 @@ export default function ProfileSettings() {
         )}
         </Animated.ScrollView>
       </SettingsRowContext.Provider>
+      {renderDeveloperPasskeyModal()}
     </View>
   );
 }

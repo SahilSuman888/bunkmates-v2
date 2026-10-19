@@ -43,6 +43,9 @@ export default function AccessibilityScreen() {
     colorBlindMode,
     reduceMotion,
     hapticFeedback,
+    boldText,
+    reduceTransparency,
+    audioCues,
     triggerHaptic,
     announceAccessibility,
     updateAccessibilityPreferences,
@@ -53,7 +56,7 @@ export default function AccessibilityScreen() {
 
   // Floating save/action toast state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const [toastOpacity] = useState(() => new Animated.Value(0));
 
   const triggerToast = useCallback(
     (msg: string) => {
@@ -208,6 +211,24 @@ export default function AccessibilityScreen() {
     setColorBlindModalVisible(false);
     triggerToast(opt.id === "Off" ? "Color blind filters disabled" : `${opt.label} filter active`);
     if (hapticFeedback) triggerHaptic("success");
+  };
+
+  const handleToggleBoldText = (val: boolean) => {
+    updateAccessibilityPreferences({ boldText: val });
+    triggerToast(val ? "Bold Text enabled" : "Standard text restored");
+    if (hapticFeedback) triggerHaptic("selection");
+  };
+
+  const handleToggleReduceTransparency = (val: boolean) => {
+    updateAccessibilityPreferences({ reduceTransparency: val });
+    triggerToast(val ? "Reduce Transparency active (Solid surfaces)" : "Dynamic transparency active");
+    if (hapticFeedback) triggerHaptic("selection");
+  };
+
+  const handleToggleAudioCues = (val: boolean) => {
+    updateAccessibilityPreferences({ audioCues: val });
+    triggerToast(val ? "Audio Cues enabled" : "Audio Cues disabled");
+    if (hapticFeedback) triggerHaptic("selection");
   };
 
   return (
@@ -415,6 +436,82 @@ export default function AccessibilityScreen() {
               </View>
             </View>
           </Pressable>
+
+          <View style={[styles.rowDivider, { backgroundColor: colors.divider }]} />
+
+          {/* 5. Bold Text */}
+          <Pressable
+            onPress={() => handleToggleBoldText(!boldText)}
+            style={({ pressed }) => [
+              styles.rowItem,
+              { minHeight: largeTouchTargets ? 76 : 64 },
+              pressed && styles.pressed,
+            ]}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: boldText }}
+            accessibilityLabel="Bold Text"
+            accessibilityHint="Double tap to toggle bold text styling for enhanced legibility"
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="text-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowContent}>
+              <View style={styles.labelGroup}>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                  {t("Bold Text")}
+                </Text>
+                <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
+                  {t("Increase text weight for enhanced legibility")}
+                </Text>
+              </View>
+              <Switch
+                value={boldText}
+                onValueChange={handleToggleBoldText}
+                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
+                thumbColor="#FFFFFF"
+                hitSlop={hitSlop}
+              />
+            </View>
+          </Pressable>
+
+          <View style={[styles.rowDivider, { backgroundColor: colors.divider }]} />
+
+          {/* 6. Reduce Transparency */}
+          <Pressable
+            onPress={() => handleToggleReduceTransparency(!reduceTransparency)}
+            style={({ pressed }) => [
+              styles.rowItem,
+              { minHeight: largeTouchTargets ? 76 : 64 },
+              pressed && styles.pressed,
+            ]}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: reduceTransparency }}
+            accessibilityLabel="Reduce Transparency"
+            accessibilityHint="Double tap to toggle solid backgrounds in place of translucent blurs"
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="layers-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowContent}>
+              <View style={styles.labelGroup}>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                  {t("Reduce Transparency")}
+                </Text>
+                <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
+                  {t("Replace translucent glass with solid high-contrast surfaces")}
+                </Text>
+              </View>
+              <Switch
+                value={reduceTransparency}
+                onValueChange={handleToggleReduceTransparency}
+                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
+                thumbColor="#FFFFFF"
+                hitSlop={hitSlop}
+              />
+            </View>
+          </Pressable>
         </View>
 
         {/* ========================================================
@@ -492,6 +589,44 @@ export default function AccessibilityScreen() {
               <Switch
                 value={hapticFeedback}
                 onValueChange={handleToggleHapticFeedback}
+                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
+                thumbColor="#FFFFFF"
+                hitSlop={hitSlop}
+              />
+            </View>
+          </Pressable>
+
+          <View style={[styles.rowDivider, { backgroundColor: colors.divider }]} />
+
+          {/* 8. Audio Cues */}
+          <Pressable
+            onPress={() => handleToggleAudioCues(!audioCues)}
+            style={({ pressed }) => [
+              styles.rowItem,
+              { minHeight: largeTouchTargets ? 76 : 64 },
+              pressed && styles.pressed,
+            ]}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: audioCues }}
+            accessibilityLabel="Audio Cues"
+            accessibilityHint="Double tap to toggle earcons and sound indicators on actions and events"
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="notifications-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowContent}>
+              <View style={styles.labelGroup}>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                  {t("Audio Cues")}
+                </Text>
+                <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
+                  {t("Play tone notifications for actions and state changes")}
+                </Text>
+              </View>
+              <Switch
+                value={audioCues}
+                onValueChange={handleToggleAudioCues}
                 trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
                 thumbColor="#FFFFFF"
                 hitSlop={hitSlop}

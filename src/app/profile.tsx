@@ -18,6 +18,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
   where,
 } from "firebase/firestore";
@@ -39,7 +40,7 @@ type ProfileData = {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, loading: authLoading } = useUser();
+  const { user, loading: authLoading, userData } = useUser();
   const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
   const { width, height } = useWindowDimensions();
 
@@ -73,26 +74,29 @@ export default function ProfileScreen() {
       return;
     }
 
-    const loadProfile = async () => {
-      try {
-        /*
-         * -----------------------------
-         * Load user profile
-         * -----------------------------
-         */
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
+    // Prefill immediately if cached userData is already available
+    if (userData && !profile) {
+      setProfile(userData as ProfileData);
+      setLoading(false);
+    }
 
-        if (userSnap.exists()) {
-          setProfile(userSnap.data() as ProfileData);
-        } else {
-          setProfile({
-            name: user.displayName || "User",
-            email: user.email || "",
-            photoURL: user.photoURL || "",
-            type: "Dev Beta",
-          });
-        }
+    const userRef = doc(db, "users", user.uid);
+    const unsub = onSnapshot(userRef, (userSnap) => {
+      if (userSnap.exists()) {
+        setProfile(userSnap.data() as ProfileData);
+      } else {
+        setProfile({
+          name: user.displayName || "User",
+          email: user.email || "",
+          photoURL: user.photoURL || "",
+          type: "Dev Beta",
+        });
+      }
+      setLoading(false);
+    });
+
+    const loadStats = async () => {
+      try {
 
         /*
          * -----------------------------
@@ -166,7 +170,9 @@ export default function ProfileScreen() {
       }
     };
 
-    loadProfile();
+    loadStats();
+
+    return () => unsub();
   }, [authLoading, user]);
 
   const handleLogout = async () => {

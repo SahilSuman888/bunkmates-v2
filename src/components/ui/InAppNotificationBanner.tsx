@@ -18,12 +18,14 @@ import {
   subscribeInAppNotification,
 } from "../../lib/NotificationService";
 import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 
 const { width } = Dimensions.get("window");
 
 export function InAppNotificationBanner() {
   const router = useRouter();
   const { triggerHaptic } = useAppSettings();
+  const { themeColors, accentColor, isDark, scaleFont } = useThemeToggle();
 
   const [currentNotification, setCurrentNotification] = useState<AppNotificationPayload | null>(null);
   const translateY = useRef(new Animated.Value(-120)).current;
@@ -170,9 +172,18 @@ export function InAppNotificationBanner() {
           },
         ]}
       >
-        <Pressable style={styles.cardPressable} onPress={handlePress}>
-          <BlurView intensity={75} tint="dark" style={StyleSheet.absoluteFill} />
-          <View style={styles.cardGlow} />
+        <Pressable
+          style={[
+            styles.cardPressable,
+            {
+              backgroundColor: isDark ? "rgba(22, 24, 30, 0.92)" : "rgba(255, 255, 255, 0.95)",
+              borderColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.1)",
+            },
+          ]}
+          onPress={handlePress}
+        >
+          <BlurView intensity={75} tint={isDark ? "dark" : "light"} style={StyleSheet.absoluteFill} />
+          <View style={[styles.cardGlow, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.05)" }]} />
 
           {/* Left Icon Pill */}
           <View style={[styles.iconBox, { backgroundColor: `${meta.color}22`, borderColor: `${meta.color}44` }]}>
@@ -185,26 +196,43 @@ export function InAppNotificationBanner() {
               <Text style={[styles.categoryPill, { color: meta.color }]}>
                 {meta.label.toUpperCase()}
               </Text>
-              <Text style={styles.timeNow}>Just now</Text>
+              <Text style={[styles.timeNow, { color: themeColors?.textSecondary || (isDark ? "rgba(255,255,255,0.4)" : "#6B7280") }]}>
+                Just now
+              </Text>
             </View>
-            <Text style={styles.titleText} numberOfLines={1}>
+            <Text
+              style={[
+                styles.titleText,
+                { color: themeColors?.text || (isDark ? "#ffffff" : "#111827"), fontSize: scaleFont(13.5) },
+              ]}
+              numberOfLines={1}
+            >
               {currentNotification.title}
             </Text>
-            <Text style={styles.bodyText} numberOfLines={2}>
+            <Text
+              style={[
+                styles.bodyText,
+                { color: themeColors?.textSecondary || (isDark ? "rgba(255,255,255,0.75)" : "#4B5563"), fontSize: scaleFont(11.5) },
+              ]}
+              numberOfLines={2}
+            >
               {currentNotification.message}
             </Text>
           </View>
 
           {/* Close Action */}
           <Pressable
-            style={styles.closeBtn}
+            style={[
+              styles.closeBtn,
+              { backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)" },
+            ]}
             hitSlop={8}
             onPress={(e) => {
               e.stopPropagation();
               dismissBanner();
             }}
           >
-            <Ionicons name="close" size={16} color="rgba(255,255,255,0.6)" />
+            <Ionicons name="close" size={16} color={themeColors?.textSecondary || (isDark ? "rgba(255,255,255,0.6)" : "#6B7280")} />
           </Pressable>
         </Pressable>
       </Animated.View>

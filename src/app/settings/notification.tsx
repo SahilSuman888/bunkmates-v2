@@ -98,34 +98,20 @@ export default function NotificationSettings() {
   };
 
   // Dynamic Theme matching Settings page & ThemeContext
-  let themeMode: "dark" | "light" | "system" = "system";
-  let dynamicAccent = "#FF5A5F";
-  let dynamicThemeColors: any = null;
-  try {
-    const themeContext = useThemeToggle();
-    if (themeContext) {
-      if (themeContext.mode) themeMode = themeContext.mode;
-      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
-      dynamicThemeColors = themeContext.themeColors;
-    }
-  } catch (e) {}
-
-  const isDark =
-    themeMode === "dark" ||
-    (themeMode === "system" && Appearance.getColorScheme() === "dark");
+  const { themeColors, accentColor, onAccentTextColor, isDark, scaleFont } = useThemeToggle();
 
   const colors = useMemo(() => {
-    const accent = dynamicAccent;
+    const accent = accentColor || "#FF5A5F";
     return {
-      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
-      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"),
+      bg: themeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: themeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"),
       cardBorder: "transparent",
       divider: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
-      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textPrimary: themeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
       textSecondary:
-        dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+        themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       sectionHeader:
-        dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+        themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       accent: accent,
       accentBg: isDark ? hexToRgba(accent, 0.12) : hexToRgba(accent, 0.07),
       accentBorder: "transparent",
@@ -138,7 +124,7 @@ export default function NotificationSettings() {
       successGreen: "#10B981",
       warningAmber: "#F59E0B",
     };
-  }, [isDark, dynamicAccent, dynamicThemeColors]);
+  }, [isDark, accentColor, themeColors]);
 
   // Auth listener
   useEffect(() => {

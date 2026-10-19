@@ -33,6 +33,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Polyline } from "react-native-svg";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const MAP_WIDTH = SCREEN_WIDTH - 32;
@@ -443,6 +445,13 @@ const AirbnbStyleCalendar = ({
   onChange: (start: string, end: string) => void;
 }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const { isDark, themeColors, accentColor } = useThemeToggle();
+  const isBrightAccent =
+    accentColor === "#FFFFFF" ||
+    accentColor === "#ffffff" ||
+    accentColor === "#e5e7eb" ||
+    accentColor === "#fbc02d";
+  const onAccentTextColor = isBrightAccent ? "#000000" : "#FFFFFF";
 
   const getDaysInMonth = (year: number, month: number) =>
     new Date(year, month + 1, 0).getDate();
@@ -501,14 +510,27 @@ const AirbnbStyleCalendar = ({
           onPress={() => handleDateClick(dateStr)}
           style={[
             cal.dayCell,
-            (isStart || isEnd) && cal.dayCellSelected,
-            inRange && cal.dayCellRange,
+            (isStart || isEnd) && [
+              cal.dayCellSelected,
+              { backgroundColor: accentColor },
+            ],
+            inRange && [
+              cal.dayCellRange,
+              {
+                backgroundColor: isDark
+                  ? "rgba(255, 255, 255, 0.18)"
+                  : "rgba(0, 0, 0, 0.08)",
+              },
+            ],
           ]}
         >
           <Text
             style={[
               cal.dayText,
-              (isStart || isEnd) && cal.dayTextSelected,
+              (isStart || isEnd) && [
+                cal.dayTextSelected,
+                { color: onAccentTextColor },
+              ],
               inRange && cal.dayTextRange,
             ]}
           >
@@ -603,6 +625,7 @@ export default function CreateTripSheet({
 }) {
   const insets = useSafeAreaInsets();
   const user = auth.currentUser;
+  const { currency, tripPreferences } = useAppSettings();
 
   /* ── Stepper State (Can be switched freely by clicking upper tabs) ── */
   const [activeStep, setActiveStep] = useState(0);
@@ -1059,6 +1082,9 @@ export default function CreateTripSheet({
         startDate: startDate || "",
         endDate: endDate || "",
         budget: total.toString(),
+        currency: currency?.code || "USD",
+        currencySymbol: currency?.symbol || "$",
+        visibility: tripPreferences?.defaultVisibility || "public",
         members,
         iconURL: iconURL || DEFAULT_NATURE_IMAGE,
         createdBy: user.uid,
@@ -1612,7 +1638,7 @@ export default function CreateTripSheet({
               <View style={s.inputWrap}>
                 <Text style={s.inputWrapLabel}>Total Budget</Text>
                 <View style={s.budgetInputRow}>
-                  <Text style={s.currPrefix}>₹</Text>
+                  <Text style={s.currPrefix}>{currency?.symbol || "₹"}</Text>
                   <TextInput
                     value={totalBudget}
                     onChangeText={handleTotalBudgetChange}

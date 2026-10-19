@@ -67,27 +67,22 @@ export function SettingsActionModal({
 }: SettingsActionModalProps) {
   const [step, setStep] = useState<"confirm" | "success">(initialStep);
   const [loading, setLoading] = useState(false);
+  const [prevVisible, setPrevVisible] = useState(visible);
 
   // Sync step when modal opens
-  useEffect(() => {
+  if (visible !== prevVisible) {
+    setPrevVisible(visible);
     if (visible) {
       setStep(initialStep);
       setLoading(false);
     }
-  }, [visible, initialStep]);
+  }
 
   // Dynamic Theme
-  let themeMode: "dark" | "light" | "system" = "system";
-  let themeColorsSuccess = "#22C55E";
-  let themeColorsError = "#FF5A4F";
-  try {
-    const themeContext = useThemeToggle();
-    if (themeContext?.mode) themeMode = themeContext.mode;
-    if (themeContext?.themeColors) {
-      themeColorsSuccess = themeContext.themeColors.success;
-      themeColorsError = themeContext.themeColors.error;
-    }
-  } catch {}
+  const themeContext = useThemeToggle();
+  const themeMode = themeContext?.mode ?? "system";
+  const themeColorsSuccess = themeContext?.themeColors?.success ?? "#22C55E";
+  const themeColorsError = themeContext?.themeColors?.error ?? "#FF5A4F";
 
   // App Accessibility Context
   let appHighContrast = false;
@@ -123,6 +118,15 @@ export function SettingsActionModal({
     successIconColor: themeColorsSuccess,
     cardBorder: appHighContrast ? (isDark ? "#38383E" : "#D1D5DB") : "transparent",
   };
+
+  const isBrightPrimary =
+    colors.primaryCoral === "#FFFFFF" ||
+    colors.primaryCoral === "#ffffff" ||
+    colors.primaryCoral?.toLowerCase() === "#ffffff" ||
+    colors.primaryCoral === "#ffd700" ||
+    colors.primaryCoral === "#fbc02d" ||
+    colors.primaryCoral === "#f59e0b";
+  const primaryTextColor = isBrightPrimary ? "#000000" : "#FFFFFF";
 
   const handleConfirmPress = async () => {
     if (!onConfirm) {
@@ -234,14 +238,14 @@ export function SettingsActionModal({
                 {
                   backgroundColor: colors.primaryCoral,
                   minHeight: appLargeTouch ? 56 : 50,
-                  borderWidth: appHighContrast ? 1.5 : 0,
-                  borderColor: isDark ? "#FFFFFF" : "#000000",
+                  borderWidth: appHighContrast || (!isDark && isBrightPrimary) ? 1.5 : 0,
+                  borderColor: !isDark && isBrightPrimary ? "#111827" : (isDark ? "#FFFFFF" : "#000000"),
                 },
                 pressed && styles.pressed,
               ]}
               onPress={handleDonePress}
             >
-              <Text style={styles.primaryBtnText}>{successButtonLabel}</Text>
+              <Text style={[styles.primaryBtnText, { color: primaryTextColor }]}>{successButtonLabel}</Text>
             </Pressable>
           </View>
         </View>
@@ -296,8 +300,8 @@ export function SettingsActionModal({
               {
                 backgroundColor: colors.primaryCoral,
                 minHeight: appLargeTouch ? 56 : 50,
-                borderWidth: appHighContrast ? 1.5 : 0,
-                borderColor: isDark ? "#FFFFFF" : "#000000",
+                borderWidth: appHighContrast || (!isDark && isBrightPrimary) ? 1.5 : 0,
+                borderColor: !isDark && isBrightPrimary ? "#111827" : (isDark ? "#FFFFFF" : "#000000"),
               },
               pressed && styles.pressed,
             ]}
@@ -305,9 +309,9 @@ export function SettingsActionModal({
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={primaryTextColor} />
             ) : (
-              <Text style={styles.primaryBtnText}>{confirmLabel}</Text>
+              <Text style={[styles.primaryBtnText, { color: primaryTextColor }]}>{confirmLabel}</Text>
             )}
           </Pressable>
 

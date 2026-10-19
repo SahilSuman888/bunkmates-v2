@@ -1,7 +1,7 @@
-// **@** About BunkMates — Pixel-perfect UI matching user's uploaded mockup & Settings design system
-// Features: Zero Red Policy, circular back button, dynamic theme adaptability, Hero brand section with app version easter egg,
-// Legal Agreements (Terms of Service, Privacy Policy, Open Source Licenses with search & license viewers),
-// Social Media integrations (Twitter/X, Instagram, GitHub with real Linking & clipboard fallbacks), and copyright footer.
+// **@** About BunkMates — Pixel-perfect UI matching Settings design system
+// Features: Dynamic theme adaptability, Hero brand section with app version easter egg,
+// Official Legal Links (Terms & Condition, Privacy Policy redirecting to official URLs),
+// Active Social Media redirects (LinkedIn, YouTube, Instagram), Open Source Licenses, and copyright footer.
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import {
@@ -12,10 +12,11 @@ import {
   ScrollView,
   Platform,
   StatusBar,
-  Appearance,
   Animated,
   Linking,
   TextInput,
+  Alert,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -23,9 +24,10 @@ import { useRouter } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../../lib/firebase";
 import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useLanguage } from "../../contexts/LanguageContext";
-import { ACCENT_COLORS } from "../../theme/theme";
 import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 interface OpenSourceLib {
@@ -95,13 +97,36 @@ const OPEN_SOURCE_LIBRARIES: OpenSourceLib[] = [
   },
 ];
 
+const SOCIAL_LINKS = [
+  {
+    id: "linkedin",
+    name: "LinkedIn",
+    icon: "logo-linkedin" as const,
+    color: "#0A66C2",
+    url: "https://www.linkedin.com/company/bunkmates/?viewAsMember=true",
+  },
+  {
+    id: "youtube",
+    name: "YouTube",
+    icon: "logo-youtube" as const,
+    color: "#FF0000",
+    url: "https://www.youtube.com/@Team_BunkMates",
+  },
+  {
+    id: "instagram",
+    name: "Instagram",
+    icon: "logo-instagram" as const,
+    color: "#E4405F",
+    url: "https://www.instagram.com/bunkmates.app/",
+  },
+];
+
 export default function AboutScreen() {
   const router = useRouter();
   const { t } = useLanguage();
+  const { themeColors, accentColor, isDark } = useThemeToggle();
 
   // Modals state
-  const [termsModalVisible, setTermsModalVisible] = useState(false);
-  const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
   const [licensesModalVisible, setLicensesModalVisible] = useState(false);
 
   // License search
@@ -109,6 +134,9 @@ export default function AboutScreen() {
 
   // Developer mode state & tap counter
   const [tapCount, setTapCount] = useState(0);
+  const [showDevDialog, setShowDevDialog] = useState(false);
+  const [enteredKey, setEnteredKey] = useState("");
+  const [verifyingKey, setVerifyingKey] = useState(false);
   const [isDeveloper, setIsDeveloper] = useState(false);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -128,7 +156,7 @@ export default function AboutScreen() {
 
   // Animated floating toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const [toastOpacity] = useState(() => new Animated.Value(0));
 
   const triggerToast = useCallback(
     (msg: string) => {
@@ -150,14 +178,76 @@ export default function AboutScreen() {
     [toastOpacity]
   );
 
-  // Handle version tap easter egg — 5 taps unlocks developer mode!
-  const handleVersionTap = async () => {
+  // Robust External URL Opener with Haptics and Clipboard Fallback
+  const handleOpenUrl = useCallback(
+    async (url: string, title?: string) => {
+      try {
+        Haptics.selectionAsync().catch(() => {});
+      } catch (e) {}
+
+      try {
+        await Linking.openURL(url);
+      } catch (err) {
+        console.log(`Failed to open URL ${url}:`, err);
+        try {
+          await Clipboard.setStringAsync(url);
+          triggerToast(title ? `${title} link copied to clipboard!` : `Link copied to clipboard!`);
+        } catch (e) {}
+      }
+    },
+    [triggerToast]
+  );
+
+  // Handle verify developer passkey against Firestore
+  const handleVerifyDevKey = async () => {
+    if (!enteredKey.trim()) {
+      Alert.alert("Required", "Please enter the developer key.");
+      return;
+    }
+
     try {
-      Haptics.selectionAsync();
+      setVerifyingKey(true);
+      const keyDoc = await getDoc(doc(db, "secret", "devkey"));
+      const validKey = keyDoc.exists() ? keyDoc.data().key : null;
+
+      if (enteredKey.trim() === validKey) {
+        setIsDeveloper(true);
+        await AsyncStorage.setItem("isDeveloper", "true");
+        setShowDevDialog(false);
+        setEnteredKey("");
+        try {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        } catch (e) {}
+        Alert.alert(
+          "Developer Mode",
+          "🧑‍💻 Developer Mode Unlocked!",
+          [
+            {
+              text: "Open Developer Tools",
+              onPress: () => router.push("/settings/developers" as any),
+            },
+            { text: "OK" },
+          ]
+        );
+      } else {
+        Alert.alert("Invalid Developer Key", "The developer key is incorrect.");
+      }
+    } catch (error) {
+      console.error("Error verifying developer key:", error);
+      Alert.alert("Error", "Could not verify the developer key. Try again later.");
+    } finally {
+      setVerifyingKey(false);
+    }
+  };
+
+  // Handle version tap easter egg — 5 taps prompts for Developer Key!
+  const handleVersionTap = () => {
+    try {
+      Haptics.selectionAsync().catch(() => {});
     } catch (e) {}
 
     if (isDeveloper) {
-      triggerToast("🧑‍💻 Developer Mode is already active! Tap Developer Tools below.");
+      router.push("/settings/developers" as any);
       return;
     }
 
@@ -165,58 +255,31 @@ export default function AboutScreen() {
     setTapCount(next);
 
     if (tapTimer.current) clearTimeout(tapTimer.current);
-    tapTimer.current = setTimeout(() => setTapCount(0), 2000);
+    tapTimer.current = setTimeout(() => setTapCount(0), 1500);
 
     if (next >= 5) {
       setTapCount(0);
-      setIsDeveloper(true);
-      await AsyncStorage.setItem("isDeveloper", "true");
-      try {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } catch (e) {}
-      triggerToast("🎉 Developer Mode Unlocked! You are now a developer.");
+      setEnteredKey("");
+      setShowDevDialog(true);
     } else if (next >= 2) {
       const remaining = 5 - next;
       triggerToast(`Tap ${remaining} more time${remaining === 1 ? "" : "s"} to unlock Developer Mode`);
     }
   };
 
-  // Dynamic Theme matching Settings page & ThemeContext
-  let themeMode: "dark" | "light" | "system" = "system";
-  let userAccent = "default";
-  try {
-    const themeContext = useThemeToggle();
-    if (themeContext) {
-      if (themeContext.mode) themeMode = themeContext.mode;
-      if (themeContext.accent) userAccent = themeContext.accent;
-    }
-  } catch (e) {}
-
-  const isDark =
-    themeMode === "dark" ||
-    (themeMode === "system" && Appearance.getColorScheme() === "dark");
-
+  // Theme-aware colors
   const colors = useMemo(() => {
-    const hasCustomNonRedAccent =
-      userAccent &&
-      userAccent !== "default" &&
-      userAccent !== "coral" &&
-      userAccent !== "red" &&
-      (ACCENT_COLORS as any)[userAccent];
-    const customAccent = hasCustomNonRedAccent
-      ? (ACCENT_COLORS as any)[userAccent]
-      : null;
     const greyishWhite = isDark ? "#E2E8F0" : "#4B5563";
-    const activeText = customAccent || (isDark ? "#FFFFFF" : "#11141A");
+    const activeText = accentColor || "#FF5A5F";
 
     return {
-      bg: isDark ? "#000000" : "#F1F1F1",
-      card: isDark ? "#161618" : "#FFFFFF",
+      bg: themeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: themeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"),
       cardBorder: "transparent",
       divider: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
-      textPrimary: isDark ? "#FFFFFF" : "#11141A",
-      textSecondary: isDark ? "#8E95A2" : "#7E8590",
-      sectionHeader: isDark ? "#8E95A2" : "#7E8590",
+      textPrimary: themeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       greyishWhite,
       iconBoxBg: isDark ? "#202024" : "#F4F5F7",
       chevron: isDark ? "#555860" : "#B4B9C2",
@@ -237,32 +300,7 @@ export default function AboutScreen() {
       devAccent: "#00e6b0",
       devAccentBg: "rgba(0, 230, 176, 0.12)",
     };
-  }, [isDark, userAccent]);
-
-  // Social link opener with clipboard fallback
-  const handleOpenSocial = async (platform: "twitter" | "instagram" | "github") => {
-    try {
-      Haptics.selectionAsync();
-    } catch (e) {}
-    const urls = {
-      twitter: "https://x.com/bunkmates",
-      instagram: "https://instagram.com/bunkmates",
-      github: "https://github.com/SahilSuman888/bunkmates-v2",
-    };
-    const targetUrl = urls[platform];
-    try {
-      const canOpen = await Linking.canOpenURL(targetUrl);
-      if (canOpen) {
-        await Linking.openURL(targetUrl);
-      } else {
-        await Clipboard.setStringAsync(targetUrl);
-        triggerToast(`Copied ${platform} link to clipboard!`);
-      }
-    } catch {
-      await Clipboard.setStringAsync(targetUrl);
-      triggerToast(`Copied ${platform} link to clipboard!`);
-    }
-  };
+  }, [isDark, accentColor, themeColors]);
 
   // Filtered open-source dependencies
   const filteredLicenses = useMemo(() => {
@@ -275,6 +313,62 @@ export default function AboutScreen() {
         lib.license.toLowerCase().includes(q)
     );
   }, [licenseSearch]);
+
+  const renderDeveloperPasskeyModal = () => (
+    <SwipeableDrawer
+      visible={showDevDialog}
+      onClose={() => {
+        setShowDevDialog(false);
+        setEnteredKey("");
+      }}
+      sheetStyle={styles.devModalCard}
+      handleColor="#555"
+    >
+      <View style={{ paddingTop: 4, paddingBottom: 16 }}>
+        <Text style={styles.devModalTitle}>Enter Developer Passkey</Text>
+        <Text style={styles.devModalSubtitle}>
+          This access is restricted to authorized developers only.
+        </Text>
+
+        <TextInput
+          autoFocus
+          value={enteredKey}
+          onChangeText={setEnteredKey}
+          placeholder="Developer Key"
+          placeholderTextColor="#777"
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          onSubmitEditing={handleVerifyDevKey}
+          style={styles.devModalInput}
+        />
+
+        <View style={styles.devModalActions}>
+          <Pressable
+            onPress={() => {
+              setShowDevDialog(false);
+              setEnteredKey("");
+            }}
+            style={styles.devCancelButton}
+          >
+            <Text style={styles.devCancelText}>Cancel</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={handleVerifyDevKey}
+            disabled={verifyingKey}
+            style={styles.devVerifyButton}
+          >
+            {verifyingKey ? (
+              <ActivityIndicator color="#00140f" size="small" />
+            ) : (
+              <Text style={styles.devVerifyText}>Verify</Text>
+            )}
+          </Pressable>
+        </View>
+      </View>
+    </SwipeableDrawer>
+  );
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top"]}>
@@ -319,14 +413,14 @@ export default function AboutScreen() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          {t("About BunkMates")}
+          {t("About BunkMates", "About BunkMates")}
         </Text>
         <View style={styles.headerSpacer} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* ========================================================
-            HERO BRAND SECTION MATCHING MOCKUP
+            HERO BRAND SECTION
         ========================================================= */}
         <View style={styles.heroSection}>
           <View
@@ -354,7 +448,7 @@ export default function AboutScreen() {
           {/* Developer Active Pill Badge */}
           {isDeveloper && (
             <Pressable
-              onPress={() => router.push("/settings/developers" as any)}
+              onPress={() => router.replace({ pathname: "/settings", params: { page: "developers" } } as any)}
               style={({ pressed }) => [
                 styles.devHeroBadge,
                 { backgroundColor: colors.devAccentBg, borderColor: "rgba(0,230,176,0.3)" },
@@ -391,9 +485,9 @@ export default function AboutScreen() {
               <Pressable
                 onPress={() => {
                   try {
-                    Haptics.selectionAsync();
+                    Haptics.selectionAsync().catch(() => {});
                   } catch (e) {}
-                  router.push("/settings/developers" as any);
+                  router.replace({ pathname: "/settings", params: { page: "developers" } } as any);
                 }}
                 style={({ pressed }) => [styles.rowItem, pressed && styles.rowPressed]}
               >
@@ -422,21 +516,18 @@ export default function AboutScreen() {
         )}
 
         {/* ========================================================
-            1. LEGAL AGREEMENTS SECTION
+            1. LEGAL AGREEMENTS SECTION (WITH ACTIVE REDIRECTS)
         ========================================================= */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
-          {t("LEGAL AGREEMENTS")}
+          {t("LEGAL AGREEMENTS", "LEGAL AGREEMENTS")}
         </Text>
         <View style={[styles.cardGroup, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          {/* Terms of Service */}
+          {/* Terms & Condition (Redirects to https://app.bunkmates.xyz/terms) */}
           <Pressable
-            onPress={() => {
-              try {
-                Haptics.selectionAsync();
-              } catch (e) {}
-              setTermsModalVisible(true);
-            }}
+            onPress={() => handleOpenUrl("https://app.bunkmates.xyz/terms", "Terms & Condition")}
             style={({ pressed }) => [styles.rowItem, pressed && styles.rowPressed]}
+            accessibilityRole="link"
+            accessibilityLabel="Terms and Condition"
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="document-text-outline" size={20} color={colors.greyishWhite} />
@@ -447,20 +538,26 @@ export default function AboutScreen() {
                 { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth },
               ]}
             >
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Terms of Service")}</Text>
-              <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                  {t("Terms & Condition", "Terms & Condition")}
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+                  app.bunkmates.xyz/terms
+                </Text>
+              </View>
+              <Ionicons name="open-outline" size={17} color={colors.chevron} />
             </View>
           </Pressable>
 
-          {/* Privacy Policy */}
+          {/* Privacy Policy (Redirects to https://app-beta.bunkmates.xyz/privacy-policy) */}
           <Pressable
-            onPress={() => {
-              try {
-                Haptics.selectionAsync();
-              } catch (e) {}
-              setPrivacyModalVisible(true);
-            }}
+            onPress={() =>
+              handleOpenUrl("https://app-beta.bunkmates.xyz/privacy-policy", "Privacy Policy")
+            }
             style={({ pressed }) => [styles.rowItem, pressed && styles.rowPressed]}
+            accessibilityRole="link"
+            accessibilityLabel="Privacy Policy"
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="shield-checkmark-outline" size={20} color={colors.greyishWhite} />
@@ -471,8 +568,15 @@ export default function AboutScreen() {
                 { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth },
               ]}
             >
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Privacy Policy")}</Text>
-              <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                  {t("Privacy Policy", "Privacy Policy")}
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+                  app-beta.bunkmates.xyz/privacy-policy
+                </Text>
+              </View>
+              <Ionicons name="open-outline" size={17} color={colors.chevron} />
             </View>
           </Pressable>
 
@@ -480,7 +584,7 @@ export default function AboutScreen() {
           <Pressable
             onPress={() => {
               try {
-                Haptics.selectionAsync();
+                Haptics.selectionAsync().catch(() => {});
               } catch (e) {}
               setLicensesModalVisible(true);
             }}
@@ -490,69 +594,45 @@ export default function AboutScreen() {
               <Ionicons name="receipt-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={[styles.rowContent, { borderBottomWidth: 0 }]}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Open Source Licenses")}</Text>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                  {t("Open Source Licenses", "Open Source Licenses")}
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 2 }}>
+                  Third-party libraries & acknowledgments
+                </Text>
+              </View>
               <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
             </View>
           </Pressable>
         </View>
 
         {/* ========================================================
-            2. SOCIAL MEDIA SECTION MATCHING MOCKUP
+            2. SOCIAL MEDIA SECTION (ACTIVE REDIRECTS)
         ========================================================= */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
-          {t("SOCIAL MEDIA")}
+          {t("CONNECT WITH US", "CONNECT WITH US")}
         </Text>
         <View style={[styles.socialCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          {/* Twitter / X */}
-          <Pressable
-            onPress={() => handleOpenSocial("twitter")}
-            style={({ pressed }) => [
-              styles.socialBtn,
-              {
-                backgroundColor: colors.socialBtnBg,
-                borderColor: colors.socialBtnBorder,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}
-            accessibilityLabel="Twitter / X"
-            hitSlop={8}
-          >
-            <Ionicons name="logo-twitter" size={20} color={colors.textPrimary} />
-          </Pressable>
-
-          {/* Instagram */}
-          <Pressable
-            onPress={() => handleOpenSocial("instagram")}
-            style={({ pressed }) => [
-              styles.socialBtn,
-              {
-                backgroundColor: colors.socialBtnBg,
-                borderColor: colors.socialBtnBorder,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}
-            accessibilityLabel="Instagram"
-            hitSlop={8}
-          >
-            <Ionicons name="logo-instagram" size={20} color={colors.textPrimary} />
-          </Pressable>
-
-          {/* GitHub */}
-          <Pressable
-            onPress={() => handleOpenSocial("github")}
-            style={({ pressed }) => [
-              styles.socialBtn,
-              {
-                backgroundColor: colors.socialBtnBg,
-                borderColor: colors.socialBtnBorder,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}
-            accessibilityLabel="GitHub"
-            hitSlop={8}
-          >
-            <Ionicons name="logo-github" size={20} color={colors.textPrimary} />
-          </Pressable>
+          {SOCIAL_LINKS.map((item) => (
+            <Pressable
+              key={item.id}
+              onPress={() => handleOpenUrl(item.url, item.name)}
+              style={({ pressed }) => [
+                styles.socialBtn,
+                {
+                  backgroundColor: colors.socialBtnBg,
+                  borderColor: colors.socialBtnBorder,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+              accessibilityLabel={item.name}
+              accessibilityRole="link"
+              hitSlop={8}
+            >
+              <Ionicons name={item.icon} size={22} color={colors.greyishWhite} />
+            </Pressable>
+          ))}
         </View>
 
         {/* ========================================================
@@ -567,122 +647,15 @@ export default function AboutScreen() {
       </ScrollView>
 
       {/* ========================================================
-          DRAWER 1: TERMS OF SERVICE DRAWER
-      ========================================================= */}
-      <SwipeableDrawer
-        visible={termsModalVisible}
-        onClose={() => setTermsModalVisible(false)}
-        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
-      >
-        <View style={styles.sheetHeader}>
-          <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>Terms of Service</Text>
-          <Pressable
-            onPress={() => setTermsModalVisible(false)}
-            style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
-            hitSlop={8}
-          >
-            <Ionicons name="close" size={22} color={colors.textPrimary} />
-          </Pressable>
-        </View>
-        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 460 }}>
-          <Text style={[styles.legalIntro, { color: colors.textSecondary }]}>
-            Last updated: October 2026. By accessing or using BunkMates, you agree to be bound by these Terms of Service.
-          </Text>
-          <Text style={[styles.legalHeading, { color: colors.textPrimary }]}>1. Acceptance of Terms</Text>
-          <Text style={[styles.legalBody, { color: colors.textSecondary }]}>
-            These Terms govern your use of the BunkMates application, websites, and related software. If you disagree with any part of these terms, you may not access our services.
-          </Text>
-          <Text style={[styles.legalHeading, { color: colors.textPrimary }]}>2. Explorer Profiles & Safety</Text>
-          <Text style={[styles.legalBody, { color: colors.textSecondary }]}>
-            Users must provide truthful identity details. You are responsible for safeguarding your credentials and all activities occurring under your authenticated profile.
-          </Text>
-          <Text style={[styles.legalHeading, { color: colors.textPrimary }]}>3. Bill Splitting & Ledger Reconciliations</Text>
-          <Text style={[styles.legalBody, { color: colors.textSecondary }]}>
-            BunkMates facilitates shared expense calculations between roommates and travel groups. BunkMates is not a bank and is not liable for unsettled personal liabilities between bunkmates.
-          </Text>
-          <Text style={[styles.legalHeading, { color: colors.textPrimary }]}>4. Community Standards</Text>
-          <Text style={[styles.legalBody, { color: colors.textSecondary }]}>
-            Harassment, discrimination, or deceptive representations are grounds for immediate account suspension without refund.
-          </Text>
-          <Pressable
-            onPress={() => {
-              setTermsModalVisible(false);
-              triggerToast("Terms acknowledged.");
-            }}
-            style={[styles.modalActionBtn, { backgroundColor: colors.brandBoxBg }]}
-          >
-            <Text style={[styles.modalActionBtnText, { color: colors.brandBoxIcon }]}>
-              I Understand
-            </Text>
-          </Pressable>
-        </ScrollView>
-      </SwipeableDrawer>
-
-      {/* ========================================================
-          DRAWER 2: PRIVACY POLICY DRAWER
-      ========================================================= */}
-      <SwipeableDrawer
-        visible={privacyModalVisible}
-        onClose={() => setPrivacyModalVisible(false)}
-        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
-      >
-        <View style={styles.sheetHeader}>
-          <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>Privacy Policy</Text>
-          <Pressable
-            onPress={() => setPrivacyModalVisible(false)}
-            style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
-            hitSlop={8}
-          >
-            <Ionicons name="close" size={22} color={colors.textPrimary} />
-          </Pressable>
-        </View>
-        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 460 }}>
-          <Text style={[styles.legalIntro, { color: colors.textSecondary }]}>
-            BunkMates prioritizes your data privacy and control. We believe in transparency and robust encryption.
-          </Text>
-          <Text style={[styles.legalHeading, { color: colors.textPrimary }]}>1. Information We Collect</Text>
-          <Text style={[styles.legalBody, { color: colors.textSecondary }]}>
-            We collect information you provide directly, including name, email address, profile picture, travel preferences, and roommate split transactions.
-          </Text>
-          <Text style={[styles.legalHeading, { color: colors.textPrimary }]}>2. How Your Data is Used</Text>
-          <Text style={[styles.legalBody, { color: colors.textSecondary }]}>
-            Data is strictly utilized to authenticate accounts, synchronize live group ledgers, and dispatch chore rotation notifications. We never sell your personal data to third-party data brokers.
-          </Text>
-          <Text style={[styles.legalHeading, { color: colors.textPrimary }]}>3. Encrypted Cloud Storage</Text>
-          <Text style={[styles.legalBody, { color: colors.textSecondary }]}>
-            Your data is stored across secure Google Cloud & Firebase databases with end-to-end TLS 1.3 transit encryption.
-          </Text>
-          <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
-            <Pressable
-              onPress={() => {
-                setPrivacyModalVisible(false);
-                router.push("/settings/privacy" as any);
-              }}
-              style={[styles.modalActionBtn, { flex: 1, backgroundColor: colors.socialBtnBg, borderWidth: 0 }]}
-            >
-              <Text style={[styles.modalActionBtnText, { color: colors.textPrimary }]}>
-                Full Privacy Settings
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setPrivacyModalVisible(false)}
-              style={[styles.modalActionBtn, { flex: 1, backgroundColor: colors.brandBoxBg }]}
-            >
-              <Text style={[styles.modalActionBtnText, { color: colors.brandBoxIcon }]}>
-                Close
-              </Text>
-            </Pressable>
-          </View>
-        </ScrollView>
-      </SwipeableDrawer>
-
-      {/* ========================================================
-          DRAWER 3: OPEN SOURCE LICENSES DRAWER
+          DRAWER: OPEN SOURCE LICENSES
       ========================================================= */}
       <SwipeableDrawer
         visible={licensesModalVisible}
         onClose={() => setLicensesModalVisible(false)}
-        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder, maxHeight: "80%" }]}
+        sheetStyle={[
+          styles.bottomSheet,
+          { backgroundColor: colors.card, borderColor: colors.cardBorder, maxHeight: "80%" },
+        ]}
       >
         <View style={styles.sheetHeader}>
           <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>Open Source Licenses</Text>
@@ -695,53 +668,53 @@ export default function AboutScreen() {
           </Pressable>
         </View>
 
-        {/* License Search Bar */}
-        <View style={[styles.searchBox, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}>
+        {/* Search Bar inside Licenses Modal */}
+        <View style={[styles.searchBox, { backgroundColor: colors.inputBg }]}>
           <Ionicons name="search" size={17} color={colors.textSecondary} style={{ marginRight: 8 }} />
           <TextInput
-            style={[styles.searchInput, { color: colors.textPrimary }]}
-            placeholder="Filter dependencies..."
-            placeholderTextColor={colors.textSecondary}
             value={licenseSearch}
             onChangeText={setLicenseSearch}
+            placeholder="Search libraries or licenses..."
+            placeholderTextColor={colors.textSecondary}
+            style={[styles.searchInput, { color: colors.textPrimary }]}
+            autoCapitalize="none"
+            autoCorrect={false}
           />
           {licenseSearch.length > 0 && (
             <Pressable onPress={() => setLicenseSearch("")} hitSlop={6}>
-              <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+              <Ionicons name="close-circle" size={17} color={colors.textSecondary} />
             </Pressable>
           )}
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-          {filteredLicenses.map((lib) => (
-            <Pressable
-              key={lib.name}
-              onPress={() => {
-                Linking.openURL(lib.url).catch(() => {
-                  triggerToast(`License: ${lib.name} (${lib.license})`);
-                });
-              }}
-              style={({ pressed }) => [
-                styles.licenseCard,
-                {
-                  backgroundColor: colors.socialBtnBg,
-                  borderColor: colors.cardBorder,
-                  opacity: pressed ? 0.7 : 1,
-                },
-              ]}
-            >
-              <View style={styles.licenseCardTop}>
-                <Text style={[styles.libName, { color: colors.textPrimary }]}>{lib.name}</Text>
-                <View style={[styles.licenseBadge, { backgroundColor: colors.badgeBg }]}>
-                  <Text style={[styles.licenseBadgeText, { color: colors.badgeText }]}>{lib.license}</Text>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
+          {filteredLicenses.length === 0 ? (
+            <View style={{ paddingVertical: 32, alignItems: "center" }}>
+              <Text style={{ color: colors.textSecondary, fontSize: 13 }}>No libraries match your search.</Text>
+            </View>
+          ) : (
+            filteredLicenses.map((lib, i) => (
+              <Pressable
+                key={i}
+                onPress={() => handleOpenUrl(lib.url, lib.name)}
+                style={[styles.licenseCard, { backgroundColor: colors.iconBoxBg }]}
+              >
+                <View style={styles.licenseCardTop}>
+                  <Text style={[styles.libName, { color: colors.textPrimary }]}>{lib.name}</Text>
+                  <View style={[styles.licenseBadge, { backgroundColor: colors.badgeBg }]}>
+                    <Text style={[styles.licenseBadgeText, { color: colors.badgeText }]}>{lib.license}</Text>
+                  </View>
                 </View>
-              </View>
-              <Text style={[styles.libVersion, { color: colors.textSecondary }]}>v{lib.version}</Text>
-              <Text style={[styles.libDesc, { color: colors.textSecondary }]}>{lib.description}</Text>
-            </Pressable>
-          ))}
+                <Text style={[styles.libVersion, { color: colors.textSecondary }]}>v{lib.version}</Text>
+                <Text style={[styles.libDesc, { color: colors.textSecondary }]}>{lib.description}</Text>
+              </Pressable>
+            ))
+          )}
         </ScrollView>
       </SwipeableDrawer>
+
+      {/* Developer Passkey Modal */}
+      {renderDeveloperPasskeyModal()}
     </SafeAreaView>
   );
 }
@@ -753,47 +726,47 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 18,
-    paddingTop: Platform.OS === "android" ? 12 : 8,
-    paddingBottom: 12,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 14,
   },
   modernHeaderBtn: {
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 0,
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "700",
     letterSpacing: -0.3,
+    marginLeft: 14,
+    flex: 1,
   },
   headerSpacer: {
     width: 42,
   },
   scrollContent: {
-    paddingHorizontal: 18,
+    paddingHorizontal: 20,
     paddingBottom: 30,
   },
-  // Hero Brand Section
+  // Hero Section
   heroSection: {
     alignItems: "center",
-    paddingTop: 18,
-    paddingBottom: 24,
+    paddingTop: 24,
+    paddingBottom: 28,
   },
   appIconContainer: {
-    width: 76,
-    height: 76,
-    borderRadius: 22,
+    width: 80,
+    height: 80,
+    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 14,
+    marginBottom: 16,
   },
   appName: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: "800",
     letterSpacing: -0.4,
     marginBottom: 4,
@@ -809,35 +782,35 @@ const styles = StyleSheet.create({
   devHeroBadge: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 10,
     paddingHorizontal: 12,
     paddingVertical: 5,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
+    marginTop: 10,
   },
   devHeroBadgeText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "700",
   },
+  // Section Headings
   sectionHeading: {
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 0.8,
     marginBottom: 10,
-    marginTop: 4,
-    textTransform: "uppercase",
+    marginLeft: 4,
   },
+  // Card Groups
   cardGroup: {
     borderRadius: 24,
-    borderWidth: 0,
     overflow: "hidden",
-    marginBottom: 24,
+    marginBottom: 26,
   },
   rowItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
     paddingVertical: 14,
+    paddingHorizontal: 16,
   },
   rowPressed: {
     opacity: 0.7,
@@ -881,13 +854,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 20,
+    gap: 24,
     marginBottom: 32,
   },
   socialBtn: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
@@ -945,33 +918,6 @@ const styles = StyleSheet.create({
   sheetCloseBtn: {
     padding: 4,
   },
-  legalIntro: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 14,
-  },
-  legalHeading: {
-    fontSize: 14,
-    fontWeight: "700",
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  legalBody: {
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 8,
-  },
-  modalActionBtn: {
-    borderRadius: 24,
-    paddingVertical: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 18,
-  },
-  modalActionBtnText: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
   // Search in Licenses
   searchBox: {
     flexDirection: "row",
@@ -1020,5 +966,74 @@ const styles = StyleSheet.create({
   libDesc: {
     fontSize: 12,
     lineHeight: 16,
+  },
+  devModalCard: {
+    width: "100%",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 24,
+    backgroundColor: "#161618",
+    borderWidth: 0,
+  },
+  devModalTitle: {
+    color: "#ffffff",
+    textAlign: "center",
+    fontSize: 20,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    marginBottom: 8,
+  },
+  devModalSubtitle: {
+    color: "#8f8f8f",
+    textAlign: "center",
+    fontSize: 11,
+    lineHeight: 17,
+    marginBottom: 18,
+    paddingHorizontal: 10,
+  },
+  devModalInput: {
+    height: 50,
+    borderWidth: 0,
+    borderRadius: 20,
+    backgroundColor: "#090909",
+    color: "#ffffff",
+    paddingHorizontal: 14,
+    fontSize: 13,
+    letterSpacing: 0.5,
+    marginBottom: 18,
+  },
+  devModalActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  devCancelButton: {
+    minWidth: 90,
+    height: 44,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  devCancelText: {
+    color: "#999999",
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  devVerifyButton: {
+    minWidth: 100,
+    height: 44,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#00c99a",
+  },
+  devVerifyText: {
+    color: "#00140f",
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

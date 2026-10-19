@@ -19,6 +19,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { db } from "../../lib/firebase";
+import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 
 export default function DeveloperToolsScreen() {
   const router = useRouter();
@@ -51,18 +53,54 @@ export default function DeveloperToolsScreen() {
   );
 
   const [activeDevTool, setActiveDevTool] = useState<string | null>(null);
-  const [isDevActive, setIsDevActive] = useState(true);
+  const [isDevActive, setIsDevActive] = useState<boolean | null>(null);
+  const [enteredPasskey, setEnteredPasskey] = useState("");
+  const [verifyingPasskey, setVerifyingPasskey] = useState(false);
 
   useEffect(() => {
+    let isMounted = true;
     AsyncStorage.getItem("isDeveloper").then((val) => {
-      setIsDevActive(val === "true");
+      if (isMounted) setIsDevActive(val === "true");
     });
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  const handleVerifyPasskey = async () => {
+    if (!enteredPasskey.trim()) {
+      Alert.alert("Required", "Please enter the developer passkey.");
+      return;
+    }
+
+    try {
+      setVerifyingPasskey(true);
+      const keyDoc = await getDoc(doc(db, "secret", "devkey"));
+      const validKey = keyDoc.exists() ? keyDoc.data().key : null;
+
+      if (enteredPasskey.trim() === validKey) {
+        await AsyncStorage.setItem("isDeveloper", "true");
+        setIsDevActive(true);
+        setEnteredPasskey("");
+        try {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch (e) {}
+        Alert.alert("Developer Mode", "🧑‍💻 Developer Mode Unlocked!");
+      } else {
+        Alert.alert("Invalid Developer Key", "The developer key is incorrect.");
+      }
+    } catch (error) {
+      console.error("Error verifying developer key:", error);
+      Alert.alert("Error", "Could not verify the developer key. Try again later.");
+    } finally {
+      setVerifyingPasskey(false);
+    }
+  };
 
   const handleDisableDevMode = async () => {
     Alert.alert(
       "Disable Developer Mode",
-      "Are you sure you want to turn off Developer Mode? You can reactivate it anytime by tapping Version in About BunkMates.",
+      "Are you sure you want to turn off Developer Mode? You can reactivate it anytime by tapping Version in About BunkMates or Settings.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -168,7 +206,7 @@ export default function DeveloperToolsScreen() {
 
     if (id === "budget-manager") {
       try {
-        router.push("/budget" as any);
+        router.push("/settings/currency-expenses" as any);
         return;
       } catch {
         setActiveDevTool(id);
@@ -196,6 +234,101 @@ export default function DeveloperToolsScreen() {
     setActiveDevTool(id);
   };
 
+  // If loading storage state
+  if (isDevActive === null) {
+    return (
+      <SafeAreaView style={[styles.developerPage, { backgroundColor: colors.bg }]} edges={["top"]}>
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <ActivityIndicator color="#00e6b0" size="large" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // If developer mode is locked / not active on this device
+  if (!isDevActive) {
+    return (
+      <SafeAreaView style={[styles.developerPage, { backgroundColor: colors.bg }]} edges={["top"]}>
+        <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+
+        <View style={styles.modernHeader}>
+          <View style={styles.modernHeaderLeft}>
+            <Pressable
+              onPress={() => {
+                if (router.canGoBack()) router.back();
+                else router.replace("/settings" as any);
+              }}
+              style={({ pressed }) => [
+                styles.modernHeaderBtn,
+                { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                pressed && styles.pressed,
+              ]}
+              hitSlop={6}
+            >
+              <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+            </Pressable>
+            <Text style={[styles.modernHeaderTitle, { color: colors.textPrimary }]}>
+              Developer Access
+            </Text>
+          </View>
+        </View>
+
+        <View style={{ flex: 1, paddingHorizontal: 24, justifyContent: "center", alignItems: "center" }}>
+          <View
+            style={[
+              styles.lockedCard,
+              { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            ]}
+          >
+            <View style={styles.lockIconBox}>
+              <Ionicons name="lock-closed" size={32} color="#00e6b0" />
+            </View>
+
+            <Text style={[styles.devModalTitle, { color: colors.textPrimary }]}>
+              Enter Developer Passkey
+            </Text>
+            <Text style={[styles.devModalSubtitle, { color: colors.textSecondary }]}>
+              This access is restricted to authorized BunkMates developers and QA engineers.
+            </Text>
+
+            <TextInput
+              autoFocus
+              value={enteredPasskey}
+              onChangeText={setEnteredPasskey}
+              placeholder="Developer Key"
+              placeholderTextColor={colors.textSecondary}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              onSubmitEditing={handleVerifyPasskey}
+              style={[
+                styles.devModalInput,
+                {
+                  backgroundColor: isDark ? "#090909" : "#F1F5F9",
+                  color: colors.textPrimary,
+                  borderColor: colors.cardBorder,
+                },
+              ]}
+            />
+
+            <Pressable
+              onPress={handleVerifyPasskey}
+              disabled={verifyingPasskey}
+              style={[styles.devVerifyButton, { width: "100%", height: 48, borderRadius: 14 }]}
+            >
+              {verifyingPasskey ? (
+                <ActivityIndicator color="#00140f" size="small" />
+              ) : (
+                <Text style={styles.devVerifyText}>Unlock Developer Tools</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Active Sandbox Tool View
   if (activeDevTool) {
     return (
       <SafeAreaView style={[styles.developerPage, { backgroundColor: colors.bg }]} edges={["top"]}>
@@ -210,11 +343,12 @@ export default function DeveloperToolsScreen() {
     );
   }
 
+  // Developer Tools Main Menu
   return (
     <SafeAreaView style={[styles.developerPage, { backgroundColor: colors.bg }]} edges={["top"]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
-      {/* Header with Circular Back Button */}
+      {/* Header with Circular Back Button & Turn Off Action */}
       <View style={styles.modernHeader}>
         <View style={styles.modernHeaderLeft}>
           <Pressable
@@ -262,7 +396,7 @@ export default function DeveloperToolsScreen() {
 
         <Text style={[styles.developerIntro, { color: colors.textSecondary }]}>
           🧑‍💻 Welcome to Developer Mode — explore experimental sandboxes, internal tools,
-          and feature prototypes for BunkMates v2.
+          and feature prototypes for BunkMates.
         </Text>
 
         {/* Section 1: Testing Features */}
@@ -362,13 +496,35 @@ function DevToolSandboxView({
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState(["4", "8", "1", "9", "0", "2"]);
 
-  // Dev Notes state
-  const [devNotes, setDevNotes] = useState<string[]>([
-    "Investigate room bill split round-off precision.",
-    "Verify push token invalidation on account sign-out.",
-    "Benchmark offline map tile bundle cache hit rate.",
+  // Dev Notes state with rich tag colors
+  const [notes, setNotes] = useState<
+    { id: string; title: string; desc: string; done: boolean; tagColor: string }[]
+  >([
+    {
+      id: "1",
+      title: "Groq AI Latency Check",
+      desc: "Ensure responses complete under 250ms on 4G networks.",
+      done: true,
+      tagColor: "#00e6b0",
+    },
+    {
+      id: "2",
+      title: "Offline Sync Persistence",
+      desc: "Validate AsyncStorage fallback on cold startup.",
+      done: false,
+      tagColor: "#fbbf24",
+    },
   ]);
-  const [newNote, setNewNote] = useState("");
+  const [newNoteTitle, setNewNoteTitle] = useState("");
+  const [newNoteDesc, setNewNoteDesc] = useState("");
+
+  // Firestore Playground state
+  const [selectedCol, setSelectedCol] = useState("users");
+  const [queryDocs, setQueryDocs] = useState<any[]>([]);
+  const [fetchingCol, setFetchingCol] = useState(false);
+
+  // Error simulation state
+  const [simulatedError, setSimulatedError] = useState(false);
 
   // Toast banner state inside sandbox
   const [activeToast, setActiveToast] = useState<string | null>(null);
@@ -376,6 +532,44 @@ function DevToolSandboxView({
   const showToast = (msg: string) => {
     setActiveToast(msg);
     setTimeout(() => setActiveToast(null), 2500);
+  };
+
+  const handleAddNote = () => {
+    if (!newNoteTitle.trim()) {
+      Alert.alert("Required", "Please enter a note title.");
+      return;
+    }
+    const item = {
+      id: Date.now().toString(),
+      title: newNoteTitle.trim(),
+      desc: newNoteDesc.trim() || "No description provided.",
+      done: false,
+      tagColor: ["#00e6b0", "#3b83f6", "#a848ec", "#f97316"][
+        Math.floor(Math.random() * 4)
+      ],
+    };
+    setNotes((prev) => [item, ...prev]);
+    setNewNoteTitle("");
+    setNewNoteDesc("");
+    showToast("Note added.");
+  };
+
+  const handleFetchCollection = async () => {
+    try {
+      setFetchingCol(true);
+      const snap = await getDocs(collection(db, selectedCol));
+      const list: any[] = [];
+      snap.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setQueryDocs(list.slice(0, 5));
+      showToast(`Fetched ${list.length} docs from "${selectedCol}"`);
+    } catch (e: any) {
+      console.log("Firestore query error:", e);
+      Alert.alert("Query Error", e.message || "Failed to query Firestore");
+    } finally {
+      setFetchingCol(false);
+    }
   };
 
   const getToolTitle = () => {
@@ -473,7 +667,7 @@ function DevToolSandboxView({
                 <Text style={{ fontSize: 18, marginVertical: 4 }}>
                   {idx === 3 ? "⛅" : idx === 5 ? "🌅" : "☀️"}
                 </Text>
-                <Text style={[styles.weatherHourTemp, { color: colors.textPrimary }]}>{28 - idx % 3}°</Text>
+                <Text style={[styles.weatherHourTemp, { color: colors.textPrimary }]}>{28 - (idx % 3)}°</Text>
               </View>
             ))}
           </ScrollView>
@@ -504,7 +698,7 @@ function DevToolSandboxView({
         <View style={[styles.sandboxCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Text style={styles.sandboxSectionTitle}>BunkMates Social Story Loop</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-            {["Sahil", "Aman", "Priya", "Rohan", "Sneha"].map((user, i) => (
+            {["Sahil", "Aman", "Priya", "Rohan", "Sneha"].map((user) => (
               <View key={user} style={{ alignItems: "center", marginRight: 12 }}>
                 <View style={styles.socialStoryRing}>
                   <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>
@@ -519,13 +713,13 @@ function DevToolSandboxView({
           <View style={[styles.socialPostCard, { backgroundColor: isDark ? "#121214" : "#F8FAFC", borderColor: colors.cardBorder }]}>
             <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
               <View style={styles.socialAvatar}>
-                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>S</Text>
+                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>M</Text>
               </View>
               <View style={{ marginLeft: 10, flex: 1 }}>
                 <Text style={{ color: colors.textPrimary, fontWeight: "700", fontSize: 13 }}>
-                  Sahil Suman
+                  Mohit Sharma
                 </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 10 }}>Goa Beach Trip • 2h ago</Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 10 }}>Manali Valley • 2 hours ago</Text>
               </View>
               <Pressable
                 onPress={() => showToast("Post bookmarked in dev sandbox.")}
@@ -535,12 +729,9 @@ function DevToolSandboxView({
               </Pressable>
             </View>
 
-            <View style={{ height: 160, borderRadius: 10, backgroundColor: isDark ? "#1c1c22" : "#E2E8F0", alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
-              <Ionicons name="image-outline" size={42} color={colors.textSecondary} />
-              <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4 }}>
-                Trip Photo Preview Simulation
-              </Text>
-            </View>
+            <Text style={{ color: colors.textPrimary, fontSize: 13, lineHeight: 19, marginBottom: 12 }}>
+              Sunset sessions with the bunkmates! 🏔️✨ Planning the next trek to Solang tomorrow. Who is joining?
+            </Text>
 
             <View style={{ flexDirection: "row", alignItems: "center", gap: 16, marginBottom: 12 }}>
               <Pressable
@@ -573,15 +764,16 @@ function DevToolSandboxView({
 
             {comments.map((c, i) => (
               <View key={i} style={[styles.commentItem, { backgroundColor: isDark ? "#1a1a1e" : "#EEF2F6" }]}>
-                <Text style={{ color: colors.textPrimary, fontSize: 11 }}>{c}</Text>
+                <Text style={{ color: "#00e6b0", fontWeight: "700", fontSize: 11 }}>BunkMate Traveler:</Text>
+                <Text style={{ color: colors.textPrimary, fontSize: 11, marginTop: 2 }}>{c}</Text>
               </View>
             ))}
 
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 6 }}>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 10 }}>
               <TextInput
                 value={commentInput}
                 onChangeText={setCommentInput}
-                placeholder="Add a comment..."
+                placeholder="Write a comment..."
                 placeholderTextColor={colors.textSecondary}
                 style={[styles.commentInput, { backgroundColor: isDark ? "#18181c" : "#EEF2F6", color: colors.textPrimary }]}
               />
@@ -607,15 +799,22 @@ function DevToolSandboxView({
         <View style={[styles.sandboxCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Text style={styles.sandboxSectionTitle}>Phone Authentication Simulation</Text>
           <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 14 }}>
-            Test login flow with simulated Firebase Auth SMS token generator.
+            Enter a phone number to trigger the simulated 6-digit verification flow:
           </Text>
 
           <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
-            <View style={[styles.countryCodePicker, { backgroundColor: isDark ? "#161616" : "#F1F5F9", borderColor: colors.cardBorder }]}>
+            <Pressable
+              onPress={() => {
+                const codes = ["+91 🇮🇳", "+1 🇺🇸", "+44 🇬🇧", "+61 🇦🇺"];
+                const nextIdx = (codes.indexOf(countryCode) + 1) % codes.length;
+                setCountryCode(codes[nextIdx]);
+              }}
+              style={[styles.countryCodePicker, { backgroundColor: isDark ? "#161616" : "#F1F5F9", borderColor: colors.cardBorder }]}
+            >
               <Text style={{ color: colors.textPrimary, fontSize: 12, fontWeight: "600" }}>
                 {countryCode}
               </Text>
-            </View>
+            </Pressable>
             <TextInput
               value={phoneInput}
               onChangeText={setPhoneInput}
@@ -629,7 +828,7 @@ function DevToolSandboxView({
           <Pressable
             onPress={() => {
               setOtpSent(true);
-              showToast("OTP sent to " + countryCode + " " + phoneInput);
+              showToast("6-Digit OTP Sent to " + countryCode + " " + phoneInput);
               try {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               } catch (e) {}
@@ -643,13 +842,13 @@ function DevToolSandboxView({
 
           {otpSent && (
             <View style={{ marginTop: 20 }}>
-              <Text style={{ color: colors.textPrimary, fontSize: 12, fontWeight: "600", marginBottom: 10 }}>
-                Enter Verification Code:
+              <Text style={{ color: "#00e6b0", fontSize: 12, fontWeight: "700", marginBottom: 10, textAlign: "center" }}>
+                Enter Verification Passcode
               </Text>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 16 }}>
+              <View style={{ flexDirection: "row", justifyContent: "center", gap: 8, marginBottom: 16 }}>
                 {otpCode.map((digit, i) => (
                   <View key={i} style={[styles.otpDigitBox, { backgroundColor: isDark ? "#161616" : "#F1F5F9" }]}>
-                    <Text style={{ color: "#00e6b0", fontSize: 18, fontWeight: "700" }}>
+                    <Text style={{ color: "#00e6b0", fontSize: 18, fontWeight: "800" }}>
                       {digit}
                     </Text>
                   </View>
@@ -658,14 +857,14 @@ function DevToolSandboxView({
 
               <Pressable
                 onPress={() => {
-                  showToast("✅ Phone Verified: BunkMates User Authenticated!");
+                  Alert.alert("OTP Verified", "✅ Successfully authenticated via Phone OTP!");
                   try {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                   } catch (e) {}
                 }}
                 style={styles.sandboxPrimaryBtn}
               >
-                <Text style={styles.sandboxPrimaryBtnText}>Verify & Complete Login</Text>
+                <Text style={styles.sandboxPrimaryBtnText}>Verify OTP</Text>
               </Pressable>
             </View>
           )}
@@ -675,36 +874,35 @@ function DevToolSandboxView({
       {/* 4. USER MAPS & ANALYTICS */}
       {toolId === "user-maps" && (
         <View style={[styles.sandboxCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Text style={styles.sandboxSectionTitle}>Active User Geographic Distribution</Text>
+          <Text style={styles.sandboxSectionTitle}>Active Traveler Heatmap Analytics</Text>
           <View style={[styles.mapHeroBox, { backgroundColor: isDark ? "#121214" : "#F8FAFC" }]}>
-            <Ionicons name="map-outline" size={48} color="#00e6b0" />
-            <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: "700", marginTop: 8 }}>
-              India Region: Active
+            <Ionicons name="map-outline" size={36} color="#00e6b0" />
+            <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: "800", marginTop: 8 }}>
+              5,190 Active BunkMates
             </Text>
             <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
-              1,248 Connected Travelers Live
+              Real-time location distribution nodes
             </Text>
           </View>
 
-          <Text style={[styles.sandboxSectionTitle, { marginTop: 14 }]}>Regional Hotspots</Text>
+          <Text style={[styles.sandboxSectionTitle, { marginTop: 14 }]}>Regional Density Breakdown</Text>
           {[
-            { region: "Goa & North Beaches", count: 482, density: "High" },
-            { region: "Manali & Solang Valley", count: 326, density: "High" },
-            { region: "Rishikesh River Camps", count: 219, density: "Medium" },
-            { region: "Leh-Ladakh Circuit", count: 145, density: "Normal" },
-            { region: "Bali South Coast", count: 76, density: "Normal" },
-          ].map((item, idx) => (
+            { region: "West & Goa Beaches 🏖️", active: "2,150 BunkMates", density: "HIGH DENSITY" },
+            { region: "North India (Manali/Leh) 🏔️", active: "1,420 BunkMates", density: "HIGH DENSITY" },
+            { region: "South & Western Ghats 🌲", active: "980 BunkMates", density: "MEDIUM DENSITY" },
+            { region: "Southeast Asia Destinations 🌴", active: "640 BunkMates", density: "MODERATE" },
+          ].map((item) => (
             <View key={item.region} style={[styles.regionRow, { borderBottomColor: colors.cardBorder }]}>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: "600" }}>
+                <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: "700" }}>
                   {item.region}
                 </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
-                  {item.count} BunkMates users
+                <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+                  {item.active}
                 </Text>
               </View>
               <View style={styles.densityBadge}>
-                <Text style={{ color: "#00e6b0", fontSize: 10, fontWeight: "700" }}>
+                <Text style={{ color: "#00e6b0", fontSize: 9, fontWeight: "800" }}>
                   {item.density}
                 </Text>
               </View>
@@ -718,173 +916,177 @@ function DevToolSandboxView({
         <View style={[styles.sandboxCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Text style={styles.sandboxSectionTitle}>Developer Quick Notes</Text>
 
-          <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
-            <TextInput
-              value={newNote}
-              onChangeText={setNewNote}
-              placeholder="Add engineering note or TODO..."
-              placeholderTextColor={colors.textSecondary}
-              style={[styles.sandboxInput, { flex: 1, backgroundColor: isDark ? "#161616" : "#F1F5F9", borderColor: colors.cardBorder, color: colors.textPrimary }]}
-            />
-            <Pressable
-              onPress={() => {
-                if (newNote.trim()) {
-                  setDevNotes((prev) => [newNote.trim(), ...prev]);
-                  setNewNote("");
-                  showToast("Note added.");
-                }
-              }}
-              style={styles.sandboxPrimaryBtn}
-            >
-              <Text style={styles.sandboxPrimaryBtnText}>Add</Text>
-            </Pressable>
-          </View>
+          <TextInput
+            value={newNoteTitle}
+            onChangeText={setNewNoteTitle}
+            placeholder="Note Title..."
+            placeholderTextColor={colors.textSecondary}
+            style={[styles.sandboxInput, { backgroundColor: isDark ? "#161616" : "#F1F5F9", borderColor: colors.cardBorder, color: colors.textPrimary }]}
+          />
+          <TextInput
+            value={newNoteDesc}
+            onChangeText={setNewNoteDesc}
+            placeholder="Description / Implementation Details..."
+            placeholderTextColor={colors.textSecondary}
+            style={[styles.sandboxInput, { marginTop: 8, height: 60, backgroundColor: isDark ? "#161616" : "#F1F5F9", borderColor: colors.cardBorder, color: colors.textPrimary }]}
+            multiline
+          />
+          <Pressable onPress={handleAddNote} style={[styles.sandboxPrimaryBtn, { marginTop: 10 }]}>
+            <Text style={styles.sandboxPrimaryBtnText}>+ Add Note</Text>
+          </Pressable>
 
-          {devNotes.map((note, idx) => (
-            <View key={idx} style={[styles.noteCard, { backgroundColor: isDark ? "#141416" : "#F8FAFC" }]}>
-              <Text style={{ color: colors.textPrimary, fontSize: 12, flex: 1 }}>{note}</Text>
-              <Pressable
-                onPress={() => {
-                  setDevNotes((prev) => prev.filter((_, i) => i !== idx));
-                  showToast("Note dismissed.");
-                }}
-                hitSlop={6}
-              >
-                <Ionicons name="trash-outline" size={16} color="#ff4757" />
-              </Pressable>
-            </View>
-          ))}
+          <View style={{ marginTop: 16 }}>
+            {notes.map((n) => (
+              <View key={n.id} style={[styles.noteCard, { backgroundColor: isDark ? "#141416" : "#F8FAFC", borderLeftColor: n.tagColor || "#00e6b0" }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.textPrimary, fontWeight: "700", fontSize: 13 }}>{n.title}</Text>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 3 }}>{n.desc}</Text>
+                </View>
+                <Pressable
+                  onPress={() => {
+                    setNotes((prev) => prev.filter((item) => item.id !== n.id));
+                    showToast("Note deleted.");
+                  }}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="trash-outline" size={16} color="#ff4757" />
+                </Pressable>
+              </View>
+            ))}
+          </View>
         </View>
       )}
 
       {/* 6. FIRESTORE PLAYGROUND */}
       {toolId === "firestore-playground" && (
         <View style={[styles.sandboxCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Text style={styles.sandboxSectionTitle}>Firestore Collection Monitor</Text>
-          <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 12 }}>
-            Real-time listener heartbeat on BunkMates cloud collections.
-          </Text>
+          <Text style={styles.sandboxSectionTitle}>Live Firestore Collection Viewer</Text>
 
-          {[
-            { col: "users", status: "Active (Synced)", latency: "42ms" },
-            { col: "trips", status: "Active (Synced)", latency: "38ms" },
-            { col: "chats", status: "Listening (Realtime)", latency: "24ms" },
-            { col: "appSettings", status: "Cached (Offline)", latency: "0ms" },
-          ].map((col) => (
-            <View key={col.col} style={[styles.jsonCard, { backgroundColor: isDark ? "#121214" : "#F8FAFC", borderColor: colors.cardBorder }]}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-                <Text style={{ color: "#00e6b0", fontSize: 13, fontWeight: "700" }}>
-                  collection("{col.col}")
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+            {["users", "trips", "notifications", "feedback"].map((col) => (
+              <Pressable
+                key={col}
+                onPress={() => setSelectedCol(col)}
+                style={[
+                  styles.cityChip,
+                  selectedCol === col && styles.cityChipActive,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.cityChipText,
+                    selectedCol === col && styles.cityChipTextActive,
+                  ]}
+                >
+                  collection: {col}
                 </Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 10 }}>{col.latency}</Text>
-              </View>
-              <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Status: {col.status}</Text>
-            </View>
-          ))}
+              </Pressable>
+            ))}
+          </ScrollView>
 
-          <Pressable
-            onPress={() => showToast("Firestore connection tested: All indexes healthy.")}
-            style={[styles.sandboxSecondaryBtn, { marginTop: 8 }]}
-          >
-            <Text style={styles.sandboxSecondaryBtnText}>Ping Database Endpoints</Text>
+          <Pressable onPress={handleFetchCollection} disabled={fetchingCol} style={styles.sandboxPrimaryBtn}>
+            {fetchingCol ? (
+              <ActivityIndicator color="#00140f" size="small" />
+            ) : (
+              <Text style={styles.sandboxPrimaryBtnText}>Run Realtime Query</Text>
+            )}
           </Pressable>
+
+          <View style={{ marginTop: 16 }}>
+            {queryDocs.map((docItem) => (
+              <View key={docItem.id} style={[styles.jsonCard, { backgroundColor: isDark ? "#121214" : "#F8FAFC", borderColor: colors.cardBorder }]}>
+                <Text style={{ color: "#00e6b0", fontWeight: "700", fontSize: 11, marginBottom: 4 }}>
+                  ID: {docItem.id}
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 10, fontFamily: Platform.OS === "ios" ? "Courier" : "monospace" }}>
+                  {JSON.stringify(docItem, null, 2)}
+                </Text>
+              </View>
+            ))}
+            {queryDocs.length === 0 && !fetchingCol && (
+              <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: "center", paddingVertical: 10 }}>
+                Tap "Run Realtime Query" to fetch documents from Firestore.
+              </Text>
+            )}
+          </View>
         </View>
       )}
 
       {/* 7. NOTIFICATIONS PREVIEW */}
       {toolId === "notifications-preview" && (
         <View style={[styles.sandboxCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Text style={styles.sandboxSectionTitle}>Notification Banner Simulator</Text>
-          <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 12 }}>
-            Simulate incoming push notifications and custom in-app banners.
-          </Text>
+          <Text style={styles.sandboxSectionTitle}>Notification Toast Previewer</Text>
 
-          <Pressable
-            onPress={() => {
-              showToast("🔔 Sahil added you to 'Goa Beach Party'!");
-              try {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              } catch (e) {}
-            }}
-            style={[styles.sandboxPrimaryBtn, { marginBottom: 10 }]}
-          >
-            <Text style={styles.sandboxPrimaryBtnText}>Trigger Trip Invite Alert</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => {
-              showToast("💸 Rohan settled ₹1,200 for Resort Stay");
-              try {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              } catch (e) {}
-            }}
-            style={[styles.sandboxSecondaryBtn, { marginBottom: 10 }]}
-          >
-            <Text style={styles.sandboxSecondaryBtnText}>Trigger Expense Settlement Alert</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => {
-              showToast("💬 New message in 'Rishikesh Rafting'");
-              try {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              } catch (e) {}
-            }}
-            style={styles.sandboxSecondaryBtn}
-          >
-            <Text style={styles.sandboxSecondaryBtnText}>Trigger Group Message Alert</Text>
-          </Pressable>
+          {[
+            { label: "Trigger Trip Joined Alert", msg: "✈️ Aarav joined your Goa Trip!" },
+            { label: "Trigger Payment Alert", msg: "💳 Expense payment received ₹1,200" },
+            { label: "Trigger Group Chat Mention", msg: "💬 @Mohit mentioned you in Group Chat" },
+            { label: "Trigger System Maintenance Notice", msg: "⚡ Scheduled maintenance at 02:00 AM" },
+          ].map((t, i) => (
+            <Pressable
+              key={i}
+              onPress={() => {
+                showToast(t.msg);
+                try {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                } catch (e) {}
+              }}
+              style={[styles.sandboxSecondaryBtn, { marginBottom: 10 }]}
+            >
+              <Text style={styles.sandboxSecondaryBtnText}>{t.label}</Text>
+            </Pressable>
+          ))}
         </View>
       )}
 
       {/* 8. UI SHOWCASE */}
       {toolId === "ui-showcase" && (
         <View style={[styles.sandboxCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Text style={styles.sandboxSectionTitle}>Design System Tokens</Text>
+          <Text style={styles.sandboxSectionTitle}>Design System Tokens & Components</Text>
 
-          <View style={{ flexDirection: "row", gap: 10, marginBottom: 12 }}>
-            <View style={{ flex: 1, height: 44, borderRadius: 10, backgroundColor: "#00e6b0", alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: "#00140f", fontWeight: "700", fontSize: 11 }}>Teal Accent</Text>
-            </View>
-            <View style={{ flex: 1, height: 44, borderRadius: 10, backgroundColor: "#3b82f6", alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: "#fff", fontWeight: "700", fontSize: 11 }}>Blue Primary</Text>
-            </View>
-            <View style={{ flex: 1, height: 44, borderRadius: 10, backgroundColor: "#f59e0b", alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: "#000", fontWeight: "700", fontSize: 11 }}>Warning</Text>
-            </View>
+          <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 10 }}>Color Swatches:</Text>
+          <View style={{ flexDirection: "row", gap: 10, marginBottom: 16 }}>
+            {["#22d3ee", "#3b83f6", "#a848ec", "#ff8d1a", "#00e6b0"].map((c) => (
+              <View key={c} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: c }} />
+            ))}
           </View>
 
-          <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
-            Theme: {isDark ? "Dark Theme Active" : "Light Theme Active"}
-          </Text>
-          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-            Card Background: {colors.card}
-          </Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 10 }}>Pills & Badges:</Text>
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+            <View style={styles.densityBadge}><Text style={{ color: "#00e6b0", fontSize: 10, fontWeight: "700" }}>ACTIVE BETA</Text></View>
+            <View style={[styles.densityBadge, { backgroundColor: "rgba(34,211,238,0.15)" }]}><Text style={{ color: "#22d3ee", fontSize: 10, fontWeight: "700" }}>VERIFIED</Text></View>
+          </View>
         </View>
       )}
 
       {/* 9. ERROR BOUNDARY TEST */}
       {toolId === "error-test" && (
         <View style={[styles.sandboxCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <Text style={styles.sandboxSectionTitle}>Error Boundary Simulation</Text>
-          <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 14 }}>
-            Verify app stability and safe fallback rendering during simulated exceptions.
-          </Text>
+          <Text style={styles.sandboxSectionTitle}>Runtime Error Boundary Simulator</Text>
 
-          <Pressable
-            onPress={() => {
-              Alert.alert(
-                "Safe Error Simulation",
-                "Simulated error captured safely by Error Boundary. No crash occurred.",
-                [{ text: "OK" }]
-              );
-            }}
-            style={[styles.sandboxPrimaryBtn, { backgroundColor: "#ef4444" }]}
-          >
-            <Text style={[styles.sandboxPrimaryBtnText, { color: "#ffffff" }]}>
-              Simulate Catchable Exception
-            </Text>
-          </Pressable>
+          {simulatedError ? (
+            <View style={{ padding: 14, backgroundColor: "rgba(255,71,87,0.12)", borderRadius: 12 }}>
+              <Text style={{ color: "#ff4757", fontWeight: "800", fontSize: 14, marginBottom: 6 }}>
+                Runtime Error Caught by Boundary
+              </Text>
+              <Text style={{ color: "#ccc", fontSize: 11, lineHeight: 16, marginBottom: 12 }}>
+                TypeError: Cannot read properties of undefined (reading &apos;userState&apos;) at DevToolSandboxView.tsx:142
+              </Text>
+              <Pressable
+                onPress={() => setSimulatedError(false)}
+                style={[styles.sandboxPrimaryBtn, { backgroundColor: "#ff4757" }]}
+              >
+                <Text style={[styles.sandboxPrimaryBtnText, { color: "#fff" }]}>Reset & Recover State</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => setSimulatedError(true)}
+              style={[styles.sandboxSecondaryBtn, { backgroundColor: "rgba(255, 71, 87, 0.12)" }]}
+            >
+              <Text style={[styles.sandboxSecondaryBtnText, { color: "#ff4757" }]}>💥 Trigger Simulated Exception</Text>
+            </Pressable>
+          )}
         </View>
       )}
 
@@ -1261,5 +1463,53 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 8,
     borderWidth: 1,
+  },
+  lockedCard: {
+    width: "100%",
+    borderRadius: 24,
+    padding: 24,
+    alignItems: "center",
+    borderWidth: 1,
+  },
+  lockIconBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "rgba(0,230,176,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  devModalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  devModalSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+    marginBottom: 20,
+    paddingHorizontal: 8,
+  },
+  devModalInput: {
+    width: "100%",
+    height: 48,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    fontSize: 14,
+    borderWidth: 1,
+    marginBottom: 18,
+  },
+  devVerifyButton: {
+    backgroundColor: "#00e6b0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  devVerifyText: {
+    color: "#00140f",
+    fontSize: 14,
+    fontWeight: "700",
   },
 });

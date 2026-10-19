@@ -1,5 +1,8 @@
-// **@** Weather & AQI Settings — Pixel-perfect UI matching Settings design system with greyish-white accents, circular back button, dynamic theme adaptability (zero red), and real Firestore persistence
-import React, { useEffect, useMemo, useState } from "react";
+// **@** Weather & Environmental Alerts Settings
+// High-performance, industry-level implementation reflecting only real app features (zero phantom options like UV)
+// Fully reactive with AppSettingsContext, AsyncStorage, and Firestore persistence
+
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,12 +13,12 @@ import {
   Switch,
   Modal,
   StatusBar,
-  Appearance,
   Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import * as Haptics from "expo-haptics";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -23,51 +26,89 @@ import { auth, db } from "../../lib/firebase";
 import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useAppSettings } from "../../contexts/AppSettingsContext";
 import { useLanguage } from "../../contexts/LanguageContext";
-import { ACCENT_COLORS } from "../../theme/theme";
 
-type TempUnit = "°F" | "°C" | "K";
-type ForecastHorizon = "3 Days" | "5 Days" | "7 Days" | "10 Days";
-type WidgetLayout = "Compact Tile" | "Detailed Card";
+type TempUnit = "°C" | "°F";
+type ForecastHorizon = "3 Days" | "5 Days" | "7 Days";
+type WidgetLayout = "Detailed Card" | "Compact Tile";
 type RefreshInterval = "Every 30 mins" | "Every 1 Hour" | "Every 3 Hours";
 
 interface TempOption {
   id: TempUnit;
   label: string;
+  badge: string;
   desc: string;
 }
 
 const TEMP_OPTIONS: TempOption[] = [
-  { id: "°F", label: "Fahrenheit (°F)", desc: "Imperial temperature standard used in USA" },
-  { id: "°C", label: "Celsius (°C)", desc: "Metric standard adopted across Europe and Asia" },
-  { id: "K", label: "Kelvin (K)", desc: "Scientific absolute temperature scale" },
+  {
+    id: "°C",
+    label: "Celsius (°C)",
+    badge: "Metric",
+    desc: "Standard metric scale used globally. Wind speed formatted in km/h.",
+  },
+  {
+    id: "°F",
+    label: "Fahrenheit (°F)",
+    badge: "Imperial",
+    desc: "Imperial scale used in the USA. Wind speed formatted in mph.",
+  },
 ];
 
-const FORECAST_HORIZONS: ForecastHorizon[] = ["3 Days", "5 Days", "7 Days", "10 Days"];
+const FORECAST_HORIZONS: ForecastHorizon[] = ["3 Days", "5 Days", "7 Days"];
+const REFRESH_INTERVALS: RefreshInterval[] = [
+  "Every 30 mins",
+  "Every 1 Hour",
+  "Every 3 Hours",
+];
 
 export default function WeatherSettings() {
   const router = useRouter();
-  const { updateWeatherPreferences } = useAppSettings();
   const { t } = useLanguage();
+  const { themeColors, accentColor, onAccentTextColor, isDark } = useThemeToggle();
+  const {
+    tempUnit: globalTempUnit,
+    forecastHorizon: globalForecastHorizon,
+    severeAlerts: globalSevereAlerts,
+    rainNotifications: globalRainNotifications,
+    widgetLayout: globalWidgetLayout,
+    showFeelsLike: globalShowFeelsLike,
+    showWindSpeed: globalShowWindSpeed,
+    refreshInterval: globalRefreshInterval,
+    highPollutionAlerts: globalHighPollutionAlerts,
+    updateWeatherPreferences,
+  } = useAppSettings();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
-  const [authLoading, setAuthLoading] = useState(true);
 
-  // States matching reference image defaults
-  const [tempUnit, setTempUnit] = useState<TempUnit>("°F");
-  const [forecastHorizon, setForecastHorizon] = useState<ForecastHorizon>("7 Days");
-  const [severeAlerts, setSevereAlerts] = useState<boolean>(true);
-  const [rainNotifications, setRainNotifications] = useState<boolean>(true);
-  const [uvAlerts, setUvAlerts] = useState<boolean>(false);
+  // States synchronized with real active app features
+  const [tempUnit, setTempUnit] = useState<TempUnit>(
+    (globalTempUnit as TempUnit) === "°F" ? "°F" : "°C"
+  );
+  const [forecastHorizon, setForecastHorizon] = useState<ForecastHorizon>(
+    (globalForecastHorizon as ForecastHorizon) || "7 Days"
+  );
+  const [severeAlerts, setSevereAlerts] = useState<boolean>(globalSevereAlerts ?? true);
+  const [rainNotifications, setRainNotifications] = useState<boolean>(
+    globalRainNotifications ?? true
+  );
+  const [highPollutionAlerts, setHighPollutionAlerts] = useState<boolean>(
+    globalHighPollutionAlerts ?? true
+  );
 
-  // Display Widget states
-  const [widgetLayout, setWidgetLayout] = useState<WidgetLayout>("Detailed Card");
-  const [showFeelsLike, setShowFeelsLike] = useState<boolean>(true);
-  const [showWindSpeed, setShowWindSpeed] = useState<boolean>(true);
-  const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>("Every 1 Hour");
-
-  // Included existing app features: AQI & Air Quality Monitoring
-  const [highPollutionAlerts, setHighPollutionAlerts] = useState<boolean>(true);
+  // Widget settings
+  const [widgetLayout, setWidgetLayout] = useState<WidgetLayout>(
+    (globalWidgetLayout as WidgetLayout) || "Detailed Card"
+  );
+  const [showFeelsLike, setShowFeelsLike] = useState<boolean>(
+    globalShowFeelsLike ?? true
+  );
+  const [showWindSpeed, setShowWindSpeed] = useState<boolean>(
+    globalShowWindSpeed ?? true
+  );
+  const [refreshInterval, setRefreshInterval] = useState<RefreshInterval>(
+    (globalRefreshInterval as RefreshInterval) || "Every 1 Hour"
+  );
 
   // Modals state
   const [tempModalVisible, setTempModalVisible] = useState(false);
@@ -77,210 +118,188 @@ export default function WeatherSettings() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastOpacity = useMemo(() => new Animated.Value(0), []);
 
-  const triggerToast = (msg: string) => {
-    setToastMessage(msg);
-    Animated.sequence([
-      Animated.timing(toastOpacity, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-      Animated.delay(1600),
-      Animated.timing(toastOpacity, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-    ]).start(() => setToastMessage(null));
+  const triggerToast = useCallback(
+    (msg: string) => {
+      setToastMessage(msg);
+      Animated.sequence([
+        Animated.timing(toastOpacity, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.delay(1400),
+        Animated.timing(toastOpacity, {
+          toValue: 0,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+      ]).start(() => setToastMessage(null));
+    },
+    [toastOpacity]
+  );
+
+  const triggerHaptic = () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    } catch {}
   };
 
-  // Dynamic Theme matching Settings page & ThemeContext
-  let themeMode: "dark" | "light" | "system" = "system";
-  let userAccent = "default";
-  let dynamicThemeColors: any = null;
-  try {
-    const themeContext = useThemeToggle();
-    if (themeContext) {
-      if (themeContext.mode) themeMode = themeContext.mode;
-      if (themeContext.accent) userAccent = themeContext.accent;
-      dynamicThemeColors = themeContext.themeColors;
+  // Keep state updated when global settings change
+  useEffect(() => {
+    if (globalTempUnit) {
+      setTempUnit((globalTempUnit as TempUnit) === "°F" ? "°F" : "°C");
     }
-  } catch (e) {
-    // fallback safe
-  }
-
-  const isDark =
-    themeMode === "dark" ||
-    (themeMode === "system" && Appearance.getColorScheme() === "dark");
-
-  // Dynamic solid colors
-  const colors = useMemo(() => {
-    const hasCustomNonRedAccent =
-      userAccent &&
-      userAccent !== "default" &&
-      userAccent !== "coral" &&
-      userAccent !== "red" &&
-      (ACCENT_COLORS as any)[userAccent];
-
-    const customAccent = hasCustomNonRedAccent
-      ? (ACCENT_COLORS as any)[userAccent]
-      : null;
-
-    const greyishWhite = isDark ? "#E2E8F0" : "#4B5563";
-    const activeText = customAccent || (isDark ? "#FFFFFF" : "#11141A");
-    const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
-
-    return {
-      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
-      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
-      cardBorder: "transparent",
-      divider: "transparent",
-      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
-      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
-      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
-      greyishWhite: greyishWhite,
-      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
-      chevron: isDark ? "#555860" : "#B4B9C2",
-      segmentBg: isDark ? "#202024" : "#E8EAEE",
-      segmentActiveBg: isDark ? "#2C2C32" : "#FFFFFF",
-      switchActive: isDark ? "#34C759" : "#10B981",
-      switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
-      activeText: activeText,
-      activeBorder: "transparent",
-      insetBg: isDark ? "#202024" : "#F8FAFC",
-      badgeBg: isDark ? "rgba(16, 185, 129, 0.12)" : "rgba(16, 185, 129, 0.08)",
-      badgeBorder: "transparent",
-      badgeText: "#10B981",
-      modalOverlay: "rgba(0, 0, 0, 0.65)",
-      toastBg: isDark ? "#1F2937" : "#111827",
-      toastText: "#F9FAFB",
-    };
-  }, [isDark, userAccent, dynamicThemeColors]);
+    if (globalForecastHorizon) {
+      setForecastHorizon((globalForecastHorizon as ForecastHorizon) || "7 Days");
+    }
+    if (globalSevereAlerts !== undefined) setSevereAlerts(globalSevereAlerts);
+    if (globalRainNotifications !== undefined) setRainNotifications(globalRainNotifications);
+    if (globalHighPollutionAlerts !== undefined) setHighPollutionAlerts(globalHighPollutionAlerts);
+    if (globalWidgetLayout) setWidgetLayout((globalWidgetLayout as WidgetLayout) || "Detailed Card");
+    if (globalShowFeelsLike !== undefined) setShowFeelsLike(globalShowFeelsLike);
+    if (globalShowWindSpeed !== undefined) setShowWindSpeed(globalShowWindSpeed);
+    if (globalRefreshInterval) setRefreshInterval((globalRefreshInterval as RefreshInterval) || "Every 1 Hour");
+  }, [
+    globalTempUnit,
+    globalForecastHorizon,
+    globalSevereAlerts,
+    globalRainNotifications,
+    globalHighPollutionAlerts,
+    globalWidgetLayout,
+    globalShowFeelsLike,
+    globalShowWindSpeed,
+    globalRefreshInterval,
+  ]);
 
   // Auth observer
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      setAuthLoading(false);
     });
     return () => unsub();
   }, []);
 
-  // Restore local cache & real-time Firestore sync
-  useEffect(() => {
-    (async () => {
-      try {
-        const cached = await AsyncStorage.getItem("@bunkmates_weather_preferences");
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (parsed.tempUnit) setTempUnit(parsed.tempUnit);
-          if (parsed.forecastHorizon) setForecastHorizon(parsed.forecastHorizon);
-          if (parsed.severeAlerts !== undefined) setSevereAlerts(parsed.severeAlerts);
-          if (parsed.rainNotifications !== undefined) setRainNotifications(parsed.rainNotifications);
-          if (parsed.uvAlerts !== undefined) setUvAlerts(parsed.uvAlerts);
-          if (parsed.widgetLayout) setWidgetLayout(parsed.widgetLayout);
-          if (parsed.showFeelsLike !== undefined) setShowFeelsLike(parsed.showFeelsLike);
-          if (parsed.showWindSpeed !== undefined) setShowWindSpeed(parsed.showWindSpeed);
-          if (parsed.refreshInterval) setRefreshInterval(parsed.refreshInterval);
-          if (parsed.highPollutionAlerts !== undefined) setHighPollutionAlerts(parsed.highPollutionAlerts);
-        }
-      } catch (e) {
-        console.log("AsyncStorage read error:", e);
+  // Theme-aware color palette
+  const colors = useMemo(() => {
+    const activeAccent = accentColor || "#FF5A5F";
+    const isWhiteAccent =
+      activeAccent === "#FFFFFF" ||
+      activeAccent === "#ffffff" ||
+      activeAccent?.toLowerCase() === "#ffffff";
+    const greyishWhite = isDark ? "#E2E8F0" : "#4B5563";
+    const activeText = isWhiteAccent
+      ? (isDark ? "#FFFFFF" : "#111827")
+      : activeAccent;
+
+    return {
+      bg: themeColors?.background ?? (isDark ? "#000000" : "#F4F5F7"),
+      card: themeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"),
+      cardBorder: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
+      divider: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.05)",
+      textPrimary: themeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      greyishWhite,
+      accent: activeAccent,
+      onAccent: onAccentTextColor || "#FFFFFF",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
+      chevron: isDark ? "#555860" : "#B4B9C2",
+      segmentBg: isDark ? "#202024" : "#E8EAEE",
+      segmentActiveBg: isDark ? "#2C2C32" : "#FFFFFF",
+      switchActive: activeAccent,
+      switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
+      activeText: activeAccent,
+      insetBg: isDark ? "#1F1F24" : "#F8FAFC",
+      badgeBg: isDark ? "rgba(16, 185, 129, 0.14)" : "rgba(16, 185, 129, 0.1)",
+      badgeText: "#10B981",
+      modalOverlay: "rgba(0, 0, 0, 0.65)",
+      toastBg: isDark ? "#1F2937" : "#111827",
+      toastText: "#F9FAFB",
+    };
+  }, [isDark, accentColor, onAccentTextColor, themeColors]);
+
+  // Synchronize preferences across AppSettingsContext, AsyncStorage, and Firestore
+  const syncPreference = useCallback(
+    (field: string, value: any) => {
+      // 1. Immediately update reactive context across the application
+      updateWeatherPreferences({ [field]: value });
+
+      // 2. Persist locally to AsyncStorage
+      AsyncStorage.getItem("@bunkmates_weather_preferences")
+        .then((current) => {
+          const currentObj = current ? JSON.parse(current) : {};
+          currentObj[field] = value;
+          AsyncStorage.setItem(
+            "@bunkmates_weather_preferences",
+            JSON.stringify(currentObj)
+          ).catch(() => {});
+        })
+        .catch(() => {});
+
+      // 3. Persist to Firestore user profile in background
+      if (user?.uid) {
+        updateDoc(doc(db, "users", user.uid), {
+          [`weatherPreferences.${field}`]: value,
+          updatedAt: new Date(),
+        }).catch((e) => {
+          console.log(`Failed to update weatherPreferences.${field}:`, e);
+        });
       }
-    })();
-
-    if (authLoading || !user) return;
-
-    const userDocRef = doc(db, "users", user.uid);
-    const unsubscribe = onSnapshot(
-      userDocRef,
-      (snap) => {
-        if (snap.exists()) {
-          const uData = snap.data();
-          const p = uData.weatherPreferences || {};
-          if (p.tempUnit) setTempUnit(p.tempUnit);
-          if (p.forecastHorizon) setForecastHorizon(p.forecastHorizon);
-          if (p.severeAlerts !== undefined) setSevereAlerts(p.severeAlerts);
-          if (p.rainNotifications !== undefined) setRainNotifications(p.rainNotifications);
-          if (p.uvAlerts !== undefined) setUvAlerts(p.uvAlerts);
-          if (p.widgetLayout) setWidgetLayout(p.widgetLayout);
-          if (p.showFeelsLike !== undefined) setShowFeelsLike(p.showFeelsLike);
-          if (p.showWindSpeed !== undefined) setShowWindSpeed(p.showWindSpeed);
-          if (p.refreshInterval) setRefreshInterval(p.refreshInterval);
-          if (p.highPollutionAlerts !== undefined) setHighPollutionAlerts(p.highPollutionAlerts);
-        }
-      },
-      (err) => {
-        console.log("Weather preferences onSnapshot error:", err);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [authLoading, user]);
-
-  // Sync preference helper saving to both AsyncStorage and Firestore in background
-  const syncPreference = (field: string, value: any) => {
-    updateWeatherPreferences({ [field]: value });
-    AsyncStorage.getItem("@bunkmates_weather_preferences").then((current) => {
-      const currentObj = current ? JSON.parse(current) : {};
-      currentObj[field] = value;
-      AsyncStorage.setItem(
-        "@bunkmates_weather_preferences",
-        JSON.stringify(currentObj)
-      ).catch(() => {});
-    }).catch(() => {});
-
-    if (!user) return;
-    updateDoc(doc(db, "users", user.uid), {
-      [`weatherPreferences.${field}`]: value,
-      updatedAt: new Date(),
-    }).catch((e) => {
-      console.log(`Failed to update weatherPreferences.${field}:`, e);
-    });
-  };
+    },
+    [user, updateWeatherPreferences]
+  );
 
   const handleSelectTempUnit = (unit: TempUnit) => {
+    triggerHaptic();
     setTempUnit(unit);
     syncPreference("tempUnit", unit);
     setTempModalVisible(false);
-    triggerToast(`Temperature unit: ${unit}`);
+    triggerToast(
+      unit === "°C"
+        ? "Celsius (°C) & km/h active"
+        : "Fahrenheit (°F) & mph active"
+    );
   };
 
   const handleSelectForecastHorizon = (horizon: ForecastHorizon) => {
+    triggerHaptic();
     setForecastHorizon(horizon);
     syncPreference("forecastHorizon", horizon);
-    triggerToast(`Forecast horizon: ${horizon}`);
+    triggerToast(`Forecast horizon set to ${horizon}`);
   };
 
   const handleToggleSevereAlerts = (val: boolean) => {
+    triggerHaptic();
     setSevereAlerts(val);
     syncPreference("severeAlerts", val);
-    triggerToast(val ? "Severe weather alerts enabled" : "Severe weather alerts muted");
+    triggerToast(val ? "Severe weather warnings active" : "Severe weather warnings muted");
   };
 
   const handleToggleRainNotifications = (val: boolean) => {
+    triggerHaptic();
     setRainNotifications(val);
     syncPreference("rainNotifications", val);
-    triggerToast(val ? "15-min rain alerts active" : "Rain alerts disabled");
-  };
-
-  const handleToggleUvAlerts = (val: boolean) => {
-    setUvAlerts(val);
-    syncPreference("uvAlerts", val);
-    triggerToast(val ? "UV index >6 alerts active" : "UV index alerts disabled");
+    triggerToast(val ? "Precipitation alerts enabled" : "Precipitation alerts muted");
   };
 
   const handleToggleHighPollutionAlerts = (val: boolean) => {
+    triggerHaptic();
     setHighPollutionAlerts(val);
     syncPreference("highPollutionAlerts", val);
     triggerToast(val ? "AQI pollution warnings enabled" : "AQI warnings muted");
   };
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: colors.bg }]}
+      edges={["top", "left", "right"]}
+    >
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={colors.bg}
+      />
 
-      {/* ── Top Header: Circular button matching Settings page (modernHeaderBtn) ── */}
+      {/* ── Top Header matching Settings page ── */}
       <View style={styles.header}>
         <Pressable
           onPress={() => router.back()}
@@ -295,7 +314,7 @@ export default function WeatherSettings() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-          {t("Weather & AQI", "Weather")}
+          {t("Weather & Alerts", "Weather & Alerts")}
         </Text>
       </View>
 
@@ -304,26 +323,32 @@ export default function WeatherSettings() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── 1. PREFERENCES ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("WEATHER UNITS", "PREFERENCES")}</Text>
+        {/* ── 1. WEATHER UNITS ── */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("WEATHER UNITS", "WEATHER UNITS")}
+        </Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
-          {/* Temperature Units */}
+          {/* Temperature & Wind Unit Row */}
           <Pressable
             style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             onPress={() => setTempModalVisible(true)}
             accessibilityRole="button"
-            accessibilityLabel="Temperature Units"
+            accessibilityLabel="Temperature and wind units"
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="thermometer-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Temperature Unit", "Temperature Units")}</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("Temperature Unit", "Temperature Unit")}
+              </Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                Select Celsius or Fahrenheit
+                {tempUnit === "°C" ? "Celsius (°C) • Wind in km/h" : "Fahrenheit (°F) • Wind in mph"}
               </Text>
             </View>
-            <Text style={[styles.rowValueText, { color: colors.textSecondary }]}>{t(tempUnit)}</Text>
+            <Text style={[styles.rowValueText, { color: colors.activeText }]}>
+              {tempUnit}
+            </Text>
             <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
           </Pressable>
 
@@ -331,7 +356,9 @@ export default function WeatherSettings() {
 
           {/* Forecast Horizon Length */}
           <View style={styles.segmentBlock}>
-            <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>{t("Forecast Horizon", "Forecast Horizon Length")}</Text>
+            <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>
+              {t("Forecast Horizon", "Forecast Horizon")}
+            </Text>
             <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg }]}>
               {FORECAST_HORIZONS.map((h) => {
                 const isSelected = forecastHorizon === h;
@@ -362,18 +389,27 @@ export default function WeatherSettings() {
               })}
             </View>
           </View>
+        </View>
 
-          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
-
+        {/* ── 2. ACTIVE WEATHER & ENVIRONMENTAL ALERTS ── */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("WEATHER & ENVIRONMENTAL ALERTS", "WEATHER & ENVIRONMENTAL ALERTS")}
+        </Text>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Severe Weather Alerts */}
           <View style={styles.row}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="thunderstorm-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Severe Weather Alerts")}</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("Severe Weather Advisories", "Severe Weather Advisories")}
+              </Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                {t("Receive push alerts for rain, storms & extreme weather", "Get notified of storms and critical updates")}
+                {t(
+                  "Alerts & banners for storms, squalls, tornado warnings & severe wind",
+                  "Alerts & banners for storms, squalls, tornado warnings & severe wind"
+                )}
               </Text>
             </View>
             <Switch
@@ -381,7 +417,7 @@ export default function WeatherSettings() {
               onValueChange={handleToggleSevereAlerts}
               trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
               thumbColor="#FFFFFF"
-              accessibilityLabel="Toggle Severe Weather Alerts"
+              accessibilityLabel="Toggle Severe Weather Advisories"
             />
           </View>
 
@@ -393,9 +429,14 @@ export default function WeatherSettings() {
               <Ionicons name="rainy-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Rain Notifications")}</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("Precipitation & Rain Alerts", "Precipitation & Rain Alerts")}
+              </Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                {t("Receive alerts 15m before rain starts", "Receive alerts 15m before rain starts")}
+                {t(
+                  "15-minute advance notice before active rainfall begins",
+                  "15-minute advance notice before active rainfall begins"
+                )}
               </Text>
             </View>
             <Switch
@@ -403,86 +444,9 @@ export default function WeatherSettings() {
               onValueChange={handleToggleRainNotifications}
               trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
               thumbColor="#FFFFFF"
-              accessibilityLabel="Toggle Rain Notifications"
+              accessibilityLabel="Toggle Precipitation Alerts"
             />
           </View>
-
-          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
-
-          {/* UV Index Alerts */}
-          <View style={styles.row}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
-              <Ionicons name="sunny-outline" size={20} color={colors.greyishWhite} />
-            </View>
-            <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("UV Index Alerts")}</Text>
-              <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                {t("Warnings when UV index exceeds 6", "Warnings when UV index exceeds 6")}
-              </Text>
-            </View>
-            <Switch
-              value={uvAlerts}
-              onValueChange={handleToggleUvAlerts}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
-              accessibilityLabel="Toggle UV Index Alerts"
-            />
-          </View>
-        </View>
-
-        {/* ── 2. DISPLAY WIDGET ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DISPLAY WIDGET")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card }]}>
-          <Pressable
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-            onPress={() => setWidgetModalVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel={t("Widget Preferences")}
-          >
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
-              <Ionicons name="apps-outline" size={20} color={colors.greyishWhite} />
-            </View>
-            <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Widget Preferences")}</Text>
-              <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                {t("Customize the home screen weather tile", "Customize the home screen weather tile")}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
-          </Pressable>
-        </View>
-
-        {/* ── 3. AIR QUALITY & AQI (ALREADY AVAILABLE IN THE APP) ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("AIR QUALITY & POLLUTION")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card }]}>
-          {/* Link to existing AQI Detail Screen */}
-          <Pressable
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-            onPress={() => router.push("/(tabs)/aqi" as any)}
-            accessibilityRole="button"
-            accessibilityLabel={t("Air Quality Index")}
-          >
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
-              <Ionicons name="speedometer-outline" size={20} color={colors.greyishWhite} />
-            </View>
-            <View style={styles.rowMid}>
-              <View style={styles.badgeRow}>
-                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Air Quality Index (AQI)")}</Text>
-                <View
-                  style={[
-                    styles.aqiBadge,
-                    { backgroundColor: colors.badgeBg },
-                  ]}
-                >
-                  <Text style={[styles.aqiBadgeText, { color: colors.badgeText }]}>{t("AQI 70 • Moderate")}</Text>
-                </View>
-              </View>
-              <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                {t("Live station monitoring, PM2.5, PM10 & Ozone", "Live station monitoring, PM2.5, PM10 & Ozone")}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
-          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
@@ -492,9 +456,14 @@ export default function WeatherSettings() {
               <Ionicons name="alert-circle-outline" size={20} color={colors.greyishWhite} />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("High Pollution Warnings")}</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("High Pollution Warnings", "High Pollution Warnings")}
+              </Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                {t("Notify when AQI exceeds Moderate threshold (>100)", "Notify when AQI exceeds Moderate threshold (>100)")}
+                {t(
+                  "Health notifications when AQI exceeds Moderate threshold (>100)",
+                  "Health notifications when AQI exceeds Moderate threshold (>100)"
+                )}
               </Text>
             </View>
             <Switch
@@ -506,9 +475,118 @@ export default function WeatherSettings() {
             />
           </View>
         </View>
+
+        {/* ── 3. HOME WEATHER WIDGET & AUTO-REFRESH ── */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("HOME WEATHER WIDGET", "HOME WEATHER WIDGET")}
+        </Text>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
+          {/* Widget Layout & Data Chips Configuration */}
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => setWidgetModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Widget Preferences"
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="apps-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("Widget Preferences", "Widget Preferences")}
+              </Text>
+              <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
+                {`${widgetLayout} • ${showFeelsLike ? "Feels Like" : ""} ${
+                  showWindSpeed ? "• Wind" : ""
+                }`}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
+          </Pressable>
+
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+
+          {/* Auto Refresh Interval */}
+          <View style={styles.segmentBlock}>
+            <Text style={[styles.blockLabel, { color: colors.textPrimary }]}>
+              {t("Auto-Refresh Interval", "Auto-Refresh Interval")}
+            </Text>
+            <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg }]}>
+              {REFRESH_INTERVALS.map((intv) => {
+                const isSelected = refreshInterval === intv;
+                return (
+                  <Pressable
+                    key={intv}
+                    style={[
+                      styles.segmentItem,
+                      isSelected && [
+                        styles.segmentItemActive,
+                        { backgroundColor: colors.segmentActiveBg },
+                      ],
+                    ]}
+                    onPress={() => {
+                      triggerHaptic();
+                      setRefreshInterval(intv);
+                      syncPreference("refreshInterval", intv);
+                      triggerToast(`Weather refresh: ${intv}`);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.segmentText,
+                        isSelected
+                          ? [styles.segmentTextActive, { color: colors.activeText }]
+                          : { color: colors.textSecondary },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {intv.replace("Every ", "")}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+
+        {/* ── 4. AIR QUALITY & MONITORING ── */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("AIR QUALITY & STATIONS", "AIR QUALITY & STATIONS")}
+        </Text>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => router.push("/(tabs)/aqi" as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Live Air Quality Station"
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="speedometer-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowMid}>
+              <View style={styles.badgeRow}>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                  {t("Air Quality Index (AQI)", "Air Quality Index (AQI)")}
+                </Text>
+                <View style={[styles.aqiBadge, { backgroundColor: colors.badgeBg }]}>
+                  <Text style={[styles.aqiBadgeText, { color: colors.badgeText }]}>
+                    {t("Active Monitoring", "Active Monitoring")}
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
+                {t(
+                  "EPA standard PM2.5, PM10, Ozone & live regional monitoring",
+                  "EPA standard PM2.5, PM10, Ozone & live regional monitoring"
+                )}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
+          </Pressable>
+        </View>
       </ScrollView>
 
-      {/* ── Floating Real-time Save Toast Indicator ── */}
+      {/* ── Floating Confirmation Toast ── */}
       {toastMessage && (
         <Animated.View
           style={[
@@ -518,7 +596,9 @@ export default function WeatherSettings() {
           pointerEvents="none"
         >
           <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-          <Text style={[styles.toastText, { color: colors.toastText }]}>{toastMessage}</Text>
+          <Text style={[styles.toastText, { color: colors.toastText }]}>
+            {toastMessage}
+          </Text>
         </Animated.View>
       )}
 
@@ -531,13 +611,34 @@ export default function WeatherSettings() {
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
-              <Ionicons name="thermometer-outline" size={22} color={colors.greyishWhite} />
+            <View
+              style={[
+                styles.iconBox,
+                {
+                  backgroundColor: colors.iconBoxBg,
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  marginBottom: 10,
+                  marginRight: 0,
+                },
+              ]}
+            >
+              <Ionicons
+                name="thermometer-outline"
+                size={22}
+                color={colors.greyishWhite}
+              />
             </View>
 
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Temperature Units")}</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+              {t("Temperature Units", "Temperature Units")}
+            </Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              {t("Choose whether temperature values across the app are displayed in Fahrenheit or Celsius.", "Choose whether temperature values across the app are displayed in Fahrenheit or Celsius.")}
+              {t(
+                "Choose the unit standard used for temperatures and wind speed across the entire app.",
+                "Choose the unit standard used for temperatures and wind speed across the entire app."
+              )}
             </Text>
 
             <View style={styles.modalListColumn}>
@@ -549,30 +650,71 @@ export default function WeatherSettings() {
                     style={({ pressed }) => [
                       styles.modalOptionItem,
                       {
-                        backgroundColor: isSelected ? (isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.06)") : colors.insetBg,
+                        backgroundColor: isSelected
+                          ? isDark
+                            ? "rgba(255, 255, 255, 0.12)"
+                            : "rgba(0, 0, 0, 0.06)"
+                          : colors.insetBg,
                       },
                       pressed && styles.pressed,
                     ]}
                     onPress={() => handleSelectTempUnit(opt.id)}
                   >
                     <View style={{ flex: 1, paddingRight: 10 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Text
+                          style={[
+                            styles.modalOptionText,
+                            {
+                              color: isSelected
+                                ? colors.activeText
+                                : colors.textPrimary,
+                              fontWeight: isSelected ? "700" : "600",
+                            },
+                          ]}
+                        >
+                          {t(opt.label)}
+                        </Text>
+                        <View
+                          style={{
+                            paddingHorizontal: 6,
+                            paddingVertical: 2,
+                            borderRadius: 6,
+                            backgroundColor: colors.iconBoxBg,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: "600",
+                              color: colors.textSecondary,
+                            }}
+                          >
+                            {opt.badge}
+                          </Text>
+                        </View>
+                      </View>
                       <Text
                         style={[
-                          styles.modalOptionText,
-                          {
-                            color: isSelected ? colors.activeText : colors.textPrimary,
-                            fontWeight: isSelected ? "700" : "600",
-                          },
+                          styles.modalOptionSub,
+                          { color: colors.textSecondary },
                         ]}
                       >
-                        {t(opt.label)}
-                      </Text>
-                      <Text style={[styles.modalOptionSub, { color: colors.textSecondary }]}>
                         {t(opt.desc)}
                       </Text>
                     </View>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
+                    {isSelected ? (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={22}
+                        color={colors.activeText}
+                      />
+                    ) : (
+                      <Ionicons
+                        name="ellipse-outline"
+                        size={22}
+                        color={colors.chevron}
+                      />
                     )}
                   </Pressable>
                 );
@@ -587,7 +729,9 @@ export default function WeatherSettings() {
               ]}
               onPress={() => setTempModalVisible(false)}
             >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
+              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>
+                {t("Close", "Close")}
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -602,20 +746,44 @@ export default function WeatherSettings() {
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
+            <View
+              style={[
+                styles.iconBox,
+                {
+                  backgroundColor: colors.iconBoxBg,
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  marginBottom: 10,
+                  marginRight: 0,
+                },
+              ]}
+            >
               <Ionicons name="apps-outline" size={22} color={colors.greyishWhite} />
             </View>
 
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Home Widget Preferences")}</Text>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+              {t("Home Widget Preferences", "Home Widget Preferences")}
+            </Text>
             <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              {t("Adjust layout and data points shown on the home screen weather tile.", "Adjust layout and data points shown on the home screen weather tile.")}
+              {t(
+                "Customize the home screen weather card appearance and data chips.",
+                "Customize the home screen weather card appearance and data chips."
+              )}
             </Text>
 
             {/* Layout switch */}
             <View style={styles.widgetControlGroup}>
-              <Text style={[styles.widgetGroupLabel, { color: colors.textPrimary }]}>{t("Card Layout")}</Text>
-              <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg, marginBottom: 14 }]}>
-                {(["Compact Tile", "Detailed Card"] as WidgetLayout[]).map((layout) => {
+              <Text style={[styles.widgetGroupLabel, { color: colors.textPrimary }]}>
+                {t("Card Layout", "Card Layout")}
+              </Text>
+              <View
+                style={[
+                  styles.segmentContainer,
+                  { backgroundColor: colors.segmentBg, marginBottom: 14 },
+                ]}
+              >
+                {(["Detailed Card", "Compact Tile"] as WidgetLayout[]).map((layout) => {
                   const isSelected = widgetLayout === layout;
                   return (
                     <Pressable
@@ -628,6 +796,7 @@ export default function WeatherSettings() {
                         ],
                       ]}
                       onPress={() => {
+                        triggerHaptic();
                         setWidgetLayout(layout);
                         syncPreference("widgetLayout", layout);
                       }}
@@ -647,14 +816,20 @@ export default function WeatherSettings() {
                 })}
               </View>
 
-              {/* Toggles */}
+              {/* Data Chip Toggles */}
               <View style={styles.widgetToggleRow}>
-                <Text style={[styles.widgetToggleLabel, { color: colors.textPrimary }]}>
-                  {t("Show Feels-Like Temp & Humidity")}
-                </Text>
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={[styles.widgetToggleLabel, { color: colors.textPrimary }]}>
+                    {t("Feels-Like Temperature", "Feels-Like Temperature")}
+                  </Text>
+                  <Text style={{ fontSize: 11.5, color: colors.textSecondary, marginTop: 1 }}>
+                    Show apparent temperature metric chip
+                  </Text>
+                </View>
                 <Switch
                   value={showFeelsLike}
                   onValueChange={(v) => {
+                    triggerHaptic();
                     setShowFeelsLike(v);
                     syncPreference("showFeelsLike", v);
                   }}
@@ -664,12 +839,18 @@ export default function WeatherSettings() {
               </View>
 
               <View style={styles.widgetToggleRow}>
-                <Text style={[styles.widgetToggleLabel, { color: colors.textPrimary }]}>
-                  {t("Show Wind Speed & Direction")}
-                </Text>
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={[styles.widgetToggleLabel, { color: colors.textPrimary }]}>
+                    {t("Live Wind Speed", "Live Wind Speed")}
+                  </Text>
+                  <Text style={{ fontSize: 11.5, color: colors.textSecondary, marginTop: 1 }}>
+                    Show wind speed in {tempUnit === "°C" ? "km/h" : "mph"}
+                  </Text>
+                </View>
                 <Switch
                   value={showWindSpeed}
                   onValueChange={(v) => {
+                    triggerHaptic();
                     setShowWindSpeed(v);
                     syncPreference("showWindSpeed", v);
                   }}
@@ -687,7 +868,9 @@ export default function WeatherSettings() {
               ]}
               onPress={() => setWidgetModalVisible(false)}
             >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Done")}</Text>
+              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>
+                {t("Done", "Done")}
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -723,7 +906,6 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -748,7 +930,6 @@ const styles = StyleSheet.create({
   card: {
     marginHorizontal: 20,
     borderRadius: 28,
-    borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
@@ -826,11 +1007,12 @@ const styles = StyleSheet.create({
   },
   rowValueText: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
     marginRight: 6,
   },
   divider: {
-    height: 0,
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 68,
   },
 
   // AQI Badge
@@ -843,7 +1025,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
-    borderWidth: 0,
   },
   aqiBadgeText: {
     fontSize: 11,
@@ -885,7 +1066,6 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 390,
     borderRadius: 28,
-    borderWidth: 0,
     padding: 22,
     alignItems: "center",
     shadowColor: "#000",
@@ -917,7 +1097,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 20,
-    borderWidth: 0,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -944,18 +1123,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: 10,
-    borderTopWidth: 0,
   },
   widgetToggleLabel: {
     fontSize: 13,
-    flex: 1,
-    paddingRight: 10,
+    fontWeight: "600",
   },
   modalCloseBtn: {
     width: "100%",
     height: 48,
     borderRadius: 24,
-    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },

@@ -151,7 +151,8 @@
           "recordAudioAndroid": true
         }
       ],
-      "./scripts/withIncomingCall.js"
+      "./scripts/withIncomingCall.js",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true

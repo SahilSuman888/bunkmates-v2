@@ -127,13 +127,13 @@ export default function CurrencyExpenses() {
 
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
-  let userAccent = "default";
+  let dynamicAccent = "#FF5A5F";
   let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
-      if (themeContext.accent) userAccent = themeContext.accent;
+      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
       dynamicThemeColors = themeContext.themeColors;
     }
   } catch (e) {
@@ -146,20 +146,17 @@ export default function CurrencyExpenses() {
 
   // Dynamic solid colors
   const colors = useMemo(() => {
-    const hasCustomNonRedAccent =
-      userAccent &&
-      userAccent !== "default" &&
-      userAccent !== "coral" &&
-      userAccent !== "red" &&
-      (ACCENT_COLORS as any)[userAccent];
-
-    const customAccent = hasCustomNonRedAccent
-      ? (ACCENT_COLORS as any)[userAccent]
-      : null;
-
+    const isWhiteAccent =
+      dynamicAccent === "white" ||
+      dynamicAccent === "navWhite" ||
+      dynamicAccent === "#FFFFFF" ||
+      dynamicAccent === "#ffffff" ||
+      dynamicAccent?.toLowerCase() === "#ffffff";
     const greyishWhite = isDark ? "#E2E8F0" : "#4B5563";
-    const activeText = customAccent || (isDark ? "#FFFFFF" : "#11141A");
-    const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
+    const activeText = isWhiteAccent
+      ? (isDark ? "#FFFFFF" : "#111827")
+      : dynamicAccent;
+    const activeBorder = dynamicAccent;
 
     return {
       bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
@@ -170,9 +167,10 @@ export default function CurrencyExpenses() {
       textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       greyishWhite: greyishWhite,
+      accent: dynamicAccent,
       iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
-      switchActive: isDark ? "#34C759" : "#10B981",
+      switchActive: dynamicAccent,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
       insetBg: isDark ? "#202024" : "#F8FAFC",
       insetBorder: "transparent",
@@ -185,7 +183,7 @@ export default function CurrencyExpenses() {
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
     };
-  }, [isDark, userAccent, dynamicThemeColors]);
+  }, [isDark, dynamicAccent, dynamicThemeColors]);
 
   // Auth observer
   useEffect(() => {

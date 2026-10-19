@@ -30,6 +30,7 @@ export default function BottomNav() {
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const { user, userData } = useUser();
+  const { isDark, accentColor, accent } = useThemeToggle();
   const [profile, setProfile] = useState<any>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -101,10 +102,14 @@ export default function BottomNav() {
       }).start();
     }, [active]);
 
+    const { largeTouchTargets, hapticFeedback } = useAppSettings();
+
     const handlePress = () => {
-      try {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      } catch (e) {}
+      if (hapticFeedback) {
+        try {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        } catch (e) {}
+      }
 
       // Press down animation
       Animated.sequence([
@@ -125,23 +130,45 @@ export default function BottomNav() {
       router.push(path as any);
     };
 
+    const activePillColor =
+      accent === "white" || !accent || accent === "default"
+        ? (isDark ? "#e5e7eb" : "#111827")
+        : accentColor;
+    const isBrightPill =
+      activePillColor === "#e5e7eb" ||
+      activePillColor === "#ffffff" ||
+      activePillColor === "#FFFFFF" ||
+      activePillColor === "#fbc02d";
+    const activeIconColor = isBrightPill ? "#000000" : "#FFFFFF";
+
+    const routeLabel = route.replace("/(tabs)", "").replace("/", "");
+    const accessibleLabel = routeLabel.charAt(0).toUpperCase() + routeLabel.slice(1);
+
     return (
       <Pressable
         onPress={handlePress}
         style={styles.navItemTouchTarget}
-        hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+        hitSlop={largeTouchTargets ? { top: 14, bottom: 14, left: 10, right: 10 } : { top: 8, bottom: 8, left: 6, right: 6 }}
+        accessible={true}
+        accessibilityRole="tab"
+        accessibilityState={{ selected: active }}
+        accessibilityLabel={`${accessibleLabel} tab`}
+        accessibilityHint={`Navigate to ${accessibleLabel}`}
       >
         <Animated.View
           style={[
             styles.navItemPill,
-            active && styles.activeItemPill,
+            active && [
+              styles.activeItemPill,
+              { backgroundColor: activePillColor },
+            ],
             { transform: [{ scale: scaleAnim }] },
           ]}
         >
           <Ionicons
             name={active ? (icon as any) : ((icon + "-outline") as any)}
             size={22}
-            color={active ? "#000000" : "rgba(255, 255, 255, 0.65)"}
+            color={active ? activeIconColor : "rgba(255, 255, 255, 0.65)"}
           />
         </Animated.View>
       </Pressable>
@@ -163,9 +190,9 @@ export default function BottomNav() {
   )[0]?.toUpperCase();
 
   const userPhoto =
+    userData?.photoURL ||
     profile?.photoURL ||
     user?.photoURL ||
-    userData?.photoURL ||
     null;
 
   return (
@@ -198,7 +225,11 @@ export default function BottomNav() {
             } catch (e) {}
             router.push("/settings" as any);
           }}
-          hitSlop={8}
+          hitSlop={10}
+          accessible={true}
+          accessibilityRole="button"
+          accessibilityLabel="Settings and Profile"
+          accessibilityHint="Double tap to open settings and profile"
         >
           <BlurView intensity={70} tint="dark" style={styles.avatarPillContainer}>
             {profileLoading ? (

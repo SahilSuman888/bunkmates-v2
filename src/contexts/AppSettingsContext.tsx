@@ -74,7 +74,7 @@ export interface WeatherPreferences {
   forecastHorizon: string;
   severeAlerts: boolean;
   rainNotifications: boolean;
-  uvAlerts: boolean;
+  uvAlerts?: boolean;
   widgetLayout: string;
   showFeelsLike: boolean;
   showWindSpeed: boolean;
@@ -110,6 +110,9 @@ export interface PrivacyPreferences {
 }
 
 export interface TripPreferences {
+  mode?: "auto" | "manual";
+  defaultVisibility?: "public" | "private";
+  aiSuggestions?: boolean;
   travelStyle: "Budget" | "Mid-Range" | "Luxury";
   accommodations: string[];
   tripDuration: string;
@@ -457,6 +460,9 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
 
   // Trip Preferences
   const [tripPreferences, setTripPreferences] = useState<TripPreferences>({
+    mode: "auto",
+    defaultVisibility: "public",
+    aiSuggestions: true,
     travelStyle: "Budget",
     accommodations: ["Hostel", "Airbnb", "Boutique Hotel"],
     tripDuration: "4 - 7 Days",

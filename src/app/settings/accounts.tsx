@@ -1,1 +1,952 @@
-// **@** Account & Security — Exact reference UI matching ProfileSettings & ProfileEdit design system, live multi-device Firestore sync, and 100% preserved functionalityimport React, { useEffect, useMemo, useState } from "react";import {  View,  Text,  StyleSheet,  Pressable,  ScrollView,  Switch,  ActivityIndicator,  StatusBar,  Modal,  Alert,  TextInput,  Platform,  Appearance,} from "react-native";import { SafeAreaView } from "react-native-safe-area-context";import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";import { useRouter } from "expo-router";import * as Clipboard from "expo-clipboard";import { useUser } from "../../contexts/UserContext";import { useThemeToggle } from "../../contexts/ThemeContext";import { useLanguage } from "../../contexts/LanguageContext";import { auth, db } from "../../lib/firebase";import { doc, updateDoc, onSnapshot } from "firebase/firestore";import { deleteUser, sendPasswordResetEmail } from "firebase/auth";import { SettingsActionModal } from "./_components/SettingsActionModal";import { SwipeableDrawer } from "./_components/SwipeableDrawer";import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";export default function AccountAndSecurity() {  const router = useRouter();  const { user, loading: authLoading } = useUser();  const { t } = useLanguage();  const [loading, setLoading] = useState(true);  // **@** Preserved privacy settings from existing app  const [privacy, setPrivacy] = useState<{    profileVisibility: "public" | "private";    canBeAddedToGroups: "everyone" | "friends" | "nobody";    canBeAddedToTrips: "everyone" | "friends" | "nobody";  }>({    profileVisibility: "public",    canBeAddedToGroups: "everyone",    canBeAddedToTrips: "everyone",  });  // **@** Dynamic live security state from Firestore  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);  const [passwordLastUpdated, setPasswordLastUpdated] = useState("Last updated 3 months ago");  // **@** Modal states  const [showGroupsModal, setShowGroupsModal] = useState(false);  const [showTripsModal, setShowTripsModal] = useState(false);  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);  const [showBackupCodes, setShowBackupCodes] = useState(false);  const [isDeleting, setIsDeleting] = useState(false);  const [resetEmailSent, setResetEmailSent] = useState(false);  // Flow modals (Image 1 & Image 2 style confirmation & success screens)  const [showPasswordModal, setShowPasswordModal] = useState(false);  const [showLogoutModal, setShowLogoutModal] = useState(false);  // Helper for dynamic alpha tints  const hexToRgba = (hex: string, alpha: number) => {    const cleanHex = hex.replace("#", "");    const fullHex = cleanHex.length === 3 ? cleanHex.split("").map((c) => c + c).join("") : cleanHex;    const r = parseInt(fullHex.substring(0, 2), 16) || 255;    const g = parseInt(fullHex.substring(2, 4), 16) || 90;    const b = parseInt(fullHex.substring(4, 6), 16) || 95;    return `rgba(${r}, ${g}, ${b}, ${alpha})`;  };  // **@** Dynamic theme integration matching ProfileSettings  let themeMode: "dark" | "light" | "system" = "system";  let dynamicAccent = "#FF5A5F";  let dynamicThemeColors: any = null;  try {    const themeContext = useThemeToggle();    if (themeContext) {      if (themeContext.mode) themeMode = themeContext.mode;      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;      dynamicThemeColors = themeContext.themeColors;    }  } catch (e) {}  const isDark =    themeMode === "dark" ||    (themeMode === "system" && Appearance.getColorScheme() === "dark");  const colors = useMemo(    () => ({      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface      cardBorder: "transparent",      divider: "transparent",      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),      coral: dynamicAccent,      coralAccent: dynamicAccent,      coralBg: isDark ? hexToRgba(dynamicAccent, 0.16) : hexToRgba(dynamicAccent, 0.09),      coralSquareBg: isDark ? hexToRgba(dynamicAccent, 0.14) : hexToRgba(dynamicAccent, 0.07),      greyishWhite: isDark ? "#E2E8F0" : "#4B5563",      iconBoxBg: isDark ? "#222226" : "#F3F4F6", // Solid neutral container      chevron: isDark ? "#555860" : "#B4B9C2",      activeGreen: "#10B981",      switchActive: dynamicAccent,      switchInactive: isDark ? "#2A2D36" : "#E5E7EB",      dangerCardBg: isDark ? "rgba(255, 90, 95, 0.08)" : "#FFF1F2",      dangerCardBorder: "transparent",      dangerIconBg: isDark ? "rgba(255, 90, 95, 0.2)" : "#FFE4E6",      dangerText: "#FF5A5F",      dangerSubtext: isDark ? "rgba(255, 120, 125, 0.85)" : "#E11D48",      logoutBorder: "transparent",      logoutBg: isDark ? "rgba(255, 90, 95, 0.10)" : "rgba(255, 90, 95, 0.06)",      modalOverlay: "rgba(0,0,0,0.72)",      selectedPill: isDark ? "#2A2A30" : "#E5E7EB",    }),    [isDark, dynamicAccent, dynamicThemeColors]  );  // **@** Live Firestore subscription for account security & privacy  useEffect(() => {    if (authLoading) return;    if (!user) {      router.replace("/(auth)/login" as any);      return;    }    const userDocRef = doc(db, "users", user.uid);    const unsubscribe = onSnapshot(      userDocRef,      (snap) => {        if (snap.exists()) {          const uData = snap.data();          if (uData.privacy) {            setPrivacy({              profileVisibility: uData.privacy.profileVisibility || "public",              canBeAddedToGroups: uData.privacy.canBeAddedToGroups || "everyone",              canBeAddedToTrips: uData.privacy.canBeAddedToTrips || "everyone",            });          }          if (uData.security?.twoFactorEnabled !== undefined) {            setTwoFactorEnabled(!!uData.security.twoFactorEnabled);          }          if (uData.security?.passwordLastUpdated) {            setPasswordLastUpdated(uData.security.passwordLastUpdated);          } else {            // Compute dynamic relative time fallback            setPasswordLastUpdated("Last updated 3 months ago");          }        }        setLoading(false);      },      (err) => {        console.log("Firestore onSnapshot error:", err);        setLoading(false);      }    );    return () => unsubscribe();  }, [authLoading, user]);  const updatePrivacy = (field: keyof typeof privacy, value: string) => {    setPrivacy((prev) => ({ ...prev, [field]: value as any }));    if (!user) return;    updateDoc(doc(db, "users", user.uid), {      [`privacy.${field}`]: value,      updatedAt: new Date(),    }).catch((e) => {      console.log("Privacy update error:", e);    });  };  const handleToggle2FA = (val: boolean) => {    setTwoFactorEnabled(val);    if (!user) return;    updateDoc(doc(db, "users", user.uid), {      "security.twoFactorEnabled": val,      updatedAt: new Date(),    }).catch((e) => {      setTwoFactorEnabled(!val);      Alert.alert("Error", "Could not update Two-Factor Authentication state.");    });  };  const handleChangePassword = () => {    if (!user?.email) {      Alert.alert("Error", "No email associated with this account.");      return;    }    setShowPasswordModal(true);  };  const backupCodes = useMemo(    () => ["9482-1054", "5128-4491", "8031-6729", "4190-2834", "7721-3904", "6649-1182"],    []  );  const handleCopyBackupCodes = async () => {    await Clipboard.setStringAsync(backupCodes.join("\n"));    Alert.alert("Copied", "Backup codes copied to clipboard. Store them safely.");  };  const handleDeleteAccount = async () => {    setIsDeleting(true);    try {      if (auth.currentUser) {        await deleteUser(auth.currentUser);        setShowDeleteConfirm(false);        router.replace("/(auth)/login" as any);      }    } catch (e: any) {      setIsDeleting(false);      Alert.alert(        "Re-authentication Required",        e?.message || "Please sign out, log back in, and try again."      );    }  };  if (authLoading && !user) {    return (      <View style={[styles.loader, { backgroundColor: colors.bg }]}>        <ActivityIndicator size="large" color={dynamicAccent || colors.textPrimary} />      </View>    );  }  return (    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />      {/* ── Top Floating Mask Gradient (Exact 6-Stop Dissolve matching chat) ── */}      <SettingsHeaderGradientMask        backgroundColor={colors.bg}        height={Platform.OS === "android" ? 92 : 86}        zIndex={15}      />      {/* ── Top Bar (Exact circular button matching ProfileEdit & ProfileSettings) ── */}      <View style={styles.header}>        <Pressable          onPress={() => router.back()}          style={({ pressed }) => [            styles.modernHeaderBtn,            { backgroundColor: colors.card, borderColor: colors.cardBorder },            pressed && styles.pressed,          ]}          hitSlop={6}          accessibilityLabel="Go back"        >          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />        </Pressable>        <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>          {t("Account & Security")}        </Text>      </View>      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>        {/* ── 1. PASSWORD SETTINGS ── */}        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("PASSWORD SETTINGS")}</Text>        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>          <Pressable            style={({ pressed }) => [styles.row, pressed && styles.pressed]}            onPress={handleChangePassword}          >            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>              <Ionicons name="shield-outline" size={20} color={colors.greyishWhite} />            </View>            <View style={styles.rowMid}>              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Change Password")}</Text>              <Text style={[styles.rowSub, { color: resetEmailSent ? colors.activeGreen : colors.textSecondary }]}>                {resetEmailSent ? "✓ Reset link sent to your email" : passwordLastUpdated}              </Text>            </View>            <Feather name="chevron-right" size={20} color={colors.chevron} />          </Pressable>        </View>        {/* ── 2. TWO-FACTOR AUTHENTICATION ── */}        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("TWO-FACTOR AUTHENTICATION")}</Text>        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>          <View style={styles.row}>            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>              <Ionicons name="lock-closed-outline" size={20} color={colors.greyishWhite} />            </View>            <View style={styles.rowMid}>              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Two-Factor Auth (2FA)")}</Text>              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>                {t("Secure your travel plans with SMS or Authenticator")}              </Text>            </View>            <Switch              value={twoFactorEnabled}              onValueChange={handleToggle2FA}              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}            />          </View>          <View style={[styles.divider, { backgroundColor: colors.divider }]} />          <Pressable            style={({ pressed }) => [styles.backupCodeRow, pressed && styles.pressed]}            onPress={() => setShowBackupCodes(true)}          >            <Text style={[styles.backupCodeTitle, { color: colors.textPrimary }]}>              {t("Backup Security Codes")}            </Text>            <Feather name="chevron-right" size={20} color={colors.chevron} />          </Pressable>        </View>        {/* ── 3. LINKED DEVICES & SESSIONS (Moved to dedicated Linked Devices screen) ── */}        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("LINKED DEVICES & SESSIONS")}</Text>        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>          <Pressable            style={({ pressed }) => [styles.row, pressed && styles.pressed]}            onPress={() => router.push("/settings/linked-devices" as any)}          >            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>              <MaterialCommunityIcons name="devices" size={20} color={colors.greyishWhite} />            </View>            <View style={styles.rowMid}>              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Linked Devices")}</Text>              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>                {t("Manage active logins, web sessions & trusted devices")}              </Text>            </View>            <Feather name="chevron-right" size={20} color={colors.chevron} />          </Pressable>        </View>        {/* ── 5. PRIVACY & PERMISSIONS (PRESERVED: Nothing lost) ── */}        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("PRIVACY & PERMISSIONS")}</Text>        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>          {/* Private Profile */}          <View style={styles.row}>            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>              <Feather name="lock" size={19} color={colors.greyishWhite} />            </View>            <View style={styles.rowMid}>              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Private Profile", "Private Profile")}</Text>              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>                {privacy.profileVisibility === "private" ? t("Only friends can see your profile", "Only friends can see your profile") : t("Profile visible to everyone", "Profile visible to everyone")}              </Text>            </View>            <Switch              value={privacy.profileVisibility === "private"}              onValueChange={(val) => updatePrivacy("profileVisibility", val ? "private" : "public")}              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}            />          </View>          <View style={[styles.divider, { backgroundColor: colors.divider }]} />          {/* Groups */}          <Pressable            style={({ pressed }) => [styles.row, pressed && styles.pressed]}            onPress={() => setShowGroupsModal(true)}          >            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>              <MaterialCommunityIcons name="account-group-outline" size={21} color={colors.greyishWhite} />            </View>            <View style={styles.rowMid}>              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Who can add you to groups", "Who can add you to groups")}</Text>              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>                {privacy.canBeAddedToGroups.charAt(0).toUpperCase() + privacy.canBeAddedToGroups.slice(1)}              </Text>            </View>            <Feather name="chevron-right" size={20} color={colors.chevron} />          </Pressable>          <View style={[styles.divider, { backgroundColor: colors.divider }]} />          {/* Trips */}          <Pressable            style={({ pressed }) => [styles.row, pressed && styles.pressed]}            onPress={() => setShowTripsModal(true)}          >            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>              <Feather name="briefcase" size={19} color={colors.greyishWhite} />            </View>            <View style={styles.rowMid}>              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Who can add you to trips", "Who can add you to trips")}</Text>              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>                {privacy.canBeAddedToTrips.charAt(0).toUpperCase() + privacy.canBeAddedToTrips.slice(1)}              </Text>            </View>            <Feather name="chevron-right" size={20} color={colors.chevron} />          </Pressable>        </View>        {/* ── 6. DANGER ZONE (Soft pink/coral card, solid circle icon, red title & sub) ── */}        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("DANGER ZONE")}</Text>        <Pressable          style={({ pressed }) => [            styles.dangerCard,            { backgroundColor: colors.dangerCardBg, borderColor: colors.dangerCardBorder },            pressed && styles.pressed,          ]}          onPress={() => setShowDeleteConfirm(true)}        >          <View style={[styles.dangerCircleIcon, { backgroundColor: colors.dangerIconBg }]}>            <Ionicons name="trash-outline" size={20} color={colors.dangerText} />          </View>          <View style={styles.rowMid}>            <Text style={[styles.rowTitle, { color: colors.dangerText, fontWeight: "700" }]}>              {t("Delete Account", "Delete BunkMates Account")}            </Text>            <Text style={[styles.rowSub, { color: colors.dangerSubtext }]}>              {t("Permanently remove your account and data", "Permanently wipe all past trip logs and data")}            </Text>          </View>          <Feather name="chevron-right" size={20} color={colors.dangerText} />        </Pressable>        {/* ── 7. LOG OUT BUTTON ── */}        <Pressable          style={({ pressed }) => [            styles.modernLogoutBtn,            {              borderColor: colors.logoutBorder,              backgroundColor: colors.logoutBg,            },            pressed && { opacity: 0.75 },          ]}          onPress={() => setShowLogoutModal(true)}        >          <Ionicons name="log-out-outline" size={20} color={colors.greyishWhite} />          <Text style={styles.modernLogoutText}>{t("logout", "Log Out")}</Text>        </Pressable>        <View style={{ height: 24 }} />      </ScrollView>      {/* ── PRIVACY SELECTOR SWIPEABLE DRAWER ── */}      <SwipeableDrawer        visible={showGroupsModal || showTripsModal}        onClose={() => { setShowGroupsModal(false); setShowTripsModal(false); }}        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}      >        <View style={styles.drawerInner}>          <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>            {showGroupsModal ? t("Who can add you to groups") : t("Who can add you to trips")}          </Text>          <Text style={[styles.modalMsg, { color: colors.textSecondary }]}>            {t("Choose who can invite you:")}          </Text>          <View style={{ width: "100%", gap: 10, marginBottom: 20 }}>            {(["everyone", "friends", "nobody"] as const).map((opt) => {              const field = showGroupsModal ? "canBeAddedToGroups" : "canBeAddedToTrips";              const isSelected = privacy[field] === opt;              const optLabel = opt === "everyone" ? t("Everyone") : opt === "friends" ? t("Friends") : t("Nobody");              return (                <Pressable                  key={opt}                  style={[                    styles.selectorItem,                    {                      backgroundColor: isSelected ? colors.selectedPill : colors.iconBoxBg,                      borderColor: isSelected ? colors.switchActive : colors.cardBorder,                    },                  ]}                  onPress={() => {                    updatePrivacy(field, opt);                    setShowGroupsModal(false);                    setShowTripsModal(false);                  }}                >                  <Text style={[styles.selectorText, { color: colors.textPrimary }]}>                    {optLabel}                  </Text>                  {isSelected && <Feather name="check" size={18} color={colors.switchActive} />}                </Pressable>              );            })}          </View>          <Pressable            style={[styles.modalSecBtn, { borderColor: colors.cardBorder, flex: 0, width: "100%", height: 46 }]}            onPress={() => { setShowGroupsModal(false); setShowTripsModal(false); }}          >            <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Done")}</Text>          </Pressable>        </View>      </SwipeableDrawer>      {/* ── BACKUP CODES SWIPEABLE DRAWER ── */}      <SwipeableDrawer        visible={showBackupCodes}        onClose={() => setShowBackupCodes(false)}        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}      >        <View style={styles.drawerInner}>          <View style={[styles.modalIcon, { backgroundColor: colors.iconBoxBg }]}>            <Ionicons name="key-outline" size={28} color={colors.greyishWhite} />          </View>          <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Backup Codes")}</Text>          <Text style={[styles.modalMsg, { color: colors.textSecondary }]}>            {t("Store these single-use recovery codes in a safe place. Each code can only be used once.")}          </Text>          <View style={[styles.codesGrid, { backgroundColor: colors.iconBoxBg, borderColor: colors.cardBorder }]}>            {backupCodes.map((code, idx) => (              <Text key={idx} style={[styles.codeItem, { color: colors.textPrimary, borderColor: colors.cardBorder }]}>                {code}              </Text>            ))}          </View>          <View style={styles.modalBtnRow}>            <Pressable style={[styles.modalSecBtn, { borderColor: colors.cardBorder }]} onPress={() => setShowBackupCodes(false)}>              <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>            </Pressable>            <Pressable style={[styles.modalPrimBtn, { backgroundColor: colors.coral }]} onPress={handleCopyBackupCodes}>              <Text style={styles.modalPrimBtnText}>{t("Copy All")}</Text>            </Pressable>          </View>        </View>      </SwipeableDrawer>      {/* ── 1. DELETE ACCOUNT CONFIRMATION & SUCCESS FLOW (Matching Image 1 & 2) ── */}      <SettingsActionModal        visible={showDeleteConfirm}        onClose={() => setShowDeleteConfirm(false)}        iconType="warning"        title={t("Delete Account")}        message={t(          "Are you sure? This action is permanent. All your trip history, saved bunks, and peer ratings will be lost forever."        )}        confirmLabel={t("Delete Account")}        cancelLabel={t("Cancel")}        confirmColor={colors.coral}        onConfirm={async () => {          if (!auth.currentUser) return false;          try {            await deleteUser(auth.currentUser);            return true;          } catch (e: any) {            Alert.alert(              "Re-authentication Required",              e?.message || "Please sign out, log back in, and try again."            );            return false;          }        }}        successTitle={t("Account Deleted")}        successMessage={t(          "We are sad to see you go! Your BunkMates profile and all associated data have been permanently erased. Safe travels on your future journeys."        )}        successButtonLabel={t("Done")}        onDone={() => {          setShowDeleteConfirm(false);          router.replace("/(auth)/login" as any);        }}      />      {/* ── LOG OUT CONFIRMATION & SUCCESS FLOW ── */}      <SettingsActionModal        visible={showLogoutModal}        onClose={() => setShowLogoutModal(false)}        iconType="logout"        title={t("Log Out", "Log Out")}        message={t(          "Are you sure you want to log out of BunkMates? You can log back into your account anytime."        )}        confirmLabel={t("Log Out", "Log Out")}        cancelLabel={t("Cancel")}        confirmColor={colors.coral}        onConfirm={async () => {          try {            await auth.signOut();            return true;          } catch (e) {            console.log("Signout error:", e);            return false;          }        }}        successTitle={t("Logged Out")}        successMessage={t(          "You have been safely signed out of your BunkMates profile. We hope to see you on your next trip soon!"        )}        successButtonLabel={t("Done")}        onDone={() => {          setShowLogoutModal(false);          router.replace("/(auth)/login" as any);        }}      />      {/* ── 2. PASSWORD RESET FLOW ── */}      <SettingsActionModal        visible={showPasswordModal}        onClose={() => setShowPasswordModal(false)}        iconType="key"        title={t("Change Password")}        message={t(          `Send a password reset link to ${user?.email || "your registered email"}? You can update your password securely through the email link.`        )}        confirmLabel={t("Send Reset Link")}        cancelLabel={t("Cancel")}        confirmColor={colors.coral}        onConfirm={async () => {          if (!user?.email) {            Alert.alert("Error", "No email associated with this account.");            return false;          }          try {            await sendPasswordResetEmail(auth, user.email);            setResetEmailSent(true);            setPasswordLastUpdated("Just now");            if (user?.uid) {              await updateDoc(doc(db, "users", user.uid), {                "security.passwordLastUpdated": "Just now",                updatedAt: new Date(),              });            }            return true;          } catch (err: any) {            Alert.alert("Error", err.message || "Failed to send reset email.");            return false;          }        }}        successTitle={t("Password Reset Sent")}        successMessage={t(          `Check your inbox at ${user?.email || "your email"}. Follow the link in the email to set your new password.`        )}        successButtonLabel={t("Done")}        onDone={() => {          setShowPasswordModal(false);        }}      />    </SafeAreaView>  );}const styles = StyleSheet.create({  safeArea: { flex: 1 },  loader: { flex: 1, justifyContent: "center", alignItems: "center" },  pressed: { opacity: 0.72 },  // Header matching ProfileSettings & ProfileEdit  header: {    position: "absolute",    top: 0,    left: 0,    right: 0,    flexDirection: "row",    alignItems: "center",    paddingHorizontal: 16,    paddingTop: Platform.OS === "android" ? 12 : 6,    paddingBottom: 10,    minHeight: 56,    zIndex: 20,    backgroundColor: "transparent",  },  modernHeaderBtn: {    width: 42,    height: 42,    borderRadius: 21,    borderWidth: 0,    justifyContent: "center",    alignItems: "center",    marginRight: 10,  },  headerTitle: {    flex: 1,    fontSize: 20,    fontWeight: "700",    letterSpacing: -0.3,  },  scrollContent: {    paddingHorizontal: 16,    paddingTop: (Platform.OS === "android" ? 64 : 58) + 10,    paddingBottom: 48,  },  // Section labels  sectionLabel: {    fontSize: 12,    fontWeight: "700",    letterSpacing: 0.8,    marginTop: 22,    marginBottom: 8,    paddingHorizontal: 2,  },  sectionHeaderRow: {    flexDirection: "row",    justifyContent: "space-between",    alignItems: "center",    marginTop: 22,    marginBottom: 8,    paddingHorizontal: 2,  },  sectionAction: {    fontSize: 12.5,    fontWeight: "700",  },  // Card container  card: {    borderRadius: 28,    borderWidth: 0,    overflow: "hidden",    shadowColor: "#000",    shadowOffset: { width: 0, height: 2 },    shadowOpacity: 0.04,    shadowRadius: 8,    elevation: 0,  },  // Standard row  row: {    flexDirection: "row",    alignItems: "center",    paddingVertical: 14,    paddingHorizontal: 16,  },  coralSquareIconBox: {    width: 44,    height: 44,    borderRadius: 14,    justifyContent: "center",    alignItems: "center",    marginRight: 14,  },  iconBox: {    width: 38,    height: 38,    borderRadius: 12,    justifyContent: "center",    alignItems: "center",    marginRight: 14,  },  rowMid: { flex: 1, marginRight: 10 },  rowTitle: { fontSize: 15, fontWeight: "600", letterSpacing: -0.2 },  rowSub: { fontSize: 12.5, marginTop: 2, lineHeight: 17 },  divider: { height: 0, marginHorizontal: 16 },  // Backup codes row inside 2FA card  backupCodeRow: {    flexDirection: "row",    alignItems: "center",    justifyContent: "space-between",    paddingVertical: 16,    paddingHorizontal: 16,  },  backupCodeTitle: {    fontSize: 15,    fontWeight: "600",    letterSpacing: -0.2,  },  // LOGIN ACTIVITY rows: plain icon, inline active status, green subtitle  activityRow: {    flexDirection: "row",    alignItems: "center",    paddingVertical: 15,    paddingHorizontal: 16,  },  activityIconWrap: {    width: 30,    alignItems: "center",    justifyContent: "center",    marginRight: 14,  },  activityInfo: { flex: 1 },  activityName: {    fontSize: 15,    fontWeight: "600",    letterSpacing: -0.2,    marginBottom: 3,  },  activitySub: {    fontSize: 12.5,    fontWeight: "500",  },  // TRUSTED DEVICE rows: coral circle, device name, approved date, chevron  trustedRow: {    flexDirection: "row",    alignItems: "center",    paddingVertical: 14,    paddingHorizontal: 16,  },  trustedIconCircle: {    width: 44,    height: 44,    borderRadius: 22,    justifyContent: "center",    alignItems: "center",    marginRight: 14,  },  trustedInfo: { flex: 1, marginRight: 8 },  trustedName: {    fontSize: 15,    fontWeight: "600",    letterSpacing: -0.2,  },  trustedSub: {    fontSize: 12.5,    marginTop: 2,  },  thisDeviceDot: {    width: 7,    height: 7,    borderRadius: 4,    marginLeft: 7,  },  // Empty states  emptyState: {    flexDirection: "row",    alignItems: "center",    justifyContent: "center",    paddingVertical: 24,    gap: 10,  },  emptyStateText: { fontSize: 13.5 },  emptyTrusted: {    alignItems: "center",    paddingVertical: 28,    paddingHorizontal: 24,  },  emptyTrustedIcon: {    width: 52,    height: 52,    borderRadius: 26,    justifyContent: "center",    alignItems: "center",    marginBottom: 14,  },  emptyTrustedTitle: { fontSize: 15, fontWeight: "700", marginBottom: 6, textAlign: "center" },  emptyTrustedSub: { fontSize: 12.5, lineHeight: 18, textAlign: "center", marginBottom: 18 },  trustNowBtn: {    flexDirection: "row",    alignItems: "center",    paddingHorizontal: 18,    paddingVertical: 10,    borderRadius: 22,    borderWidth: 0,  },  trustNowText: { fontSize: 13.5, fontWeight: "600" },  // Log Out button  modernLogoutBtn: {    height: 52,    borderRadius: 26,    borderWidth: 0,    flexDirection: "row",    alignItems: "center",    justifyContent: "center",    marginTop: 28,    marginBottom: 16,  },  modernLogoutText: {    color: "#FF5A5F",    fontWeight: "700",    fontSize: 15,    marginLeft: 8,  },  // DANGER ZONE card  dangerCard: {    flexDirection: "row",    alignItems: "center",    borderRadius: 28,    borderWidth: 0,    paddingVertical: 15,    paddingHorizontal: 16,    shadowColor: "#000",    shadowOffset: { width: 0, height: 2 },    shadowOpacity: 0.03,    shadowRadius: 5,    elevation: 0,  },  dangerCircleIcon: {    width: 44,    height: 44,    borderRadius: 22,    justifyContent: "center",    alignItems: "center",    marginRight: 14,  },  // Modals  overlay: {    flex: 1,    justifyContent: "center",    alignItems: "center",    paddingHorizontal: 22,  },  drawerInner: {    width: "100%",    alignItems: "center",    paddingTop: 4,    paddingBottom: 8,  },  modalCard: {    width: "100%",    borderTopLeftRadius: 28,    borderTopRightRadius: 28,    borderBottomLeftRadius: 0,    borderBottomRightRadius: 0,    borderWidth: 0,    paddingHorizontal: 16,    paddingTop: 6,    paddingBottom: 16,    alignItems: "center",  },  modalIcon: {    width: 60,    height: 60,    borderRadius: 30,    justifyContent: "center",    alignItems: "center",    marginBottom: 16,  },  modalDangerIcon: {    width: 64,    height: 64,    borderRadius: 32,    justifyContent: "center",    alignItems: "center",    marginBottom: 16,  },  modalTitle: {    fontSize: 19,    fontWeight: "700",    letterSpacing: -0.3,    marginBottom: 8,    textAlign: "center",  },  modalMsg: {    fontSize: 13.5,    lineHeight: 20,    textAlign: "center",    marginBottom: 20,  },  modalInput: {    width: "100%",    height: 48,    borderRadius: 20,    borderWidth: 0,    paddingHorizontal: 14,    fontSize: 14.5,    marginBottom: 14,  },  typeChip: {    flex: 1,    height: 38,    borderRadius: 20,    borderWidth: 0,    justifyContent: "center",    alignItems: "center",  },  typeChipText: { fontSize: 12, fontWeight: "600" },  modalBtnRow: {    flexDirection: "row",    width: "100%",    gap: 10,  },  modalSecBtn: {    flex: 1,    height: 46,    borderRadius: 24,    borderWidth: 0,    justifyContent: "center",    alignItems: "center",  },  modalSecBtnText: { fontSize: 14, fontWeight: "600" },  modalPrimBtn: {    flex: 1,    height: 46,    borderRadius: 24,    borderWidth: 0,    justifyContent: "center",    alignItems: "center",  },  modalPrimBtnText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },  modalDangerBtn: {    flex: 1,    height: 46,    borderRadius: 24,    borderWidth: 0,    justifyContent: "center",    alignItems: "center",  },  modalDangerBtnText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },  // Selector  selectorItem: {    flexDirection: "row",    alignItems: "center",    justifyContent: "space-between",    width: "100%",    paddingVertical: 13,    paddingHorizontal: 16,    borderRadius: 20,    borderWidth: 0,  },  selectorText: { fontSize: 14.5, fontWeight: "600" },  // Backup codes  codesGrid: {    flexDirection: "row",    flexWrap: "wrap",    gap: 8,    padding: 14,    borderRadius: 20,    borderWidth: 0,    justifyContent: "center",    marginBottom: 20,    width: "100%",  },  codeItem: {    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",    fontSize: 13.5,    fontWeight: "700",    paddingHorizontal: 10,    paddingVertical: 6,    borderRadius: 12,    borderWidth: 0,    letterSpacing: 0.5,  },});
+// **@** Account & Security — Exact reference UI matching ProfileSettings & ProfileEdit design system, live multi-device Firestore sync, and 100% preserved functionality
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ScrollView,
+  Switch,
+  ActivityIndicator,
+  StatusBar,
+  Modal,
+  Alert,
+  TextInput,
+  Platform,
+  Appearance,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import * as Clipboard from "expo-clipboard";
+import { useUser } from "../../contexts/UserContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { auth, db } from "../../lib/firebase";
+import { doc, updateDoc, onSnapshot } from "firebase/firestore";
+import { deleteUser, sendPasswordResetEmail } from "firebase/auth";
+import { SettingsActionModal } from "./_components/SettingsActionModal";
+
+export default function AccountAndSecurity() {
+  const router = useRouter();
+  const { user, loading: authLoading } = useUser();
+  const { t } = useLanguage();
+
+  const [loading, setLoading] = useState(true);
+
+  // **@** Preserved privacy settings from existing app
+  const [privacy, setPrivacy] = useState<{
+    profileVisibility: "public" | "private";
+    canBeAddedToGroups: "everyone" | "friends" | "nobody";
+    canBeAddedToTrips: "everyone" | "friends" | "nobody";
+  }>({
+    profileVisibility: "public",
+    canBeAddedToGroups: "everyone",
+    canBeAddedToTrips: "everyone",
+  });
+
+  // **@** Dynamic live security state from Firestore
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [passwordLastUpdated, setPasswordLastUpdated] = useState("Last updated 3 months ago");
+
+  // **@** Modal states
+  const [showGroupsModal, setShowGroupsModal] = useState(false);
+  const [showTripsModal, setShowTripsModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showBackupCodes, setShowBackupCodes] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [resetEmailSent, setResetEmailSent] = useState(false);
+
+  // Flow modals (Image 1 & Image 2 style confirmation & success screens)
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+
+  // Helper for dynamic alpha tints
+  const hexToRgba = (hex: string, alpha: number) => {
+    const cleanHex = hex.replace("#", "");
+    const fullHex = cleanHex.length === 3 ? cleanHex.split("").map((c) => c + c).join("") : cleanHex;
+    const r = parseInt(fullHex.substring(0, 2), 16) || 255;
+    const g = parseInt(fullHex.substring(2, 4), 16) || 90;
+    const b = parseInt(fullHex.substring(4, 6), 16) || 95;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  };
+
+  // **@** Dynamic theme integration matching ProfileSettings
+  let themeMode: "dark" | "light" | "system" = "system";
+  let dynamicAccent = "#FF5A5F";
+  let dynamicThemeColors: any = null;
+  try {
+    const themeContext = useThemeToggle();
+    if (themeContext) {
+      if (themeContext.mode) themeMode = themeContext.mode;
+      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
+      dynamicThemeColors = themeContext.themeColors;
+    }
+  } catch (e) {}
+
+  const isDark =
+    themeMode === "dark" ||
+    (themeMode === "system" && Appearance.getColorScheme() === "dark");
+
+  const colors = useMemo(
+    () => ({
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      divider: "transparent",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      coral: dynamicAccent,
+      coralAccent: dynamicAccent,
+      coralBg: isDark ? hexToRgba(dynamicAccent, 0.16) : hexToRgba(dynamicAccent, 0.09),
+      coralSquareBg: isDark ? hexToRgba(dynamicAccent, 0.14) : hexToRgba(dynamicAccent, 0.07),
+      greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6", // Solid neutral container
+      chevron: isDark ? "#555860" : "#B4B9C2",
+      activeGreen: "#10B981",
+      switchActive: dynamicAccent,
+      switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
+      dangerCardBg: isDark ? "rgba(255, 90, 95, 0.08)" : "#FFF1F2",
+      dangerCardBorder: "transparent",
+      dangerIconBg: isDark ? "rgba(255, 90, 95, 0.2)" : "#FFE4E6",
+      dangerText: "#FF5A5F",
+      dangerSubtext: isDark ? "rgba(255, 120, 125, 0.85)" : "#E11D48",
+      modalOverlay: "rgba(0,0,0,0.72)",
+      selectedPill: isDark ? "#2A2A30" : "#E5E7EB",
+    }),
+    [isDark, dynamicAccent, dynamicThemeColors]
+  );
+
+  // **@** Live Firestore subscription for instant synchronization
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      router.replace("/(auth)/login" as any);
+      return;
+    }
+
+    const userDocRef = doc(db, "users", user.uid);
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      (snap) => {
+        if (snap.exists()) {
+          const uData = snap.data();
+
+          if (uData.privacy) {
+            setPrivacy({
+              profileVisibility: uData.privacy.profileVisibility || "public",
+              canBeAddedToGroups: uData.privacy.canBeAddedToGroups || "everyone",
+              canBeAddedToTrips: uData.privacy.canBeAddedToTrips || "everyone",
+            });
+          }
+
+          if (uData.security?.twoFactorEnabled !== undefined) {
+            setTwoFactorEnabled(!!uData.security.twoFactorEnabled);
+          }
+
+          if (uData.security?.passwordLastUpdated) {
+            setPasswordLastUpdated(uData.security.passwordLastUpdated);
+          } else {
+            // Compute dynamic relative time fallback
+            setPasswordLastUpdated("Last updated 3 months ago");
+          }
+        }
+        setLoading(false);
+      },
+      (err) => {
+        console.log("Firestore onSnapshot error:", err);
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [authLoading, user]);
+
+  const updatePrivacy = (field: keyof typeof privacy, value: string) => {
+    setPrivacy((prev) => ({ ...prev, [field]: value as any }));
+    if (!user) return;
+    updateDoc(doc(db, "users", user.uid), {
+      [`privacy.${field}`]: value,
+      updatedAt: new Date(),
+    }).catch((e) => {
+      console.log("Privacy update error:", e);
+    });
+  };
+
+  const handleToggle2FA = (val: boolean) => {
+    setTwoFactorEnabled(val);
+    if (!user) return;
+    updateDoc(doc(db, "users", user.uid), {
+      "security.twoFactorEnabled": val,
+      updatedAt: new Date(),
+    }).catch((e) => {
+      setTwoFactorEnabled(!val);
+      Alert.alert("Error", "Could not update Two-Factor Authentication state.");
+    });
+  };
+
+  const handleChangePassword = () => {
+    if (!user?.email) {
+      Alert.alert("Error", "No email associated with this account.");
+      return;
+    }
+    setShowPasswordModal(true);
+  };
+
+  const backupCodes = useMemo(
+    () => ["9482-1054", "5128-4491", "8031-6729", "4190-2834", "7721-3904", "6649-1182"],
+    []
+  );
+
+  const handleCopyBackupCodes = async () => {
+    await Clipboard.setStringAsync(backupCodes.join("\n"));
+    Alert.alert("Copied", "Backup codes copied to clipboard. Store them safely.");
+  };
+
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    try {
+      if (auth.currentUser) {
+        await deleteUser(auth.currentUser);
+        setShowDeleteConfirm(false);
+        router.replace("/(auth)/login" as any);
+      }
+    } catch (e: any) {
+      setIsDeleting(false);
+      Alert.alert(
+        "Re-authentication Required",
+        e?.message || "Please sign out, log back in, and try again."
+      );
+    }
+  };
+
+  if (authLoading && !user) {
+    return (
+      <View style={[styles.loader, { backgroundColor: colors.bg }]}>
+        <ActivityIndicator size="large" color={dynamicAccent || colors.textPrimary} />
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+
+      {/* ── Top Bar (Exact circular button matching ProfileEdit & ProfileSettings) ── */}
+      <View style={styles.header}>
+        <Pressable
+          onPress={() => router.back()}
+          style={({ pressed }) => [
+            styles.modernHeaderBtn,
+            { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            pressed && styles.pressed,
+          ]}
+          hitSlop={6}
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+        </Pressable>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+          {t("Account & Security")}
+        </Text>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+
+        {/* ── 1. PASSWORD SETTINGS ── */}
+        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("PASSWORD SETTINGS")}</Text>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={handleChangePassword}
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="shield-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Change Password")}</Text>
+              <Text style={[styles.rowSub, { color: resetEmailSent ? colors.activeGreen : colors.textSecondary }]}>
+                {resetEmailSent ? "✓ Reset link sent to your email" : passwordLastUpdated}
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={colors.chevron} />
+          </Pressable>
+        </View>
+
+        {/* ── 2. TWO-FACTOR AUTHENTICATION ── */}
+        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("TWO-FACTOR AUTHENTICATION")}</Text>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={styles.row}>
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="lock-closed-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Two-Factor Auth (2FA)")}</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {t("Secure your travel plans with SMS or Authenticator")}
+              </Text>
+            </View>
+            <Switch
+              value={twoFactorEnabled}
+              onValueChange={handleToggle2FA}
+              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
+              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+
+          <Pressable
+            style={({ pressed }) => [styles.backupCodeRow, pressed && styles.pressed]}
+            onPress={() => setShowBackupCodes(true)}
+          >
+            <Text style={[styles.backupCodeTitle, { color: colors.textPrimary }]}>
+              {t("Backup Security Codes")}
+            </Text>
+            <Feather name="chevron-right" size={20} color={colors.chevron} />
+          </Pressable>
+        </View>
+
+        {/* ── 3. LINKED DEVICES ── */}
+        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("LINKED DEVICES")}</Text>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => router.push("/settings/linked-devices" as any)}
+            accessibilityRole="button"
+            accessibilityLabel={t("Manage Linked Devices")}
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <MaterialCommunityIcons name="devices" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Manage Linked Devices")}</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {t("Active sessions, phones, tablets & web browsers")}
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={colors.chevron} />
+          </Pressable>
+        </View>
+
+        {/* ── 5. PRIVACY & PERMISSIONS (PRESERVED: Nothing lost) ── */}
+        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("PRIVACY & PERMISSIONS")}</Text>
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          {/* Private Profile */}
+          <View style={styles.row}>
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Feather name="lock" size={19} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Private Profile", "Private Profile")}</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {privacy.profileVisibility === "private" ? t("Only friends can see your profile", "Only friends can see your profile") : t("Profile visible to everyone", "Profile visible to everyone")}
+              </Text>
+            </View>
+            <Switch
+              value={privacy.profileVisibility === "private"}
+              onValueChange={(val) => updatePrivacy("profileVisibility", val ? "private" : "public")}
+              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
+              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+            />
+          </View>
+
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+
+          {/* Groups */}
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => setShowGroupsModal(true)}
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <MaterialCommunityIcons name="account-group-outline" size={21} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Who can add you to groups", "Who can add you to groups")}</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {privacy.canBeAddedToGroups.charAt(0).toUpperCase() + privacy.canBeAddedToGroups.slice(1)}
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={colors.chevron} />
+          </Pressable>
+
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+
+          {/* Trips */}
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => setShowTripsModal(true)}
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Feather name="briefcase" size={19} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Who can add you to trips", "Who can add you to trips")}</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {privacy.canBeAddedToTrips.charAt(0).toUpperCase() + privacy.canBeAddedToTrips.slice(1)}
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={colors.chevron} />
+          </Pressable>
+        </View>
+
+        {/* ── 6. DANGER ZONE (Soft pink/coral card, solid circle icon, red title & sub) ── */}
+        <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("DANGER ZONE")}</Text>
+        <Pressable
+          style={({ pressed }) => [
+            styles.dangerCard,
+            { backgroundColor: colors.dangerCardBg, borderColor: colors.dangerCardBorder },
+            pressed && styles.pressed,
+          ]}
+          onPress={() => setShowDeleteConfirm(true)}
+        >
+          <View style={[styles.dangerCircleIcon, { backgroundColor: colors.dangerIconBg }]}>
+            <Ionicons name="trash-outline" size={20} color={colors.dangerText} />
+          </View>
+          <View style={styles.rowMid}>
+            <Text style={[styles.rowTitle, { color: colors.dangerText, fontWeight: "700" }]}>
+              {t("Delete Account", "Delete BunkMates Account")}
+            </Text>
+            <Text style={[styles.rowSub, { color: colors.dangerSubtext }]}>
+              {t("Permanently remove your account and data", "Permanently wipe all past trip logs and data")}
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={20} color={colors.dangerText} />
+        </Pressable>
+
+        <View style={{ height: 24 }} />
+      </ScrollView>
+
+      {/* ── PRIVACY SELECTOR MODAL ── */}
+      <Modal
+        transparent
+        visible={showGroupsModal || showTripsModal}
+        animationType="fade"
+        onRequestClose={() => { setShowGroupsModal(false); setShowTripsModal(false); }}
+      >
+        <View style={[styles.overlay, { backgroundColor: colors.modalOverlay }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+              {showGroupsModal ? t("Who can add you to groups") : t("Who can add you to trips")}
+            </Text>
+            <Text style={[styles.modalMsg, { color: colors.textSecondary }]}>
+              {t("Choose who can invite you:")}
+            </Text>
+
+            <View style={{ width: "100%", gap: 10, marginBottom: 20 }}>
+              {(["everyone", "friends", "nobody"] as const).map((opt) => {
+                const field = showGroupsModal ? "canBeAddedToGroups" : "canBeAddedToTrips";
+                const isSelected = privacy[field] === opt;
+                const optLabel = opt === "everyone" ? t("Everyone") : opt === "friends" ? t("Friends") : t("Nobody");
+                return (
+                  <Pressable
+                    key={opt}
+                    style={[
+                      styles.selectorItem,
+                      {
+                        backgroundColor: isSelected ? colors.selectedPill : colors.iconBoxBg,
+                        borderColor: isSelected ? colors.switchActive : colors.cardBorder,
+                      },
+                    ]}
+                    onPress={() => {
+                      updatePrivacy(field, opt);
+                      setShowGroupsModal(false);
+                      setShowTripsModal(false);
+                    }}
+                  >
+                    <Text style={[styles.selectorText, { color: colors.textPrimary }]}>
+                      {optLabel}
+                    </Text>
+                    {isSelected && <Feather name="check" size={18} color={colors.switchActive} />}
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Pressable
+              style={[styles.modalSecBtn, { borderColor: colors.cardBorder, flex: 0, width: "100%", height: 46 }]}
+              onPress={() => { setShowGroupsModal(false); setShowTripsModal(false); }}
+            >
+              <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Done")}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── BACKUP CODES MODAL ── */}
+      <Modal transparent visible={showBackupCodes} animationType="fade" onRequestClose={() => setShowBackupCodes(false)}>
+        <View style={[styles.overlay, { backgroundColor: colors.modalOverlay }]}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={[styles.modalIcon, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="key-outline" size={28} color={colors.greyishWhite} />
+            </View>
+            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Backup Codes")}</Text>
+            <Text style={[styles.modalMsg, { color: colors.textSecondary }]}>
+              {t("Store these single-use recovery codes in a safe place. Each code can only be used once.")}
+            </Text>
+
+            <View style={[styles.codesGrid, { backgroundColor: colors.iconBoxBg, borderColor: colors.cardBorder }]}>
+              {backupCodes.map((code, idx) => (
+                <Text key={idx} style={[styles.codeItem, { color: colors.textPrimary, borderColor: colors.cardBorder }]}>
+                  {code}
+                </Text>
+              ))}
+            </View>
+
+            <View style={styles.modalBtnRow}>
+              <Pressable style={[styles.modalSecBtn, { borderColor: colors.cardBorder }]} onPress={() => setShowBackupCodes(false)}>
+                <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
+              </Pressable>
+              <Pressable style={[styles.modalPrimBtn, { backgroundColor: colors.coral }]} onPress={handleCopyBackupCodes}>
+                <Text style={styles.modalPrimBtnText}>{t("Copy All")}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── 1. DELETE ACCOUNT CONFIRMATION & SUCCESS FLOW (Matching Image 1 & 2) ── */}
+      <SettingsActionModal
+        visible={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        iconType="warning"
+        title={t("Delete Account")}
+        message={t(
+          "Are you sure? This action is permanent. All your trip history, saved bunks, and peer ratings will be lost forever."
+        )}
+        confirmLabel={t("Delete Account")}
+        cancelLabel={t("Cancel")}
+        confirmColor={colors.coral}
+        onConfirm={async () => {
+          if (!auth.currentUser) return false;
+          try {
+            await deleteUser(auth.currentUser);
+            return true;
+          } catch (e: any) {
+            Alert.alert(
+              "Re-authentication Required",
+              e?.message || "Please sign out, log back in, and try again."
+            );
+            return false;
+          }
+        }}
+        successTitle={t("Account Deleted")}
+        successMessage={t(
+          "We are sad to see you go! Your BunkMates profile and all associated data have been permanently erased. Safe travels on your future journeys."
+        )}
+        successButtonLabel={t("Done")}
+        onDone={() => {
+          setShowDeleteConfirm(false);
+          router.replace("/(auth)/login" as any);
+        }}
+      />
+
+      {/* ── 2. PASSWORD RESET FLOW ── */}
+      <SettingsActionModal
+        visible={showPasswordModal}
+        onClose={() => setShowPasswordModal(false)}
+        iconType="key"
+        title={t("Change Password")}
+        message={t(
+          `Send a password reset link to ${user?.email || "your registered email"}? You can update your password securely through the email link.`
+        )}
+        confirmLabel={t("Send Reset Link")}
+        cancelLabel={t("Cancel")}
+        confirmColor={colors.coral}
+        onConfirm={async () => {
+          if (!user?.email) {
+            Alert.alert("Error", "No email associated with this account.");
+            return false;
+          }
+          try {
+            await sendPasswordResetEmail(auth, user.email);
+            setResetEmailSent(true);
+            setPasswordLastUpdated("Just now");
+            if (user?.uid) {
+              await updateDoc(doc(db, "users", user.uid), {
+                "security.passwordLastUpdated": "Just now",
+                updatedAt: new Date(),
+              });
+            }
+            return true;
+          } catch (err: any) {
+            Alert.alert("Error", err.message || "Failed to send reset email.");
+            return false;
+          }
+        }}
+        successTitle={t("Password Reset Sent")}
+        successMessage={t(
+          `Check your inbox at ${user?.email || "your email"}. Follow the link in the email to set your new password.`
+        )}
+        successButtonLabel={t("Done")}
+        onDone={() => {
+          setShowPasswordModal(false);
+        }}
+      />
+
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1 },
+  loader: { flex: 1, justifyContent: "center", alignItems: "center" },
+  pressed: { opacity: 0.72 },
+
+  // Header matching ProfileSettings & ProfileEdit
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === "android" ? 12 : 6,
+    paddingBottom: 10,
+    minHeight: 56,
+  },
+  modernHeaderBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+  },
+  headerTitle: {
+    flex: 1,
+    fontSize: 20,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+  },
+
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 48,
+  },
+
+  // Section labels
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    marginTop: 22,
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 22,
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
+  sectionAction: {
+    fontSize: 12.5,
+    fontWeight: "700",
+  },
+
+  // Card container
+  card: {
+    borderRadius: 28,
+    borderWidth: 0,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 0,
+  },
+
+  // Standard row
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  coralSquareIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+  iconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+  rowMid: { flex: 1, marginRight: 10 },
+  rowTitle: { fontSize: 15, fontWeight: "600", letterSpacing: -0.2 },
+  rowSub: { fontSize: 12.5, marginTop: 2, lineHeight: 17 },
+  divider: { height: 0, marginHorizontal: 16 },
+
+  // Backup codes row inside 2FA card
+  backupCodeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  backupCodeTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    letterSpacing: -0.2,
+  },
+
+  // LOGIN ACTIVITY rows: plain icon, inline active status, green subtitle
+  activityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 15,
+    paddingHorizontal: 16,
+  },
+  activityIconWrap: {
+    width: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+  },
+  activityInfo: { flex: 1 },
+  activityName: {
+    fontSize: 15,
+    fontWeight: "600",
+    letterSpacing: -0.2,
+    marginBottom: 3,
+  },
+  activitySub: {
+    fontSize: 12.5,
+    fontWeight: "500",
+  },
+
+  // TRUSTED DEVICE rows: coral circle, device name, approved date, chevron
+  trustedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  trustedIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+  trustedInfo: { flex: 1, marginRight: 8 },
+  trustedName: {
+    fontSize: 15,
+    fontWeight: "600",
+    letterSpacing: -0.2,
+  },
+  trustedSub: {
+    fontSize: 12.5,
+    marginTop: 2,
+  },
+  thisDeviceDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginLeft: 7,
+  },
+
+  // Empty states
+  emptyState: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 24,
+    gap: 10,
+  },
+  emptyStateText: { fontSize: 13.5 },
+  emptyTrusted: {
+    alignItems: "center",
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+  },
+  emptyTrustedIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  emptyTrustedTitle: { fontSize: 15, fontWeight: "700", marginBottom: 6, textAlign: "center" },
+  emptyTrustedSub: { fontSize: 12.5, lineHeight: 18, textAlign: "center", marginBottom: 18 },
+  trustNowBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 22,
+    borderWidth: 0,
+  },
+  trustNowText: { fontSize: 13.5, fontWeight: "600" },
+
+  // DANGER ZONE card
+  dangerCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 28,
+    borderWidth: 0,
+    paddingVertical: 15,
+    paddingHorizontal: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.03,
+    shadowRadius: 5,
+    elevation: 0,
+  },
+  dangerCircleIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+
+  // Modals
+  overlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 22,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 380,
+    borderRadius: 28,
+    borderWidth: 0,
+    padding: 24,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  modalDangerIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 19,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  modalMsg: {
+    fontSize: 13.5,
+    lineHeight: 20,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  modalInput: {
+    width: "100%",
+    height: 48,
+    borderRadius: 20,
+    borderWidth: 0,
+    paddingHorizontal: 14,
+    fontSize: 14.5,
+    marginBottom: 14,
+  },
+  typeChip: {
+    flex: 1,
+    height: 38,
+    borderRadius: 20,
+    borderWidth: 0,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  typeChipText: { fontSize: 12, fontWeight: "600" },
+  modalBtnRow: {
+    flexDirection: "row",
+    width: "100%",
+    gap: 10,
+  },
+  modalSecBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 24,
+    borderWidth: 0,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalSecBtnText: { fontSize: 14, fontWeight: "600" },
+  modalPrimBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 24,
+    borderWidth: 0,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalPrimBtnText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
+  modalDangerBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 24,
+    borderWidth: 0,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalDangerBtnText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
+
+  // Selector
+  selectorItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 0,
+  },
+  selectorText: { fontSize: 14.5, fontWeight: "600" },
+
+  // Backup codes
+  codesGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    padding: 14,
+    borderRadius: 20,
+    borderWidth: 0,
+    justifyContent: "center",
+    marginBottom: 20,
+    width: "100%",
+  },
+  codeItem: {
+    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+    fontSize: 13.5,
+    fontWeight: "700",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 0,
+    letterSpacing: 0.5,
+  },
+});

@@ -59,7 +59,23 @@ export default function ChatsScreen() {
   const { user, userData, loading: authLoading } = useUser();
   const { startCall } = useCall();
   const { t } = useLanguage();
+  const { isDark, themeColors, accentColor, scaleFont, fontScale } = useThemeToggle();
+  const isBrightAccent =
+    accentColor === "#FFFFFF" ||
+    accentColor === "#ffffff" ||
+    accentColor === "#f59e0b" ||
+    accentColor === "#ffd700";
+  const onAccentTextColor = isBrightAccent ? "#000000" : "#FFFFFF";
 
+  const {
+    archivedChatIds,
+    isChatArchived,
+    keepArchived,
+    clearedAt,
+    toggleArchiveChat,
+  } = useChatSettings();
+
+  const [showArchivedOnly, setShowArchivedOnly] = useState(false);
   const [activeScope, setActiveScope] = useState<ChatFilterScope>("All");
   const [isPrivateUnlocked, setIsPrivateUnlocked] = useState(false);
   const [pinModalVisible, setPinModalVisible] = useState(false);
@@ -468,6 +484,7 @@ export default function ChatsScreen() {
   };
 
   const normalizedChats = useMemo(() => {
+    const clearedMs = clearedAt ? new Date(clearedAt).getTime() : 0;
     // Exclude invalid/broken dummy chats with no messages or unknown names
     const validChats = (filteredChats || []).filter((c: any) => {
       if (!c || !c.id) return false;
@@ -488,13 +505,14 @@ export default function ChatsScreen() {
           : c.id);
       const existing = chatByPeer.get(peerUid);
       const cTime = getTimestampMs(anyC.lastTimestamp || anyC.timestamp || anyC.date);
+      const isCleared = clearedMs > 0 && cTime > 0 && cTime < clearedMs;
 
       if (!existing || getTimestampMs(existing.timestamp) < cTime) {
         chatByPeer.set(peerUid, {
           id: c.id,
           type: "chat" as const,
           title: c.name || anyC.displayName || "Traveler",
-          subtitle: c.lastMessage || "",
+          subtitle: isCleared ? "" : (c.lastMessage || ""),
           avatar:
             c.avatar ||
             anyC.photoURL ||
@@ -502,7 +520,7 @@ export default function ChatsScreen() {
               c.name || "Traveler"
             )}&background=1f2937&color=fff`,
           timestamp: cTime,
-          unreadCount: c.unreadCount || 0,
+          unreadCount: isCleared ? 0 : (c.unreadCount || 0),
           badge: null,
           rawItem: c,
         });
@@ -510,23 +528,30 @@ export default function ChatsScreen() {
     }
 
     return Array.from(chatByPeer.values());
-  }, [filteredChats, user?.uid]);
+  }, [filteredChats, user?.uid, clearedAt]);
 
   const normalizedGroups = useMemo(() => {
+    const clearedMs = clearedAt ? new Date(clearedAt).getTime() : 0;
     const validGroups = (filteredGroups || []).filter((g: any) => !!g && !!g.id);
 
-    return validGroups.map((g: any) => ({
-      id: g.id,
-      type: "group" as const,
-      title: g.name || g.tripName || "Trip Group",
-      subtitle: g.lastMessage && g.lastMessage !== "No messages yet" ? g.lastMessage : "Group conversation",
-      avatar: g.iconURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(g.name || "Group")}&background=3b82f6&color=fff`,
-      timestamp: getTimestampMs(g.lastTimestamp || g.updatedAt || g.createdAt || 0),
-      unreadCount: typeof g.unreadCount === "number" ? g.unreadCount : g.unreadCounts?.current || 0,
-      badge: null,
-      rawItem: g,
-    }));
-  }, [filteredGroups]);
+    return validGroups.map((g: any) => {
+      const gTime = getTimestampMs(g.lastTimestamp || g.updatedAt || g.createdAt || 0);
+      const isCleared = clearedMs > 0 && gTime > 0 && gTime < clearedMs;
+      return {
+        id: g.id,
+        type: "group" as const,
+        title: g.name || g.tripName || "Trip Group",
+        subtitle: isCleared
+          ? "Group conversation"
+          : (g.lastMessage && g.lastMessage !== "No messages yet" ? g.lastMessage : "Group conversation"),
+        avatar: g.iconURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(g.name || "Group")}&background=3b82f6&color=fff`,
+        timestamp: gTime,
+        unreadCount: isCleared ? 0 : (typeof g.unreadCount === "number" ? g.unreadCount : g.unreadCounts?.current || 0),
+        badge: null,
+        rawItem: g,
+      };
+    });
+  }, [filteredGroups, clearedAt]);
 
   const combinedList = useMemo(() => {
     // Sort all single chats and group chats together so newest message is ALWAYS index 0 (top)
@@ -544,15 +569,29 @@ export default function ChatsScreen() {
     });
   }, [normalizedChats, normalizedGroups]);
 
-  // Filter based on activeScope (All, Unread, Group, Favourites, Private)
+  const archivedCount = useMemo(() => {
+    return combinedList.filter((item) => isChatArchived(item.id)).length;
+  }, [combinedList, isChatArchived, archivedChatIds]);
+
+  // Filter based on activeScope (All, Unread, Group, Favourites, Private) & Archived status
   const displayedList = useMemo(() => {
-    // 1. Private tab shows ONLY private chats
+    // 1. If viewing archived chats specifically
+    if (showArchivedOnly) {
+      return combinedList.filter((item) => isChatArchived(item.id));
+    }
+
+    // 2. Private tab shows ONLY private chats
     if (activeScope === "Private") {
       return combinedList.filter((item) => isItemPrivate(item));
     }
 
-    // 2. All other tabs EXCLUDE private chats (WhatsApp locked chats behavior!)
-    const nonPrivateList = combinedList.filter((item) => !isItemPrivate(item));
+    // 3. Exclude private chats
+    let nonPrivateList = combinedList.filter((item) => !isItemPrivate(item));
+
+    // 4. If keepArchived is enabled (WhatsApp behavior), exclude archived chats from regular tabs
+    if (keepArchived) {
+      nonPrivateList = nonPrivateList.filter((item) => !isChatArchived(item.id));
+    }
 
     if (activeScope === "Unread") {
       return nonPrivateList.filter((item) => item.unreadCount > 0);
@@ -564,9 +603,9 @@ export default function ChatsScreen() {
       return nonPrivateList.filter((item) => isItemFavourite(item));
     }
 
-    // "All" tab: non-private chats & groups
+    // "All" tab: non-private & non-archived
     return nonPrivateList;
-  }, [combinedList, activeScope, privateChatIds, favouriteChatIds]);
+  }, [combinedList, activeScope, showArchivedOnly, keepArchived, isChatArchived, archivedChatIds, privateChatIds, favouriteChatIds]);
 
   const totalUnreadCount = useMemo(() => {
     return combinedList.filter((c) => !isItemPrivate(c) && c.unreadCount > 0).length;
@@ -695,14 +734,14 @@ export default function ChatsScreen() {
   const showBlockingLoader = authLoading ? true : (!hasCachedItems && (chatsLoading || groupsLoading));
 
   return (
-    <View style={s.screenContainer}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+    <View style={[s.screenContainer, { backgroundColor: themeColors.background }]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={themeColors.background} />
 
       {/* ── TOP HEADER (Clean, Professional, WhatsApp Reference) ── */}
       <View style={[s.topHeader, { paddingTop: insets.top + 8 }]}>
         <View>
-          <Text style={s.headerTitleText}>Chats</Text>
-          <Text style={s.headerSubtitleText}>
+          <Text style={[s.headerTitleText, { color: themeColors.text, fontSize: scaleFont(26) }]}>Chats</Text>
+          <Text style={[s.headerSubtitleText, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>
             {activeScope === "Private"
               ? `${displayedList.length} locked chats`
               : activeScope === "Favourites"
@@ -720,7 +759,13 @@ export default function ChatsScreen() {
         <View style={s.headerRightCluster}>
           {/* Create Group Quick Button */}
           <Pressable
-            style={s.headerCircleBtn}
+            style={[
+              s.headerCircleBtn,
+              {
+                backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+                borderColor: themeColors.border,
+              },
+            ]}
             onPress={() => {
               try {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -729,12 +774,18 @@ export default function ChatsScreen() {
             }}
             hitSlop={8}
           >
-            <Ionicons name="people-outline" size={20} color="#ffffff" />
+            <Ionicons name="people-outline" size={20} color={themeColors.text} />
           </Pressable>
 
           {/* New Chat Quick Button */}
           <Pressable
-            style={s.headerCircleBtn}
+            style={[
+              s.headerCircleBtn,
+              {
+                backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)",
+                borderColor: themeColors.border,
+              },
+            ]}
             onPress={() => {
               try {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -743,7 +794,7 @@ export default function ChatsScreen() {
             }}
             hitSlop={8}
           >
-            <Ionicons name="person-add-outline" size={19} color="#ffffff" />
+            <Ionicons name="person-add-outline" size={19} color={themeColors.text} />
           </Pressable>
 
           <NotificationBell />
@@ -752,14 +803,22 @@ export default function ChatsScreen() {
 
       {/* ── SEARCH BAR (High-Legibility, Sleek Floating Pill) ── */}
       <View style={s.searchRow}>
-        <View style={s.searchFieldBox}>
-          <Feather name="search" size={17} color="#7e8594" style={{ marginRight: 10 }} />
+        <View
+          style={[
+            s.searchFieldBox,
+            {
+              backgroundColor: isDark ? "#0d0f14" : "#f3f4f6",
+              borderColor: themeColors.border,
+            },
+          ]}
+        >
+          <Feather name="search" size={17} color={isDark ? "#7e8594" : "#9ca3af"} style={{ marginRight: 10 }} />
           <TextInput
             placeholder="Search bunkmates, groups, chats..."
-            placeholderTextColor="#6b7280"
+            placeholderTextColor={isDark ? "#6b7280" : "#9ca3af"}
             value={searchQuery}
             onChangeText={setSearchQuery}
-            style={s.searchInputField}
+            style={[s.searchInputField, { color: themeColors.text, fontSize: scaleFont(14) }]}
           />
           {searchQuery.length > 0 && (
             <Pressable
@@ -771,7 +830,7 @@ export default function ChatsScreen() {
               }}
               hitSlop={8}
             >
-              <Ionicons name="close-circle" size={18} color="#7e8594" />
+              <Ionicons name="close-circle" size={18} color={isDark ? "#7e8594" : "#9ca3af"} />
             </Pressable>
           )}
         </View>
@@ -814,13 +873,23 @@ export default function ChatsScreen() {
                   }
                   setActiveScope(scope.key);
                 }}
-                style={[s.scopeChip, isSelected && s.scopeChipSelected]}
+                style={[
+                  s.scopeChip,
+                  {
+                    backgroundColor: isDark ? "#0d0f14" : "#f3f4f6",
+                    borderColor: themeColors.border,
+                  },
+                  isSelected && {
+                    backgroundColor: accentColor,
+                    borderColor: accentColor,
+                  },
+                ]}
               >
                 {scope.key === "Group" && (
                   <Ionicons
                     name="people"
                     size={13}
-                    color={isSelected ? "#000000" : "rgba(255, 255, 255, 0.6)"}
+                    color={isSelected ? onAccentTextColor : themeColors.textSecondary}
                     style={{ marginRight: 5 }}
                   />
                 )}
@@ -828,7 +897,7 @@ export default function ChatsScreen() {
                   <Ionicons
                     name="star"
                     size={12}
-                    color={isSelected ? "#000000" : "#ffffff"}
+                    color={isSelected ? onAccentTextColor : themeColors.textSecondary}
                     style={{ marginRight: 5 }}
                   />
                 )}
@@ -836,7 +905,7 @@ export default function ChatsScreen() {
                   <Ionicons
                     name="lock-closed"
                     size={12}
-                    color={isSelected ? "#000000" : "#ffffff"}
+                    color={isSelected ? onAccentTextColor : themeColors.textSecondary}
                     style={{ marginRight: 5 }}
                   />
                 )}
@@ -844,24 +913,47 @@ export default function ChatsScreen() {
                   <Ionicons
                     name="call"
                     size={12}
-                    color={isSelected ? "#000000" : "#ffffff"}
+                    color={isSelected ? onAccentTextColor : themeColors.textSecondary}
                     style={{ marginRight: 5 }}
                   />
                 )}
-                <Text style={[s.scopeChipText, isSelected && s.scopeChipTextSelected]}>
+                <Text
+                  style={[
+                    s.scopeChipText,
+                    { color: themeColors.textSecondary, fontSize: scaleFont(13) },
+                    isSelected && { color: onAccentTextColor, fontWeight: "700" },
+                  ]}
+                >
                   {scope.label}
                 </Text>
                 {scope.count > 0 && (
                   <View
                     style={[
                       s.scopeCountBadge,
-                      isSelected && s.scopeCountBadgeSelected,
+                      isSelected
+                        ? {
+                            backgroundColor: isBrightAccent
+                              ? "rgba(0,0,0,0.15)"
+                              : "rgba(255,255,255,0.25)",
+                          }
+                        : {
+                            backgroundColor: isDark
+                              ? "rgba(255,255,255,0.12)"
+                              : "rgba(0,0,0,0.08)",
+                          },
                     ]}
                   >
                     <Text
                       style={[
                         s.scopeCountBadgeText,
-                        isSelected && s.scopeCountBadgeTextSelected,
+                        {
+                          color: isSelected
+                            ? onAccentTextColor
+                            : isDark
+                            ? "#ffffff"
+                            : "#111827",
+                          fontSize: scaleFont(10.5),
+                        },
                       ]}
                     >
                       {scope.count}
@@ -920,6 +1012,27 @@ export default function ChatsScreen() {
             </View>
           )}
 
+          {showArchivedOnly && (
+            <View style={s.privateBannerRow}>
+              <View style={s.privateBannerLeft}>
+                <Ionicons name="archive" size={15} color="#ffffff" />
+                <Text style={s.privateBannerText}>Archived Chats ({archivedCount})</Text>
+              </View>
+              <Pressable
+                onPress={() => {
+                  try {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  } catch (e) {}
+                  setShowArchivedOnly(false);
+                }}
+                style={s.lockNowBtn}
+              >
+                <Ionicons name="arrow-back" size={12} color="#000000" style={{ marginRight: 4 }} />
+                <Text style={s.lockNowBtnText}>Back</Text>
+              </Pressable>
+            </View>
+          )}
+
           {/* ═══════════════════════════════════════════════════════════
              CALLS TAB FEED (WhatsApp Reference in White & Black Accent)
              ═══════════════════════════════════════════════════════════ */}
@@ -928,7 +1041,13 @@ export default function ChatsScreen() {
               {/* Top Quick Actions Cards (Voice Call, Video Call, Group Call) */}
               <View style={s.callQuickActionsRow}>
                 <Pressable
-                  style={s.callActionCard}
+                  style={[
+                    s.callActionCard,
+                    {
+                      backgroundColor: isDark ? "#0d0f14" : "#f3f4f6",
+                      borderColor: themeColors.border,
+                    },
+                  ]}
                   onPress={() => {
                     try {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -937,15 +1056,31 @@ export default function ChatsScreen() {
                     setStartCallModalVisible(true);
                   }}
                 >
-                  <View style={s.callActionIconCircle}>
-                    <Ionicons name="call" size={18} color="#ffffff" />
+                  <View
+                    style={[
+                      s.callActionIconCircle,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(255, 255, 255, 0.08)"
+                          : "rgba(0, 0, 0, 0.05)",
+                        borderColor: themeColors.border,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="call" size={18} color={themeColors.text} />
                   </View>
-                  <Text style={s.callActionCardTitle}>Voice Call</Text>
-                  <Text style={s.callActionCardSub}>Single bunkmate</Text>
+                  <Text style={[s.callActionCardTitle, { color: themeColors.text, fontSize: scaleFont(12) }]}>Voice Call</Text>
+                  <Text style={[s.callActionCardSub, { color: themeColors.textSecondary, fontSize: scaleFont(10) }]}>Single bunkmate</Text>
                 </Pressable>
 
                 <Pressable
-                  style={s.callActionCard}
+                  style={[
+                    s.callActionCard,
+                    {
+                      backgroundColor: isDark ? "#0d0f14" : "#f3f4f6",
+                      borderColor: themeColors.border,
+                    },
+                  ]}
                   onPress={() => {
                     try {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -954,15 +1089,31 @@ export default function ChatsScreen() {
                     setStartCallModalVisible(true);
                   }}
                 >
-                  <View style={s.callActionIconCircle}>
-                    <Ionicons name="videocam" size={18} color="#ffffff" />
+                  <View
+                    style={[
+                      s.callActionIconCircle,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(255, 255, 255, 0.08)"
+                          : "rgba(0, 0, 0, 0.05)",
+                        borderColor: themeColors.border,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="videocam" size={18} color={themeColors.text} />
                   </View>
-                  <Text style={s.callActionCardTitle}>Video Call</Text>
-                  <Text style={s.callActionCardSub}>HD Face to Face</Text>
+                  <Text style={[s.callActionCardTitle, { color: themeColors.text, fontSize: scaleFont(12) }]}>Video Call</Text>
+                  <Text style={[s.callActionCardSub, { color: themeColors.textSecondary, fontSize: scaleFont(10) }]}>HD Face to Face</Text>
                 </Pressable>
 
                 <Pressable
-                  style={s.callActionCard}
+                  style={[
+                    s.callActionCard,
+                    {
+                      backgroundColor: isDark ? "#0d0f14" : "#f3f4f6",
+                      borderColor: themeColors.border,
+                    },
+                  ]}
                   onPress={() => {
                     try {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -970,20 +1121,39 @@ export default function ChatsScreen() {
                     setCreateGroupModalVisible(true);
                   }}
                 >
-                  <View style={s.callActionIconCircle}>
-                    <Ionicons name="people" size={18} color="#ffffff" />
+                  <View
+                    style={[
+                      s.callActionIconCircle,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(255, 255, 255, 0.08)"
+                          : "rgba(0, 0, 0, 0.05)",
+                        borderColor: themeColors.border,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="people" size={18} color={themeColors.text} />
                   </View>
-                  <Text style={s.callActionCardTitle}>Group Call</Text>
-                  <Text style={s.callActionCardSub}>Travel crew</Text>
+                  <Text style={[s.callActionCardTitle, { color: themeColors.text, fontSize: scaleFont(12) }]}>Group Call</Text>
+                  <Text style={[s.callActionCardSub, { color: themeColors.textSecondary, fontSize: scaleFont(10) }]}>Travel crew</Text>
                 </Pressable>
               </View>
 
               {/* Section Header: Recent Calls */}
               <View style={s.callsSectionHeader}>
-                <Text style={s.callsSectionTitle}>Recent</Text>
+                <Text style={[s.callsSectionTitle, { color: themeColors.textSecondary, fontSize: scaleFont(13) }]}>Recent</Text>
                 {groupedCallHistory.length > 0 && (
-                  <View style={s.callsBadgeCount}>
-                    <Text style={s.callsBadgeCountText}>{groupedCallHistory.length}</Text>
+                  <View
+                    style={[
+                      s.callsBadgeCount,
+                      {
+                        backgroundColor: isDark
+                          ? "rgba(255, 255, 255, 0.12)"
+                          : "rgba(0, 0, 0, 0.08)",
+                      },
+                    ]}
+                  >
+                    <Text style={[s.callsBadgeCountText, { color: themeColors.text, fontSize: scaleFont(11) }]}>{groupedCallHistory.length}</Text>
                   </View>
                 )}
               </View>
@@ -1029,6 +1199,7 @@ export default function ChatsScreen() {
                           <Text
                             style={[
                               s.callRowName,
+                              { color: themeColors.text, fontSize: scaleFont(15) },
                               isMissed && s.callRowNameMissed,
                             ]}
                             numberOfLines={1}
@@ -1049,7 +1220,7 @@ export default function ChatsScreen() {
                               <Ionicons
                                 name="arrow-up"
                                 size={12}
-                                color="#ffffff"
+                                color={themeColors.text}
                                 style={{
                                   marginRight: 5,
                                   transform: [{ rotate: "45deg" }],
@@ -1059,7 +1230,7 @@ export default function ChatsScreen() {
                               <Ionicons
                                 name="arrow-down"
                                 size={12}
-                                color="#ffffff"
+                                color={themeColors.text}
                                 style={{
                                   marginRight: 5,
                                   transform: [{ rotate: "45deg" }],
@@ -1070,6 +1241,7 @@ export default function ChatsScreen() {
                             <Text
                               style={[
                                 s.callRowMetaText,
+                                { color: themeColors.textSecondary, fontSize: scaleFont(12.5) },
                                 isMissed && { color: "#ef4444" },
                               ]}
                             >
@@ -1092,7 +1264,15 @@ export default function ChatsScreen() {
                         </View>
 
                         <Pressable
-                          style={s.callRowActionBtn}
+                          style={[
+                            s.callRowActionBtn,
+                            {
+                              backgroundColor: isDark
+                                ? "rgba(255, 255, 255, 0.08)"
+                                : "rgba(0, 0, 0, 0.05)",
+                              borderColor: themeColors.border,
+                            },
+                          ]}
                           onPress={() =>
                             handleCallBack(
                               callItem.latestCall || callItem,
@@ -1104,7 +1284,7 @@ export default function ChatsScreen() {
                           <Ionicons
                             name={isVideo ? "videocam" : "call"}
                             size={18}
-                            color="#ffffff"
+                            color={themeColors.text}
                           />
                         </Pressable>
                       </Pressable>
@@ -1124,8 +1304,51 @@ export default function ChatsScreen() {
                 />
               )}
             </View>
-          ) : displayedList.length > 0 ? (
+          ) : displayedList.length > 0 || (activeScope === "All" && archivedCount > 0) ? (
             <View style={s.chatListContainer}>
+              {/* WhatsApp-Style Archived Row at the top of All chats */}
+              {activeScope === "All" && !showArchivedOnly && archivedCount > 0 && (
+                <Pressable
+                  style={[
+                    s.archivedRow,
+                    {
+                      backgroundColor: isDark ? "rgba(255, 255, 255, 0.05)" : "#f3f4f6",
+                      borderColor: themeColors.border,
+                    },
+                  ]}
+                  onPress={() => {
+                    try {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    } catch (e) {}
+                    setShowArchivedOnly(true);
+                  }}
+                >
+                  <View style={s.archivedRowLeft}>
+                    <View
+                      style={[
+                        s.archivedIconBox,
+                        {
+                          backgroundColor: isDark ? "rgba(255, 255, 255, 0.1)" : "#e5e7eb",
+                        },
+                      ]}
+                    >
+                      <Ionicons name="archive-outline" size={18} color={themeColors.text} />
+                    </View>
+                    <Text
+                      style={[
+                        s.archivedRowText,
+                        { color: themeColors.text, fontSize: scaleFont(14.5) },
+                      ]}
+                    >
+                      Archived
+                    </Text>
+                  </View>
+                  <View style={s.archivedBadge}>
+                    <Text style={s.archivedBadgeText}>{archivedCount}</Text>
+                  </View>
+                </Pressable>
+              )}
+
               {displayedList.map((item: any, index: number) => {
                 const isGroup = item.type === "group";
                 const isUnread = item.unreadCount > 0;
@@ -1195,6 +1418,7 @@ export default function ChatsScreen() {
                           <Text
                             style={[
                               s.cardHeadlineTitle,
+                              { color: themeColors.text, fontSize: scaleFont(16) },
                               isUnread && s.cardHeadlineTitleUnread,
                             ]}
                             numberOfLines={1}
@@ -1260,7 +1484,8 @@ export default function ChatsScreen() {
                           <Text
                             style={[
                               s.messageSnippetText,
-                              isUnread && s.messageSnippetTextUnread,
+                              { color: themeColors.textSecondary, fontSize: scaleFont(13) },
+                              isUnread && { color: themeColors.text, fontWeight: "600" },
                             ]}
                             numberOfLines={1}
                           >
@@ -1274,15 +1499,16 @@ export default function ChatsScreen() {
                         <Text
                           style={[
                             s.timeStringText,
-                            isUnread && s.timeStringTextUnread,
+                            { color: themeColors.textSecondary, fontSize: scaleFont(11.5) },
+                            isUnread && { color: accentColor, fontWeight: "700" },
                           ]}
                         >
                           {formatTime(item.timestamp)}
                         </Text>
 
                         {isUnread ? (
-                          <View style={s.unreadNumberBadge}>
-                            <Text style={s.unreadNumberText}>
+                          <View style={[s.unreadNumberBadge, { backgroundColor: accentColor }]}>
+                            <Text style={[s.unreadNumberText, { color: onAccentTextColor, fontSize: scaleFont(11) }]}>
                               {item.unreadCount}
                             </Text>
                           </View>
@@ -1290,7 +1516,7 @@ export default function ChatsScreen() {
                           <Ionicons
                             name="pin"
                             size={12}
-                            color="rgba(255, 255, 255, 0.3)"
+                            color={accentColor}
                             style={{ marginTop: 6 }}
                           />
                         ) : null}
@@ -1370,10 +1596,10 @@ export default function ChatsScreen() {
               setStartCallModalVisible(true);
             }
           }}
-          style={s.fabButtonSquare}
+          style={[s.fabButtonSquare, { backgroundColor: accentColor }]}
           hitSlop={8}
         >
-          <Ionicons name="call" size={22} color="#000000" />
+          <Ionicons name="call" size={22} color={onAccentTextColor} />
         </Pressable>
       </View>
 
@@ -1443,130 +1669,161 @@ export default function ChatsScreen() {
         animationType="fade"
         onRequestClose={() => setSelectedChatAction(null)}
       >
-        <Pressable
-          style={s.bottomSheetOverlay}
-          onPress={() => setSelectedChatAction(null)}
-        >
-          <View style={s.bottomSheetPanel}>
-            <View style={s.sheetHandleBar} />
-            <Text style={s.sheetMainTitle}>{selectedChatAction?.title}</Text>
-            <Text style={s.sheetMainSubtitle} numberOfLines={1}>
-              {selectedChatAction?.subtitle}
-            </Text>
+        {selectedChatAction ? (
+          <Pressable
+            style={s.bottomSheetOverlay}
+            onPress={() => setSelectedChatAction(null)}
+          >
+            <View style={s.bottomSheetPanel}>
+              <View style={s.sheetHandleBar} />
+              <Text style={s.sheetMainTitle}>{selectedChatAction?.title}</Text>
+              <Text style={s.sheetMainSubtitle} numberOfLines={1}>
+                {selectedChatAction?.subtitle}
+              </Text>
 
-            <Pressable
-              style={s.sheetActionItem}
-              onPress={() => {
-                const item = selectedChatAction;
-                setSelectedChatAction(null);
-                item?.type === "group"
-                  ? router.push(`/(tabs)/group-chatroom/${item.id}` as any)
-                  : router.push(`/chat/${item.id}` as any);
-              }}
-            >
-              <View style={s.sheetIconBox}>
-                <Ionicons name="chatbubbles-outline" size={20} color="#ffffff" />
-              </View>
-              <Text style={s.sheetActionTitle}>Open Conversation</Text>
-            </Pressable>
-
-            {/* Lock / Unlock Chat (Private) */}
-            <Pressable
-              style={s.sheetActionItem}
-              onPress={() => handleTogglePrivateChat(selectedChatAction)}
-            >
-              <View
-                style={[
-                  s.sheetIconBox,
-                  {
-                    backgroundColor: isItemPrivate(selectedChatAction)
-                      ? "rgba(239, 68, 68, 0.15)"
-                      : "rgba(16, 185, 129, 0.15)",
-                  },
-                ]}
+              <Pressable
+                style={s.sheetActionItem}
+                onPress={() => {
+                  const item = selectedChatAction;
+                  setSelectedChatAction(null);
+                  item?.type === "group"
+                    ? router.push(`/(tabs)/group-chatroom/${item.id}` as any)
+                    : router.push(`/chat/${item.id}` as any);
+                }}
               >
-                <Ionicons
-                  name={
-                    isItemPrivate(selectedChatAction)
-                      ? "lock-open-outline"
-                      : "lock-closed-outline"
-                  }
-                  size={20}
-                  color={
-                    isItemPrivate(selectedChatAction) ? "#ef4444" : "#10b981"
-                  }
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.sheetActionTitle}>
-                  {isItemPrivate(selectedChatAction)
-                    ? "Unlock Chat"
-                    : "Lock Chat (Set as Private)"}
-                </Text>
-                <Text style={s.sheetActionDesc}>
-                  {isItemPrivate(selectedChatAction)
-                    ? "Restore to main chat feed"
-                    : "Hide from All feed, only viewable in Private tab"}
-                </Text>
-              </View>
-            </Pressable>
+                <View style={s.sheetIconBox}>
+                  <Ionicons name="chatbubbles-outline" size={20} color="#ffffff" />
+                </View>
+                <Text style={s.sheetActionTitle}>Open Conversation</Text>
+              </Pressable>
 
-            {/* Add / Remove Favourite */}
-            <Pressable
-              style={s.sheetActionItem}
-              onPress={() => handleToggleFavouriteChat(selectedChatAction)}
-            >
-              <View
-                style={[
-                  s.sheetIconBox,
-                  { backgroundColor: "rgba(245, 158, 11, 0.15)" },
-                ]}
+              {/* Lock / Unlock Chat (Private) */}
+              <Pressable
+                style={s.sheetActionItem}
+                onPress={() => handleTogglePrivateChat(selectedChatAction)}
               >
-                <Ionicons
-                  name={
-                    isItemFavourite(selectedChatAction)
-                      ? "star"
-                      : "star-outline"
-                  }
-                  size={20}
-                  color="#f59e0b"
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.sheetActionTitle}>
-                  {isItemFavourite(selectedChatAction)
-                    ? "Remove from Favourites"
-                    : "Mark as Favourite"}
-                </Text>
-                <Text style={s.sheetActionDesc}>
-                  {isItemFavourite(selectedChatAction)
-                    ? "Remove from Favourites tab"
-                    : "Pin to Favourites tab for quick access"}
-                </Text>
-              </View>
-            </Pressable>
+                <View
+                  style={[
+                    s.sheetIconBox,
+                    {
+                      backgroundColor: isItemPrivate(selectedChatAction)
+                        ? "rgba(239, 68, 68, 0.15)"
+                        : "rgba(16, 185, 129, 0.15)",
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      isItemPrivate(selectedChatAction)
+                        ? "lock-open-outline"
+                        : "lock-closed-outline"
+                    }
+                    size={20}
+                    color={
+                      isItemPrivate(selectedChatAction) ? "#ef4444" : "#10b981"
+                    }
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.sheetActionTitle}>
+                    {isItemPrivate(selectedChatAction)
+                      ? "Unlock Chat"
+                      : "Lock Chat (Set as Private)"}
+                  </Text>
+                  <Text style={s.sheetActionDesc}>
+                    {isItemPrivate(selectedChatAction)
+                      ? "Restore to main chat feed"
+                      : "Hide from All feed, only viewable in Private tab"}
+                  </Text>
+                </View>
+              </Pressable>
 
-            <Pressable
-              style={s.sheetActionItem}
-              onPress={() => handleStartCallFromChat(selectedChatAction, "audio")}
-            >
-              <View style={[s.sheetIconBox, { backgroundColor: "rgba(0, 230, 176, 0.15)" }]}>
-                <Ionicons name="call-outline" size={20} color="#00e6b0" />
-              </View>
-              <Text style={s.sheetActionTitle}>Voice Call</Text>
-            </Pressable>
+              {/* Add / Remove Favourite */}
+              <Pressable
+                style={s.sheetActionItem}
+                onPress={() => handleToggleFavouriteChat(selectedChatAction)}
+              >
+                <View
+                  style={[
+                    s.sheetIconBox,
+                    { backgroundColor: "rgba(245, 158, 11, 0.15)" },
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      isItemFavourite(selectedChatAction)
+                        ? "star"
+                        : "star-outline"
+                    }
+                    size={20}
+                    color="#f59e0b"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.sheetActionTitle}>
+                    {isItemFavourite(selectedChatAction)
+                      ? "Remove from Favourites"
+                      : "Mark as Favourite"}
+                  </Text>
+                  <Text style={s.sheetActionDesc}>
+                    {isItemFavourite(selectedChatAction)
+                      ? "Remove from Favourites tab"
+                      : "Pin to Favourites tab for quick access"}
+                  </Text>
+                </View>
+              </Pressable>
 
-            <Pressable
-              style={s.sheetActionItem}
-              onPress={() => handleStartCallFromChat(selectedChatAction, "video")}
-            >
-              <View style={[s.sheetIconBox, { backgroundColor: "rgba(56, 189, 248, 0.15)" }]}>
-                <Ionicons name="videocam-outline" size={20} color="#38bdf8" />
-              </View>
-              <Text style={s.sheetActionTitle}>Video Call</Text>
-            </Pressable>
-          </View>
-        </Pressable>
+              {/* Archive / Unarchive Chat */}
+              <Pressable
+                style={s.sheetActionItem}
+                onPress={async () => {
+                  if (!selectedChatAction?.id) return;
+                  try {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  } catch (e) {}
+                  await toggleArchiveChat(selectedChatAction.id);
+                  setSelectedChatAction(null);
+                }}
+              >
+                <View style={[s.sheetIconBox, { backgroundColor: "rgba(56, 189, 248, 0.15)" }]}>
+                  <Ionicons
+                    name={selectedChatAction?.id && isChatArchived(selectedChatAction.id) ? "arrow-up-circle-outline" : "archive-outline"}
+                    size={20}
+                    color="#38bdf8"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.sheetActionTitle}>
+                    {selectedChatAction?.id && isChatArchived(selectedChatAction.id) ? "Unarchive Chat" : "Archive Chat"}
+                  </Text>
+                  <Text style={s.sheetActionDesc}>
+                    {selectedChatAction?.id && isChatArchived(selectedChatAction.id) ? "Move back to main chats" : "Hide from main chats"}
+                  </Text>
+                </View>
+              </Pressable>
+
+              <Pressable
+                style={s.sheetActionItem}
+                onPress={() => handleStartCallFromChat(selectedChatAction, "audio")}
+              >
+                <View style={[s.sheetIconBox, { backgroundColor: "rgba(0, 230, 176, 0.15)" }]}>
+                  <Ionicons name="call-outline" size={20} color="#00e6b0" />
+                </View>
+                <Text style={s.sheetActionTitle}>Voice Call</Text>
+              </Pressable>
+
+              <Pressable
+                style={s.sheetActionItem}
+                onPress={() => handleStartCallFromChat(selectedChatAction, "video")}
+              >
+                <View style={[s.sheetIconBox, { backgroundColor: "rgba(56, 189, 248, 0.15)" }]}>
+                  <Ionicons name="videocam-outline" size={20} color="#38bdf8" />
+                </View>
+                <Text style={s.sheetActionTitle}>Video Call</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        ) : null}
       </Modal>
 
       {/* ── PROFILE MODAL ── */}
@@ -1652,15 +1909,23 @@ function EmptyView({
   actionLabel?: string;
   onAction?: () => void;
 }) {
+  const { isDark, themeColors, accentColor, scaleFont } = useThemeToggle();
+  const isBrightAccent =
+    accentColor === "#FFFFFF" ||
+    accentColor === "#ffffff" ||
+    accentColor === "#f59e0b" ||
+    accentColor === "#ffd700";
+  const onAccentTextColor = isBrightAccent ? "#000000" : "#FFFFFF";
+
   return (
     <View style={s.emptyStateContainer}>
-      <Feather name={icon} size={42} color="rgba(255, 255, 255, 0.2)" />
-      <Text style={s.emptyMainTitle}>{title}</Text>
-      <Text style={s.emptySubText}>{subtitle}</Text>
+      <Feather name={icon} size={42} color={isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.2)"} />
+      <Text style={[s.emptyMainTitle, { color: themeColors.text, fontSize: scaleFont(17) }]}>{title}</Text>
+      <Text style={[s.emptySubText, { color: themeColors.textSecondary, fontSize: scaleFont(13) }]}>{subtitle}</Text>
       {actionLabel && onAction && (
-        <Pressable style={s.emptyCtaButton} onPress={onAction}>
-          <Text style={s.emptyCtaText}>{actionLabel}</Text>
-          <Ionicons name="arrow-forward" size={14} color="#000000" style={{ marginLeft: 6 }} />
+        <Pressable style={[s.emptyCtaButton, { backgroundColor: accentColor }]} onPress={onAction}>
+          <Text style={[s.emptyCtaText, { color: onAccentTextColor, fontSize: scaleFont(13.5) }]}>{actionLabel}</Text>
+          <Ionicons name="arrow-forward" size={14} color={onAccentTextColor} style={{ marginLeft: 6 }} />
         </Pressable>
       )}
     </View>

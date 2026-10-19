@@ -12,6 +12,7 @@ import {
 import { Image as ExpoImage } from "expo-image";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 
 interface StartCallModalProps {
   visible: boolean;
@@ -32,6 +33,14 @@ export default function StartCallModal({
   onStartGroupCall,
   defaultCallType = "audio",
 }: StartCallModalProps) {
+  const { accentColor } = useThemeToggle();
+  const isBrightAccent =
+    accentColor === "#FFFFFF" ||
+    accentColor === "#ffffff" ||
+    accentColor === "#f59e0b" ||
+    accentColor === "#ffd700";
+  const onAccentTextColor = isBrightAccent ? "#000000" : "#FFFFFF";
+
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"bunkmates" | "groups">("bunkmates");
 
@@ -100,12 +109,15 @@ export default function StartCallModal({
             )}
           </View>
 
-          {/* Tab Switcher: Bunkmates / Groups (White and Black accent) */}
+          {/* Tab Switcher: Bunkmates / Groups (Dynamic accent) */}
           <View style={styles.tabSwitcher}>
             <Pressable
               style={[
                 styles.tabSegment,
-                activeTab === "bunkmates" && styles.tabSegmentActive,
+                activeTab === "bunkmates" && [
+                  styles.tabSegmentActive,
+                  { backgroundColor: accentColor },
+                ],
               ]}
               onPress={() => {
                 try {
@@ -117,13 +129,16 @@ export default function StartCallModal({
               <Ionicons
                 name="person"
                 size={13}
-                color={activeTab === "bunkmates" ? "#000000" : "rgba(255, 255, 255, 0.6)"}
+                color={activeTab === "bunkmates" ? onAccentTextColor : "rgba(255, 255, 255, 0.6)"}
                 style={{ marginRight: 5 }}
               />
               <Text
                 style={[
                   styles.tabSegmentText,
-                  activeTab === "bunkmates" && styles.tabSegmentTextActive,
+                  activeTab === "bunkmates" && [
+                    styles.tabSegmentTextActive,
+                    { color: onAccentTextColor },
+                  ],
                 ]}
               >
                 Bunkmates ({filteredBunkmates.length})
@@ -133,7 +148,10 @@ export default function StartCallModal({
             <Pressable
               style={[
                 styles.tabSegment,
-                activeTab === "groups" && styles.tabSegmentActive,
+                activeTab === "groups" && [
+                  styles.tabSegmentActive,
+                  { backgroundColor: accentColor },
+                ],
               ]}
               onPress={() => {
                 try {
@@ -145,13 +163,16 @@ export default function StartCallModal({
               <Ionicons
                 name="people"
                 size={14}
-                color={activeTab === "groups" ? "#000000" : "rgba(255, 255, 255, 0.6)"}
+                color={activeTab === "groups" ? onAccentTextColor : "rgba(255, 255, 255, 0.6)"}
                 style={{ marginRight: 5 }}
               />
               <Text
                 style={[
                   styles.tabSegmentText,
-                  activeTab === "groups" && styles.tabSegmentTextActive,
+                  activeTab === "groups" && [
+                    styles.tabSegmentTextActive,
+                    { color: onAccentTextColor },
+                  ],
                 ]}
               >
                 Groups ({filteredGroups.length})

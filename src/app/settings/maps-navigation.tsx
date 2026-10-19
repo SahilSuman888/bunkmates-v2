@@ -82,55 +82,35 @@ export default function MapsNavigation() {
   };
 
   // Dynamic Theme matching Settings page & ThemeContext
-  let themeMode: "dark" | "light" | "system" = "system";
-  let userAccent = "default";
-  let dynamicThemeColors: any = null;
-  try {
-    const themeContext = useThemeToggle();
-    if (themeContext) {
-      if (themeContext.mode) themeMode = themeContext.mode;
-      if (themeContext.accent) userAccent = themeContext.accent;
-      dynamicThemeColors = themeContext.themeColors;
-    }
-  } catch (e) {
-    // fallback safe
-  }
-
-  const isDark =
-    themeMode === "dark" ||
-    (themeMode === "system" && Appearance.getColorScheme() === "dark");
+  const { themeColors, accentColor, onAccentTextColor, isDark, scaleFont } = useThemeToggle();
 
   // Dynamic solid colors
   const colors = useMemo(() => {
-    const hasCustomNonRedAccent =
-      userAccent &&
-      userAccent !== "default" &&
-      userAccent !== "coral" &&
-      userAccent !== "red" &&
-      (ACCENT_COLORS as any)[userAccent];
-
-    const customAccent = hasCustomNonRedAccent
-      ? (ACCENT_COLORS as any)[userAccent]
-      : null;
-
+    const dynamicAccent = accentColor || "#38bdf8";
+    const isWhiteAccent =
+      dynamicAccent === "#FFFFFF" ||
+      dynamicAccent === "#ffffff" ||
+      dynamicAccent?.toLowerCase() === "#ffffff";
     const greyishWhite = isDark ? "#E2E8F0" : "#4B5563";
-    const activeText = customAccent || (isDark ? "#FFFFFF" : "#11141A");
-    const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
+    const activeText = isWhiteAccent
+      ? (isDark ? "#FFFFFF" : "#111827")
+      : dynamicAccent;
 
     return {
-      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
-      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      bg: themeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: themeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"),
       cardBorder: "transparent",
       divider: "transparent",
-      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
-      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
-      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      accent: dynamicAccent,
+      textPrimary: themeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       greyishWhite: greyishWhite,
       iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
       segmentBg: isDark ? "#202024" : "#E8EAEE",
       segmentActiveBg: isDark ? "#2C2C32" : "#FFFFFF",
-      switchActive: isDark ? "#34C759" : "#10B981",
+      switchActive: dynamicAccent,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
       activeText: activeText,
       activeBorder: "transparent",
@@ -139,7 +119,7 @@ export default function MapsNavigation() {
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
     };
-  }, [isDark, userAccent, dynamicThemeColors]);
+  }, [isDark, accentColor, themeColors]);
 
   // Auth observer
   useEffect(() => {

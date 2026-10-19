@@ -139,11 +139,18 @@ export default function LanguageRegionSettings() {
   const [timeFormat24, setTimeFormat24] = useState<boolean>(false);
   const [firstDayOfWeek, setFirstDayOfWeek] = useState<"Sunday" | "Monday" | "Saturday">("Monday");
 
+  const [prevContextLang, setPrevContextLang] = useState(contextLang);
+  const [prevContextLangCode, setPrevContextLangCode] = useState(contextLangCode);
+
   // Synchronize with global language context
-  useEffect(() => {
+  if (contextLang !== prevContextLang) {
+    setPrevContextLang(contextLang);
     if (contextLang) setLanguage(contextLang);
+  }
+  if (contextLangCode !== prevContextLangCode) {
+    setPrevContextLangCode(contextLangCode);
     if (contextLangCode) setLanguageCode(contextLangCode);
-  }, [contextLang, contextLangCode]);
+  }
 
   // Dynamic ticking clock state (ticks every second)
   const [currentClock, setCurrentClock] = useState<Date>(new Date());
@@ -166,7 +173,7 @@ export default function LanguageRegionSettings() {
 
   // Floating save/action toast state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const [toastOpacity] = useState(() => new Animated.Value(0));
 
   const triggerToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -187,13 +194,13 @@ export default function LanguageRegionSettings() {
 
   // Dynamic Theme matching Settings page & ThemeContext
   let themeMode: "dark" | "light" | "system" = "system";
-  let userAccent = "default";
+  let dynamicAccent = "#FF5A5F";
   let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
-      if (themeContext.accent) userAccent = themeContext.accent;
+      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
       dynamicThemeColors = themeContext.themeColors;
     }
   } catch (e) {
@@ -206,20 +213,24 @@ export default function LanguageRegionSettings() {
 
   // Dynamic solid colors
   const colors = useMemo(() => {
-    const hasCustomNonRedAccent =
-      userAccent &&
-      userAccent !== "default" &&
-      userAccent !== "coral" &&
-      userAccent !== "red" &&
-      (ACCENT_COLORS as any)[userAccent];
+    const isWhiteAccent =
+      dynamicAccent === "white" ||
+      dynamicAccent === "navWhite" ||
+      dynamicAccent === "#FFFFFF" ||
+      dynamicAccent === "#ffffff" ||
+      dynamicAccent?.toLowerCase() === "#ffffff";
 
-    const customAccent = hasCustomNonRedAccent
-      ? (ACCENT_COLORS as any)[userAccent]
-      : null;
+    const isBrightAccent =
+      isWhiteAccent ||
+      dynamicAccent === "#fbc02d" ||
+      dynamicAccent === "#ffd700" ||
+      dynamicAccent === "#f59e0b";
 
+    const onAccentText = isBrightAccent ? "#000000" : "#FFFFFF";
     const greyishWhite = isDark ? "#E2E8F0" : "#4B5563";
-    const activeText = customAccent || (isDark ? "#FFFFFF" : "#11141A");
-    const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
+    const activeText = isWhiteAccent
+      ? (isDark ? "#FFFFFF" : "#111827")
+      : dynamicAccent;
 
     return {
       bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
@@ -230,9 +241,12 @@ export default function LanguageRegionSettings() {
       textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       greyishWhite: greyishWhite,
+      accent: dynamicAccent,
+      onAccentText,
+      isWhiteAccent,
       iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
-      switchActive: isDark ? "#34C759" : "#10B981",
+      switchActive: dynamicAccent,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
       activeText: activeText,
       activeBorder: "transparent",
@@ -246,7 +260,7 @@ export default function LanguageRegionSettings() {
       chipBg: isDark ? "#2A2A30" : "#EEF2F6",
       weekdayActiveBg: isDark ? "#2C2C32" : "#E5E7EB",
     };
-  }, [isDark, userAccent, dynamicThemeColors]);
+  }, [isDark, dynamicAccent, dynamicThemeColors]);
 
   // Auth observer
   useEffect(() => {
@@ -527,7 +541,7 @@ export default function LanguageRegionSettings() {
 
           {/* Localized Greeting & Details */}
           <Text style={[styles.previewGreeting, { color: colors.textPrimary }]}>
-            "{activeGreeting}"
+            &ldquo;{activeGreeting}&rdquo;
           </Text>
 
           <Text style={[styles.previewDetails, { color: colors.textSecondary }]}>
@@ -543,13 +557,20 @@ export default function LanguageRegionSettings() {
                   key={d}
                   style={[
                     styles.weekDayPill,
-                    { backgroundColor: isToday ? colors.switchActive : colors.chipBg },
+                    {
+                      backgroundColor: isToday ? colors.switchActive : colors.chipBg,
+                      borderWidth: (isToday && colors.isWhiteAccent && !isDark) ? 1 : 0,
+                      borderColor: "#111827",
+                    },
                   ]}
                 >
                   <Text
                     style={[
                       styles.weekDayPillText,
-                      { color: isToday ? "#FFFFFF" : colors.textSecondary, fontWeight: isToday ? "700" : "500" },
+                      {
+                        color: isToday ? colors.onAccentText : colors.textSecondary,
+                        fontWeight: isToday ? "700" : "500",
+                      },
                     ]}
                   >
                     {d}
@@ -741,7 +762,7 @@ export default function LanguageRegionSettings() {
                     {item.name}
                   </Text>
                   <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
-                    {item.nativeName} • "{item.greeting}"
+                    {item.nativeName} • &ldquo;{item.greeting}&rdquo;
                   </Text>
                 </View>
                 {isSelected && (
@@ -941,13 +962,15 @@ export default function LanguageRegionSettings() {
                           paddingVertical: 1,
                           borderRadius: 4,
                           backgroundColor: i === 0 ? colors.switchActive : colors.chipBg,
+                          borderWidth: (i === 0 && colors.isWhiteAccent && !isDark) ? 1 : 0,
+                          borderColor: "#111827",
                         }}
                       >
                         <Text
                           style={{
                             fontSize: 9,
                             fontWeight: "600",
-                            color: i === 0 ? "#FFFFFF" : colors.textSecondary,
+                            color: i === 0 ? colors.onAccentText : colors.textSecondary,
                           }}
                         >
                           {wd}

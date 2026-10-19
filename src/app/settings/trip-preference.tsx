@@ -1,4 +1,4 @@
-// **@** Trip Preferences — Pixel-perfect UI matching Settings design system with greyish-white accents, circular back button, dynamic theme adaptability (zero red), and real Firestore persistence
+// **@** Trip Preferences — Features Auto / Manual selection, dynamic subpage routing to Set Your Trip Preferences, Public/Private default trip style toggle, and AI Suggestions switch
 import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
@@ -7,13 +7,14 @@ import {
   Pressable,
   ScrollView,
   Platform,
-  Modal,
+  Switch,
   StatusBar,
   Appearance,
   Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
@@ -24,50 +25,8 @@ import { useAppSettings } from "../../contexts/AppSettingsContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../../theme/theme";
 
-type TravelStyle = "Budget" | "Mid-Range" | "Luxury";
-
-const DURATION_OPTIONS = [
-  "1 - 3 Days",
-  "4 - 7 Days",
-  "1 - 2 Weeks",
-  "2 - 4 Weeks",
-  "1+ Month",
-];
-
-const GROUP_SIZE_OPTIONS = [
-  "Solo (1 Traveler)",
-  "Duo (2 Travelers)",
-  "3 - 6 Bunkmates",
-  "7 - 12 Bunkmates",
-  "12+ Bunkmates",
-];
-
-const ACCOMMODATION_OPTIONS = [
-  "Hostel",
-  "Hotel",
-  "Airbnb",
-  "Camping",
-  "Boutique Hotel",
-  "Guesthouse",
-];
-
-const DIETARY_OPTIONS = [
-  "No Restrictions",
-  "Vegetarian",
-  "Vegan",
-  "Gluten-Free",
-  "Halal",
-  "Kosher",
-];
-
-const ACTIVITY_OPTIONS = [
-  "Museums",
-  "Hiking & Nature",
-  "Nightlife",
-  "Street Food",
-  "Historical Landmarks",
-  "Live Music",
-];
+type PreferenceMode = "auto" | "manual";
+type DefaultTripStyle = "public" | "private";
 
 export default function TripPreferences() {
   const router = useRouter();
@@ -78,27 +37,12 @@ export default function TripPreferences() {
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // States matching reference defaults
-  const [travelStyle, setTravelStyle] = useState<TravelStyle>("Budget");
-  const [accommodations, setAccommodations] = useState<string[]>([
-    "Hostel",
-    "Airbnb",
-    "Boutique Hotel",
-  ]);
-  const [tripDuration, setTripDuration] = useState<string>("4 - 7 Days");
-  const [groupSize, setGroupSize] = useState<string>("3 - 6 Bunkmates");
-  const [dietary, setDietary] = useState<string[]>(["No Restrictions"]);
-  const [activities, setActivities] = useState<string[]>([
-    "Museums",
-    "Hiking & Nature",
-    "Nightlife",
-    "Street Food",
-  ]);
+  // States
+  const [mode, setMode] = useState<PreferenceMode>("auto");
+  const [defaultTripStyle, setDefaultTripStyle] = useState<DefaultTripStyle>("public");
+  const [aiSuggestions, setAiSuggestions] = useState<boolean>(true);
 
-  // Modal pickers state
-  const [activeModal, setActiveModal] = useState<"duration" | "groupSize" | null>(null);
-
-  // Feedback banner state for showing real saving confirmation
+  // Feedback banner state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastOpacity = useMemo(() => new Animated.Value(0), []);
 
@@ -119,71 +63,53 @@ export default function TripPreferences() {
     ]).start(() => setToastMessage(null));
   };
 
-  // Dynamic Theme matching Settings page & ThemeContext
+  // Theme resolution
   let themeMode: "dark" | "light" | "system" = "system";
-  let userAccent = "default";
+  let dynamicAccent = "#FF5A5F";
   let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
-      if (themeContext.accent) userAccent = themeContext.accent;
+      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
       dynamicThemeColors = themeContext.themeColors;
     }
-  } catch (e) {
-    // fallback safe
-  }
+  } catch (e) {}
 
   const isDark =
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  // Dynamic solid colors
   const colors = useMemo(() => {
-    const hasCustomNonRedAccent =
-      userAccent &&
-      userAccent !== "default" &&
-      userAccent !== "coral" &&
-      userAccent !== "red" &&
-      (ACCENT_COLORS as any)[userAccent];
-
-    const customAccent = hasCustomNonRedAccent
-      ? (ACCENT_COLORS as any)[userAccent]
-      : null;
-
+    const isWhiteAccent = dynamicAccent?.toLowerCase() === "#ffffff" || dynamicAccent === "white";
     const greyishWhite = isDark ? "#E2E8F0" : "#4B5563";
-    const activeText = customAccent || (isDark ? "#FFFFFF" : "#11141A");
-    const activeBorder = customAccent || (isDark ? "#E2E8F0" : "#11141A");
-    const activeChipBg = customAccent
-      ? (isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.06)")
-      : (isDark ? "rgba(226, 232, 240, 0.14)" : "rgba(17, 20, 26, 0.08)");
+    const activeText = (isWhiteAccent && !isDark) ? "#111827" : dynamicAccent;
+    const switchActive = dynamicAccent;
+    const switchInactive = isDark ? "#2A2D36" : "#E5E7EB";
 
     return {
       bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
-      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"),
       cardBorder: "transparent",
-      divider: "transparent",
+      divider: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
       textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
       textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
-      greyishWhite: greyishWhite,
+      greyishWhite,
+      accent: dynamicAccent,
       iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
       segmentBg: isDark ? "#202024" : "#E8EAEE",
       segmentActiveBg: isDark ? "#2C2C32" : "#FFFFFF",
       segmentActiveText: activeText,
-      // Selected Chip Colors (zero border, clean contrast)
-      chipSelectedBg: userAccent || (isDark ? "#2C2C32" : "#000000"),
-      chipSelectedBorder: "transparent",
-      chipSelectedText: "#FFFFFF",
-      // Unselected Chip Colors
-      chipUnselectedBg: isDark ? "#202024" : "#F4F5F7",
-      chipUnselectedBorder: "transparent",
-      chipUnselectedText: isDark ? "#94A3B8" : "#64748B",
+      switchActive,
+      switchInactive,
+      activeRowBg: isDark ? "#202024" : "#F4F5F7",
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
+      activePillBg: isDark ? "#2C2C32" : "#FFFFFF",
     };
-  }, [isDark, userAccent]);
+  }, [isDark, dynamicAccent, dynamicThemeColors]);
 
   // Auth observer
   useEffect(() => {
@@ -201,12 +127,9 @@ export default function TripPreferences() {
         const cached = await AsyncStorage.getItem("@bunkmates_trip_preferences");
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (parsed.travelStyle) setTravelStyle(parsed.travelStyle);
-          if (Array.isArray(parsed.accommodations)) setAccommodations(parsed.accommodations);
-          if (parsed.tripDuration) setTripDuration(parsed.tripDuration);
-          if (parsed.groupSize) setGroupSize(parsed.groupSize);
-          if (Array.isArray(parsed.dietary)) setDietary(parsed.dietary);
-          if (Array.isArray(parsed.activities)) setActivities(parsed.activities);
+          if (parsed.mode) setMode(parsed.mode);
+          if (parsed.defaultVisibility) setDefaultTripStyle(parsed.defaultVisibility);
+          if (parsed.aiSuggestions !== undefined) setAiSuggestions(parsed.aiSuggestions);
         }
       } catch (e) {
         console.log("AsyncStorage read error:", e);
@@ -223,12 +146,9 @@ export default function TripPreferences() {
           const uData = snap.data();
           const p = uData.tripPreferences || {};
 
-          if (p.travelStyle) setTravelStyle(p.travelStyle);
-          if (Array.isArray(p.accommodations)) setAccommodations(p.accommodations);
-          if (p.tripDuration) setTripDuration(p.tripDuration);
-          if (p.groupSize) setGroupSize(p.groupSize);
-          if (Array.isArray(p.dietary)) setDietary(p.dietary);
-          if (Array.isArray(p.activities)) setActivities(p.activities);
+          if (p.mode) setMode(p.mode);
+          if (p.defaultVisibility) setDefaultTripStyle(p.defaultVisibility);
+          if (p.aiSuggestions !== undefined) setAiSuggestions(p.aiSuggestions);
         }
       },
       (err) => {
@@ -239,7 +159,6 @@ export default function TripPreferences() {
     return () => unsubscribe();
   }, [authLoading, user]);
 
-  // Sync preference helper saving to both AsyncStorage and Firestore in background
   const syncPreference = (field: string, value: any) => {
     updateTripPreferences({ [field]: value });
     AsyncStorage.getItem("@bunkmates_trip_preferences").then((current) => {
@@ -248,7 +167,6 @@ export default function TripPreferences() {
       AsyncStorage.setItem("@bunkmates_trip_preferences", JSON.stringify(currentObj)).catch(() => {});
     }).catch(() => {});
 
-    // Sync to Firestore in background
     if (!user) return;
     updateDoc(doc(db, "users", user.uid), {
       [`tripPreferences.${field}`]: value,
@@ -258,68 +176,45 @@ export default function TripPreferences() {
     });
   };
 
-  // Toggle multi-select chips: Accommodations
-  const toggleAccommodation = (item: string) => {
-    const next = accommodations.includes(item)
-      ? accommodations.filter((a) => a !== item)
-      : [...accommodations, item];
-    setAccommodations(next);
-    syncPreference("accommodations", next);
-    triggerToast(`Accommodations updated`);
+  const handleSelectMode = (newMode: PreferenceMode) => {
+    Haptics.selectionAsync().catch(() => {});
+    setMode(newMode);
+    syncPreference("mode", newMode);
+    triggerToast(
+      newMode === "auto"
+        ? "AI Auto Trip Preferences active"
+        : "Manual Trip Preferences enabled"
+    );
   };
 
-  // Toggle multi-select chips: Dietary Preferences
-  const toggleDietary = (item: string) => {
-    let next: string[];
-    if (item === "No Restrictions") {
-      next = ["No Restrictions"];
-    } else {
-      const filtered = dietary.filter((d) => d !== "No Restrictions");
-      next = filtered.includes(item)
-        ? filtered.filter((d) => d !== item)
-        : [...filtered, item];
-      if (next.length === 0) next = ["No Restrictions"];
-    }
-    setDietary(next);
-    syncPreference("dietary", next);
-    triggerToast(`Dietary preferences updated`);
+  const handleSelectTripStyle = (style: DefaultTripStyle) => {
+    Haptics.selectionAsync().catch(() => {});
+    setDefaultTripStyle(style);
+    syncPreference("defaultVisibility", style);
+    triggerToast(
+      style === "public"
+        ? "Default trip style set to Public"
+        : "Default trip style set to Private"
+    );
   };
 
-  // Toggle multi-select chips: Activity Interests
-  const toggleActivity = (item: string) => {
-    const next = activities.includes(item)
-      ? activities.filter((a) => a !== item)
-      : [...activities, item];
-    setActivities(next);
-    syncPreference("activities", next);
-    triggerToast(`Interests updated`);
+  const handleToggleAiSuggestions = (val: boolean) => {
+    Haptics.selectionAsync().catch(() => {});
+    setAiSuggestions(val);
+    syncPreference("aiSuggestions", val);
+    triggerToast(val ? "AI Suggestions enabled" : "AI Suggestions disabled");
   };
 
-  const handleSelectStyle = (style: TravelStyle) => {
-    setTravelStyle(style);
-    syncPreference("travelStyle", style);
-    triggerToast(`Travel style set to ${style}`);
-  };
-
-  const handleSelectDuration = (duration: string) => {
-    setTripDuration(duration);
-    syncPreference("tripDuration", duration);
-    setActiveModal(null);
-    triggerToast(`Duration set to ${duration}`);
-  };
-
-  const handleSelectGroupSize = (size: string) => {
-    setGroupSize(size);
-    syncPreference("groupSize", size);
-    setActiveModal(null);
-    triggerToast(`Group size set to ${size}`);
+  const handleOpenCustomPreferences = () => {
+    Haptics.selectionAsync().catch(() => {});
+    router.push("/settings/custom-trip-preference" as any);
   };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
 
-      {/* ── Top Header: Exact circular button matching Settings page (modernHeaderBtn) ── */}
+      {/* ── Top Header ── */}
       <View style={styles.header}>
         <Pressable
           onPress={() => router.back()}
@@ -343,292 +238,288 @@ export default function TripPreferences() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── 1. PREFERRED TRAVEL STYLE ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("TRAVEL STYLE", "PREFERRED TRAVEL STYLE")}</Text>
+        {/* ── 1. PREFERENCE MODE: AUTO & MANUAL ── */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("PREFERENCE MODE")}
+        </Text>
         <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
           <Text style={[styles.descText, { color: colors.textSecondary }]}>
-            {t("What's your typical budget and pace for exploring new spots?", "What's your typical budget and pace for exploring new spots?")}
+            {t("Choose whether BunkMates dynamically adapts to your trip style or uses your custom settings:")}
           </Text>
 
-          {/* 3-Way Segmented Control */}
+          {/* 2-Way Segmented Control: Auto vs Manual */}
           <View style={[styles.segmentContainer, { backgroundColor: colors.segmentBg }]}>
-            {(["Budget", "Mid-Range", "Luxury"] as TravelStyle[]).map((style) => {
-              const isSelected = travelStyle === style;
-              return (
-                <Pressable
-                  key={style}
+            <Pressable
+              style={[
+                styles.segmentItem,
+                mode === "auto" && [
+                  styles.segmentItemActive,
+                  { backgroundColor: colors.segmentActiveBg },
+                ],
+              ]}
+              onPress={() => handleSelectMode("auto")}
+            >
+              <View style={styles.segmentLabelRow}>
+                <Ionicons
+                  name="flash"
+                  size={15}
+                  color={mode === "auto" ? colors.segmentActiveText : colors.textSecondary}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
                   style={[
-                    styles.segmentItem,
-                    isSelected && [
-                      styles.segmentItemActive,
-                      { backgroundColor: colors.segmentActiveBg },
-                    ],
+                    styles.segmentText,
+                    mode === "auto"
+                      ? [styles.segmentTextActive, { color: colors.segmentActiveText }]
+                      : { color: colors.textSecondary },
                   ]}
-                  onPress={() => handleSelectStyle(style)}
                 >
-                  <Text
-                    style={[
-                      styles.segmentText,
-                      isSelected
-                        ? [styles.segmentTextActive, { color: colors.segmentActiveText }]
-                        : { color: colors.textSecondary },
-                    ]}
-                  >
-                    {t(style)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
+                  {t("Auto")}
+                </Text>
+              </View>
+            </Pressable>
 
-        {/* ── 2. PREFERRED ACCOMMODATIONS ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("Accommodation Preference", "PREFERRED ACCOMMODATIONS")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
-          <Text style={[styles.descText, { color: colors.textSecondary }]}>
-            {t("Select your favorite types of stays (multi-select):", "Select your favorite types of stays (multi-select):")}
+            <Pressable
+              style={[
+                styles.segmentItem,
+                mode === "manual" && [
+                  styles.segmentItemActive,
+                  { backgroundColor: colors.segmentActiveBg },
+                ],
+              ]}
+              onPress={() => handleSelectMode("manual")}
+            >
+              <View style={styles.segmentLabelRow}>
+                <Ionicons
+                  name="options-outline"
+                  size={16}
+                  color={mode === "manual" ? colors.segmentActiveText : colors.textSecondary}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[
+                    styles.segmentText,
+                    mode === "manual"
+                      ? [styles.segmentTextActive, { color: colors.segmentActiveText }]
+                      : { color: colors.textSecondary },
+                  ]}
+                >
+                  {t("Manual")}
+                </Text>
+              </View>
+            </Pressable>
+          </View>
+
+          {/* Dynamic mode explanation */}
+          <Text style={[styles.modeNote, { color: colors.textSecondary }]}>
+            {mode === "auto"
+              ? t("⚡ Auto mode uses BunkMates AI to automatically learn your travel pace, budget, and ideal stays as you explore.")
+              : t("⚙️ Manual mode lets you precisely configure your default duration, stay types, diet, and activities.")}
           </Text>
-
-          <View style={styles.chipRow}>
-            {ACCOMMODATION_OPTIONS.map((item) => {
-              const isSelected = accommodations.includes(item);
-              return (
-                <Pressable
-                  key={item}
-                  style={({ pressed }) => [
-                    styles.chipPill,
-                    {
-                      backgroundColor: isSelected ? colors.chipSelectedBg : colors.chipUnselectedBg,
-                    },
-                    pressed && styles.pressed,
-                  ]}
-                  onPress={() => toggleAccommodation(item)}
-                >
-                  <Text
-                    style={[
-                      styles.chipText,
-                      {
-                        color: isSelected ? colors.chipSelectedText : colors.chipUnselectedText,
-                        fontWeight: isSelected ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {t(item)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
         </View>
 
-        {/* ── 3. DEFAULT TRIP SETTINGS ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DEFAULT TRIP SETTINGS", "DEFAULT TRIP SETTINGS")}</Text>
+        {/* ── CONDITIONAL MANUAL CONFIGURATION BUTTON ── */}
+        {mode === "manual" && (
+          <>
+            <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+              {t("CUSTOM PREFERENCES")}
+            </Text>
+            <View style={[styles.card, { backgroundColor: colors.card }]}>
+              <Pressable
+                style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                onPress={handleOpenCustomPreferences}
+                accessibilityRole="button"
+                accessibilityLabel="Set your trip preferences"
+              >
+                <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+                  <Ionicons name="construct-outline" size={20} color={colors.greyishWhite} />
+                </View>
+                <View style={styles.rowMid}>
+                  <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                    {t("Set Your Trip Preferences")}
+                  </Text>
+                  <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                    {t("Default trip settings, diet & lifestyles, activities & interests")}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
+              </Pressable>
+            </View>
+          </>
+        )}
+
+        {/* ── 2. DEFAULT TRIP STYLE: PUBLIC / PRIVATE TOGGLE ── */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("DEFAULT TRIP STYLE")}
+        </Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
-          {/* Default Trip Duration */}
-          <Pressable
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-            onPress={() => setActiveModal("duration")}
-            accessibilityRole="button"
-            accessibilityLabel="Default Trip Duration"
-          >
+          <View style={styles.row}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
-              <Ionicons name="time-outline" size={20} color={colors.greyishWhite} />
+              <Ionicons
+                name={defaultTripStyle === "public" ? "globe-outline" : "lock-closed-outline"}
+                size={20}
+                color={colors.greyishWhite}
+              />
             </View>
             <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Typical Duration", "Default Trip Duration")}</Text>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("Default Trip Style")}
+              </Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {defaultTripStyle === "public"
+                  ? t("Public: Anyone can discover and request to join your trips")
+                  : t("Private: Invitation-only; hidden from public discovery")}
+              </Text>
             </View>
-            <Text style={[styles.rowValue, { color: colors.textSecondary }]}>{t(tripDuration)}</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
-          </Pressable>
 
-          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
-
-          {/* Ideal Group Size */}
-          <Pressable
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-            onPress={() => setActiveModal("groupSize")}
-            accessibilityRole="button"
-            accessibilityLabel="Ideal Group Size"
-          >
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
-              <Ionicons name="people-outline" size={20} color={colors.greyishWhite} />
-            </View>
-            <View style={styles.rowMid}>
-              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Preferred Group Size", "Ideal Group Size")}</Text>
-            </View>
-            <Text style={[styles.rowValue, { color: colors.textSecondary }]}>{t(groupSize)}</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
-          </Pressable>
-        </View>
-
-        {/* ── 4. DIETARY PREFERENCES ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DIET & LIFESTYLE", "DIETARY PREFERENCES")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
-          <Text style={[styles.descText, { color: colors.textSecondary }]}>
-            We'll filter group diners and recipe guides based on these:
-          </Text>
-
-          <View style={styles.chipRow}>
-            {DIETARY_OPTIONS.map((item) => {
-              const isSelected = dietary.includes(item);
-              return (
-                <Pressable
-                  key={item}
-                  style={({ pressed }) => [
-                    styles.chipPill,
+            {/* Segmented Toggle Buttons: Public / Private */}
+            <View
+              style={[
+                styles.toggleContainer,
+                {
+                  backgroundColor: isDark
+                    ? "rgba(255, 255, 255, 0.08)"
+                    : "rgba(0, 0, 0, 0.05)",
+                },
+              ]}
+            >
+              <Pressable
+                onPress={() => handleSelectTripStyle("public")}
+                style={({ pressed }) => [
+                  styles.toggleBtn,
+                  defaultTripStyle === "public" && [
+                    styles.toggleBtnActive,
                     {
-                      backgroundColor: isSelected ? colors.chipSelectedBg : colors.chipUnselectedBg,
+                      backgroundColor: colors.activePillBg,
+                      shadowColor: "#000",
+                      shadowOffset: { width: 0, height: 1 },
+                      shadowOpacity: isDark ? 0.35 : 0.12,
+                      shadowRadius: 2,
+                      elevation: 2,
                     },
-                    pressed && styles.pressed,
+                  ],
+                  pressed && { opacity: 0.8 },
+                ]}
+                hitSlop={4}
+                accessibilityRole="button"
+                accessibilityLabel="Set trip style to Public"
+              >
+                <Ionicons
+                  name="globe-outline"
+                  size={13}
+                  color={
+                    defaultTripStyle === "public"
+                      ? colors.segmentActiveText
+                      : colors.textSecondary
+                  }
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.toggleBtnText,
+                    {
+                      color:
+                        defaultTripStyle === "public"
+                          ? colors.segmentActiveText
+                          : colors.textSecondary,
+                      fontWeight: defaultTripStyle === "public" ? "700" : "500",
+                    },
                   ]}
-                  onPress={() => toggleDietary(item)}
                 >
-                  <Text
-                    style={[
-                      styles.chipText,
-                      {
-                        color: isSelected ? colors.chipSelectedText : colors.chipUnselectedText,
-                        fontWeight: isSelected ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {t(item)}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                  {t("Public")}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => handleSelectTripStyle("private")}
+                style={({ pressed }) => [
+                  styles.toggleBtn,
+                  defaultTripStyle === "private" && [
+                    styles.toggleBtnActive,
+                    {
+                      backgroundColor: colors.activePillBg,
+                      shadowColor: "#000",
+                      shadowOffset: { width: 0, height: 1 },
+                      shadowOpacity: isDark ? 0.35 : 0.12,
+                      shadowRadius: 2,
+                      elevation: 2,
+                    },
+                  ],
+                  pressed && { opacity: 0.8 },
+                ]}
+                hitSlop={4}
+                accessibilityRole="button"
+                accessibilityLabel="Set trip style to Private"
+              >
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={12}
+                  color={
+                    defaultTripStyle === "private"
+                      ? colors.segmentActiveText
+                      : colors.textSecondary
+                  }
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.toggleBtnText,
+                    {
+                      color:
+                        defaultTripStyle === "private"
+                          ? colors.segmentActiveText
+                          : colors.textSecondary,
+                      fontWeight: defaultTripStyle === "private" ? "700" : "500",
+                    },
+                  ]}
+                >
+                  {t("Private")}
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </View>
 
-        {/* ── 5. ACTIVITY INTERESTS ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("ACTIVITY INTERESTS")}</Text>
-        <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
-          <Text style={[styles.descText, { color: colors.textSecondary }]}>
-            {t("Help us match you with perfect sightseeing plans:", "Help us match you with perfect sightseeing plans:")}
-          </Text>
-
-          <View style={styles.chipRow}>
-            {ACTIVITY_OPTIONS.map((item) => {
-              const isSelected = activities.includes(item);
-              return (
-                <Pressable
-                  key={item}
-                  style={({ pressed }) => [
-                    styles.chipPill,
-                    {
-                      backgroundColor: isSelected ? colors.chipSelectedBg : colors.chipUnselectedBg,
-                    },
-                    pressed && styles.pressed,
-                  ]}
-                  onPress={() => toggleActivity(item)}
-                >
-                  <Text
-                    style={[
-                      styles.chipText,
-                      {
-                        color: isSelected ? colors.chipSelectedText : colors.chipUnselectedText,
-                        fontWeight: isSelected ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {t(item)}
-                  </Text>
-                </Pressable>
-              );
-            })}
+        {/* ── 3. AI SUGGESTIONS ── */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("SMART RECOMMENDATIONS")}
+        </Text>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
+          <View style={styles.row}>
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="sparkles" size={19} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("AI Suggestions")}
+              </Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {t("Receive smart recommendations for spots, routes, and bunkmates while planning trips")}
+              </Text>
+            </View>
+            <Switch
+              value={aiSuggestions}
+              onValueChange={handleToggleAiSuggestions}
+              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
+              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+            />
           </View>
         </View>
       </ScrollView>
 
-      {/* ── Floating Real-time Save Toast Indicator ── */}
+      {/* Floating Save Toast */}
       {toastMessage && (
         <Animated.View
           style={[
-            styles.toastContainer,
+            styles.toastBox,
             { backgroundColor: colors.toastBg, opacity: toastOpacity },
           ]}
           pointerEvents="none"
         >
-          <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+          <Ionicons name="checkmark-circle" size={18} color="#10B981" style={{ marginRight: 8 }} />
           <Text style={[styles.toastText, { color: colors.toastText }]}>{toastMessage}</Text>
         </Animated.View>
       )}
-
-      {/* ── Interactive Selection Modal (Duration & Group Size) ── */}
-      <Modal
-        visible={activeModal !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setActiveModal(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
-              <Ionicons
-                name={activeModal === "duration" ? "time-outline" : "people-outline"}
-                size={22}
-                color={colors.greyishWhite}
-              />
-            </View>
-
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
-              {activeModal === "duration" ? t("Default Trip Duration") : t("Ideal Group Size")}
-            </Text>
-            <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
-              {activeModal === "duration"
-                ? t("Choose your standard preferred duration when creating or searching trips.", "Choose your standard preferred duration when creating or searching trips.")
-                : t("Choose the target group size that best suits your travel style.", "Choose the target group size that best suits your travel style.")}
-            </Text>
-
-            <View style={styles.modalListColumn}>
-              {(activeModal === "duration" ? DURATION_OPTIONS : GROUP_SIZE_OPTIONS).map((opt) => {
-                const isSelected = activeModal === "duration" ? tripDuration === opt : groupSize === opt;
-                return (
-                  <Pressable
-                    key={opt}
-                    style={({ pressed }) => [
-                      styles.modalOptionItem,
-                      {
-                        backgroundColor: isSelected ? colors.chipSelectedBg : colors.segmentBg,
-                      },
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={() =>
-                      activeModal === "duration" ? handleSelectDuration(opt) : handleSelectGroupSize(opt)
-                    }
-                  >
-                    <Text
-                      style={[
-                        styles.modalOptionText,
-                        {
-                          color: isSelected ? colors.chipSelectedText : colors.textPrimary,
-                          fontWeight: isSelected ? "700" : "500",
-                        },
-                      ]}
-                    >
-                      {t(opt)}
-                    </Text>
-                    {isSelected && (
-                      <Ionicons name="checkmark-circle" size={20} color={colors.greyishWhite} />
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Pressable
-              style={({ pressed }) => [
-                styles.modalCloseBtn,
-                { backgroundColor: colors.segmentBg },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setActiveModal(null)}
-            >
-              <Text style={[styles.modalCloseBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -641,13 +532,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
+    paddingTop: 8,
     paddingBottom: 40,
   },
   pressed: {
     opacity: 0.7,
   },
 
-  // Header matching Settings & ProfileEdit
+  // Header matching Bunkmates Settings design
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -671,202 +563,132 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // Section Heading matching Settings
+  // Section Headings & Cards
   sectionHeading: {
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 0.8,
     marginTop: 22,
     marginBottom: 8,
-    paddingHorizontal: 22,
+    paddingHorizontal: 20,
   },
-
-  // Card matching modernCardGroup in Settings (28px radius, zero border)
   card: {
     marginHorizontal: 20,
     borderRadius: 28,
     borderWidth: 0,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 5,
-    elevation: 0,
   },
-
-  // Description text
   descText: {
-    fontSize: 13.5,
-    lineHeight: 19,
+    fontSize: 13,
+    lineHeight: 18,
     marginBottom: 14,
   },
+  modeNote: {
+    fontSize: 12.5,
+    lineHeight: 17,
+    marginTop: 12,
+  },
 
-  // 3-Option Segmented Control
+  // Segmented Control
   segmentContainer: {
     flexDirection: "row",
-    alignItems: "center",
-    height: 48,
-    borderRadius: 14,
+    borderRadius: 16,
     padding: 4,
+    gap: 4,
   },
   segmentItem: {
     flex: 1,
-    height: "100%",
-    justifyContent: "center",
+    paddingVertical: 10,
     alignItems: "center",
-    borderRadius: 10,
+    justifyContent: "center",
+    borderRadius: 12,
   },
   segmentItemActive: {
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
     elevation: 2,
   },
+  segmentLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   segmentText: {
-    fontSize: 13.5,
+    fontSize: 13,
     fontWeight: "600",
   },
   segmentTextActive: {
     fontWeight: "700",
   },
 
-  // Chips layout
-  chipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  chipPill: {
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 24,
-    borderWidth: 0,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  chipText: {
-    fontSize: 13.5,
-  },
-
-  // Rows inside cards
+  // Rows
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 15,
+    paddingVertical: 14,
     paddingHorizontal: 16,
   },
   iconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 14,
   },
   rowMid: {
     flex: 1,
+    marginRight: 10,
   },
   rowTitle: {
     fontSize: 15,
     fontWeight: "600",
-    letterSpacing: -0.2,
   },
-  rowValue: {
-    fontSize: 13.5,
-    fontWeight: "500",
-    marginRight: 6,
-  },
-  divider: {
-    height: 0,
-    marginHorizontal: 16,
+  rowSub: {
+    fontSize: 12,
+    marginTop: 2,
+    lineHeight: 16,
   },
 
-  // Toast container
-  toastContainer: {
+  // Toggle Buttons Container
+  toggleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 20,
+    padding: 3,
+    gap: 3,
+  },
+  toggleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  toggleBtnActive: {},
+  toggleBtnText: {
+    fontSize: 12,
+  },
+
+  // Toast
+  toastBox: {
     position: "absolute",
-    bottom: 24,
+    bottom: 30,
     alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 24,
+    elevation: 8,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
-    elevation: 6,
-    zIndex: 999,
   },
   toastText: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
-
-  // Modal styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
-  modalCard: {
-    width: "100%",
-    maxWidth: 380,
-    borderRadius: 28,
-    borderWidth: 0,
-    padding: 24,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 0,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    letterSpacing: -0.3,
-    marginBottom: 6,
-    textAlign: "center",
-  },
-  modalDesc: {
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: "center",
-    marginBottom: 16,
-  },
-  modalListColumn: {
-    width: "100%",
-    gap: 8,
-    marginBottom: 18,
-  },
-  modalOptionItem: {
-    width: "100%",
-    paddingVertical: 13,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    borderWidth: 0,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  modalOptionText: {
-    fontSize: 14,
-  },
-  modalCloseBtn: {
-    width: "100%",
-    height: 44,
-    borderRadius: 24,
-    borderWidth: 0,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalCloseBtnText: {
-    fontSize: 14,
+    fontSize: 13.5,
     fontWeight: "600",
   },
 });

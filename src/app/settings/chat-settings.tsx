@@ -4,13 +4,12 @@
 // typing indicators, media auto-download, disappearing messages, and archive management.
 // Redundant settings (Theme, Font Size) are removed and centralized in Appearance.
 
-import React, { useState, useMemo, useRef, useCallback } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
-  Modal,
   FlatList,
   Image,
   Dimensions,
@@ -85,7 +84,7 @@ export default function ChatSettingsScreen() {
 
   // Floating Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const [toastOpacity] = useState(() => new Animated.Value(0));
 
   const triggerToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -105,13 +104,9 @@ export default function ChatSettingsScreen() {
   }, [toastOpacity]);
 
   // Theme resolution
-  let themeMode: "dark" | "light" | "system" = "system";
-  let activeAccent = "#FF5A5F";
-  try {
-    const themeContext = useThemeToggle();
-    if (themeContext?.mode) themeMode = themeContext.mode;
-    if (themeContext?.accentColor) activeAccent = themeContext.accentColor;
-  } catch (e) {}
+  const themeContext = useThemeToggle();
+  const themeMode = themeContext?.mode ?? "system";
+  const activeAccent = themeContext?.accentColor ?? "#FF5A5F";
 
   const isDark =
     themeMode === "dark" ||
@@ -699,11 +694,7 @@ export default function ChatSettingsScreen() {
         confirmLabel={t("Clear Messages")}
         cancelLabel={t("Cancel")}
         confirmColor={colors.destructive}
-        onConfirm={async () => {
-          await clearAllChats();
-          triggerToast("All chat messages cleared");
-          triggerHaptic("warning");
-        }}
+        onConfirm={handleConfirmClearChats}
         successTitle={t("Messages Cleared")}
         successMessage={t("All conversation message histories have been cleared successfully.")}
       />
@@ -718,11 +709,7 @@ export default function ChatSettingsScreen() {
         confirmLabel={t("Delete Everything")}
         cancelLabel={t("Cancel")}
         confirmColor={colors.destructive}
-        onConfirm={async () => {
-          await deleteAllChats();
-          triggerToast("All chats permanently deleted");
-          triggerHaptic("warning");
-        }}
+        onConfirm={handleConfirmDeleteChats}
         successTitle={t("All Chats Deleted")}
         successMessage={t("All chat conversations and attachments have been permanently deleted.")}
       />
@@ -737,11 +724,7 @@ export default function ChatSettingsScreen() {
         confirmLabel={t("Reset Defaults")}
         cancelLabel={t("Cancel")}
         confirmColor={colors.switchActive}
-        onConfirm={async () => {
-          await resetChatPreferences();
-          triggerToast("Chat settings reset to default");
-          triggerHaptic("warning");
-        }}
+        onConfirm={handleConfirmReset}
         successTitle={t("Settings Restored")}
         successMessage={t("Chat configurations have been reset to default values.")}
       />

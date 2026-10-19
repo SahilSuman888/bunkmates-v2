@@ -1,10 +1,11 @@
+import { AccessibilityApplicator } from "../components/ui/AccessibilityApplicator";
 import { Stack } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { View, Platform, StatusBar } from "react-native";
 import { enableScreens, enableFreeze } from "react-native-screens";
 
 import { UserProvider } from "../contexts/UserContext";
-import { AppSettingsProvider, useAppSettings } from "../contexts/AppSettingsContext";
+import { AppSettingsProvider } from "../contexts/AppSettingsContext";
 import { LanguageProvider } from "../contexts/LanguageContext";
 
 import {
@@ -31,58 +32,59 @@ enableScreens(true);
 enableFreeze(true);
 
 function LayoutContent() {
-  const { themeColors, isDark, reduceAnimations, background } = useThemeToggle();
-  const { reduceMotion } = useAppSettings();
+  const { themeColors, isDark, reduceAnimations, background, reduceMotionAccessibility } = useThemeToggle();
 
-  const disableAnimations = reduceAnimations || reduceMotion;
+  const disableAnimations = reduceAnimations || reduceMotionAccessibility;
 
   return (
-    <View
-      style={{
-        flex: 1,
-        backgroundColor: themeColors.background,
-      }}
-    >
-      <StatusBar
-        barStyle={isDark ? "light-content" : "dark-content"}
-        backgroundColor={themeColors.background}
-      />
-      <AppAtmosphereBackground />
-      <GradientProvider>
-        <UserProvider>
-          <CallProvider>
-            <ChatSettingsProvider>
+    <AccessibilityApplicator>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: themeColors.background,
+        }}
+      >
+        <StatusBar
+          barStyle={isDark ? "light-content" : "dark-content"}
+          backgroundColor={themeColors.background}
+        />
+        <AppAtmosphereBackground />
+        <GradientProvider>
+          <UserProvider>
+            <CallProvider>
+              <ChatSettingsProvider>
 
-              {/* OneSignal — handles push notification taps & call alerts */}
-              <OneSignalHandler />
+                {/* OneSignal — handles push notification taps & call alerts */}
+                <OneSignalHandler />
 
-              {/* Local expo-notifications handler */}
-              <NotificationsHandler />
-              <InAppNotificationBanner />
-              <IncomingCallHandler />
+                {/* Local expo-notifications handler */}
+                <NotificationsHandler />
+                <InAppNotificationBanner />
+                <IncomingCallHandler />
 
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  presentation: "card",
-                  contentStyle: {
-                    backgroundColor:
-                      background.mode === "solid"
-                        ? themeColors.background
-                        : "transparent",
-                  },
-                  animation: disableAnimations ? "none" : "slide_from_right",
-                  gestureEnabled: true,
-                  fullScreenGestureEnabled: true,
-                  freezeOnBlur: true,
-                  animationTypeForReplace: "push",
-                }}
-              />
-            </ChatSettingsProvider>
-          </CallProvider>
-        </UserProvider>
-      </GradientProvider>
-    </View>
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    presentation: "card",
+                    contentStyle: {
+                      backgroundColor:
+                        background.mode === "solid"
+                          ? themeColors.background
+                          : "transparent",
+                    },
+                    animation: disableAnimations ? "none" : "slide_from_right",
+                    gestureEnabled: true,
+                    fullScreenGestureEnabled: true,
+                    freezeOnBlur: true,
+                    animationTypeForReplace: "push",
+                  }}
+                />
+              </ChatSettingsProvider>
+            </CallProvider>
+          </UserProvider>
+        </GradientProvider>
+      </View>
+    </AccessibilityApplicator>
   );
 }
 

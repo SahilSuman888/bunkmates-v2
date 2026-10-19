@@ -191,7 +191,7 @@ export default function LicensesScreen() {
               distribute the software.
             </Text>
             <Text style={[styles.bullet, { color: themeColors.textSecondary }]}>
-              • The software is provided "as is" without warranty of any kind.
+              • The software is provided &ldquo;as is&rdquo; without warranty of any kind.
             </Text>
             <Text style={[styles.bullet, { color: themeColors.textSecondary }]}>
               • Includes copyrights from Facebook, Inc., Material-UI Team, and
@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   cardGroup: {
-    borderRadius: 20,
+    borderRadius: 28,
     overflow: "hidden",
     borderWidth: 0,
   },

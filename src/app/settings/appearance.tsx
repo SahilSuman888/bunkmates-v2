@@ -27,7 +27,8 @@ import {
 import { useLanguage } from "../../contexts/LanguageContext";
 
 const SWATCH_PALETTE = [
-  { key: "coral", color: "#FF5A5F", label: "Sunset Coral" },
+  { key: "coral", color: "#FF5A5F", label: "Default (Sunset Coral)" },
+  { key: "white", color: "#FFFFFF", label: "Navigation White" },
   { key: "orange", color: "#f9971f", label: "Sunset Orange" },
   { key: "green", color: "#43a047", label: "Emerald Green" },
   { key: "blue", color: "#1976d2", label: "Ocean Blue" },
@@ -54,6 +55,7 @@ export default function AppearanceScreen() {
     accent,
     setAccent,
     accentColor,
+    onAccentTextColor,
     locationMode,
     setLocationMode,
     fontSize,
@@ -288,13 +290,18 @@ export default function AppearanceScreen() {
             contentContainerStyle={styles.swatchRow}
           >
             {SWATCH_PALETTE.map((s) => {
-              const isSelected = accent === s.key;
+              const isSelected =
+                accent === s.key || (s.key === "coral" && (accent === "default" || !accent));
               return (
                 <Pressable
                   key={s.key}
                   style={({ pressed }) => [
                     styles.swatchCircle,
-                    { backgroundColor: s.color },
+                    {
+                      backgroundColor: s.color,
+                      borderWidth: s.key === "white" ? 1.5 : 0,
+                      borderColor: isDark ? "rgba(255, 255, 255, 0.3)" : "rgba(0, 0, 0, 0.15)",
+                    },
                     isSelected && [
                       styles.swatchSelectedRing,
                       { borderColor: isDark ? "#FFFFFF" : "#000000" },
@@ -304,7 +311,13 @@ export default function AppearanceScreen() {
                   onPress={() => handleSelectAccent(s.key)}
                   accessibilityLabel={s.label}
                 >
-                  {isSelected && <Ionicons name="checkmark" size={18} color="#FFFFFF" />}
+                  {isSelected && (
+                    <Ionicons
+                      name="checkmark"
+                      size={18}
+                      color={s.key === "white" ? "#000000" : "#FFFFFF"}
+                    />
+                  )}
                 </Pressable>
               );
             })}
@@ -312,10 +325,31 @@ export default function AppearanceScreen() {
 
           {/* Live Accent Preview Box */}
           <View style={[styles.accentPreviewBox, { backgroundColor: colors.cardInner }]}>
-            <View style={[styles.accentPill, { backgroundColor: accentColor }]}>
-              <Ionicons name="sparkles" size={14} color="#FFFFFF" />
-              <Text style={[styles.accentPillText, { fontSize: scaleFont(12) }]}>
-                {SWATCH_PALETTE.find((s) => s.key === accent)?.label || "Active Accent"}
+            <View
+              style={[
+                styles.accentPill,
+                {
+                  backgroundColor: accentColor,
+                  borderWidth: (accentColor === "#FFFFFF" && !isDark) ? 1 : 0,
+                  borderColor: "rgba(0, 0, 0, 0.1)",
+                },
+              ]}
+            >
+              <Ionicons
+                name="sparkles"
+                size={14}
+                color={accentColor === "#FFFFFF" || accentColor === "#e5e7eb" ? "#000000" : "#FFFFFF"}
+              />
+              <Text
+                style={[
+                  styles.accentPillText,
+                  {
+                    color: accentColor === "#FFFFFF" || accentColor === "#e5e7eb" ? "#000000" : "#FFFFFF",
+                    fontSize: scaleFont(12),
+                  },
+                ]}
+              >
+                {SWATCH_PALETTE.find((s) => s.key === accent || (s.key === "coral" && (accent === "default" || !accent)))?.label || "Default (Sunset Coral)"}
               </Text>
             </View>
             <Text style={[styles.accentPreviewLabel, { color: colors.textSecondary, fontSize: scaleFont(12) }]}>
@@ -368,8 +402,17 @@ export default function AppearanceScreen() {
             {/* LIVE TYPOGRAPHY PREVIEW CARD */}
             <View style={[styles.liveTypeBox, { backgroundColor: colors.cardInner }]}>
               <View style={styles.liveTypeHeader}>
-                <View style={[styles.typeBadge, { backgroundColor: accentColor }]}>
-                  <Text style={styles.typeBadgeText}>Aa</Text>
+                <View
+                  style={[
+                    styles.typeBadge,
+                    {
+                      backgroundColor: accentColor,
+                      borderWidth: (accentColor === "#FFFFFF" && !isDark) ? 1 : 0,
+                      borderColor: "#111827",
+                    },
+                  ]}
+                >
+                  <Text style={[styles.typeBadgeText, { color: onAccentTextColor }]}>Aa</Text>
                 </View>
                 <Text style={[styles.liveTypeScaleText, { color: colors.textSecondary, fontSize: scaleFont(11) }]}>
                   Scale: {Math.round(fontScale * 100)}% ({fontSize})

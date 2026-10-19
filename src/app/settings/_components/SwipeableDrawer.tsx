@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   View,
   StyleSheet,
@@ -49,17 +49,28 @@ export function SwipeableDrawer({
 }: SwipeableDrawerProps) {
   const insets = useSafeAreaInsets();
   const [modalVisible, setModalVisible] = useState(visible);
-  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const [prevVisible, setPrevVisible] = useState(visible);
+  const [translateY] = useState(() => new Animated.Value(SCREEN_HEIGHT));
   const isClosingRef = useRef(false);
 
+  // Sync modalVisible state on visible prop transition
+  if (visible !== prevVisible) {
+    setPrevVisible(visible);
+    if (visible) {
+      setModalVisible(true);
+    }
+  }
+
   // Directly interpolate backdrop opacity from translateY on UI thread — ZERO JS bridge overhead
-  const backdropOpacity = useRef(
-    translateY.interpolate({
-      inputRange: [0, SCREEN_HEIGHT * 0.7],
-      outputRange: [1, 0],
-      extrapolate: "clamp",
-    })
-  ).current;
+  const backdropOpacity = useMemo(
+    () =>
+      translateY.interpolate({
+        inputRange: [0, SCREEN_HEIGHT * 0.7],
+        outputRange: [1, 0],
+        extrapolate: "clamp",
+      }),
+    [translateY]
+  );
 
   // Ultra-smooth native dismiss animation
   const dismissAnimated = useCallback(() => {
@@ -81,7 +92,6 @@ export function SwipeableDrawer({
   useEffect(() => {
     if (visible) {
       isClosingRef.current = false;
-      setModalVisible(true);
       translateY.setValue(SCREEN_HEIGHT);
       Animated.spring(translateY, {
         toValue: 0,
@@ -94,7 +104,7 @@ export function SwipeableDrawer({
     } else if (modalVisible && !isClosingRef.current) {
       dismissAnimated();
     }
-  }, [visible]);
+  }, [visible, modalVisible, dismissAnimated, translateY]);
 
   // Handle Android hardware back button
   useEffect(() => {
@@ -106,8 +116,16 @@ export function SwipeableDrawer({
     return () => backSub.remove();
   }, [modalVisible, dismissAnimated]);
 
+  const dismissAnimatedRef = useRef(dismissAnimated);
+  const dismissThresholdRef = useRef(dismissThreshold);
+  useEffect(() => {
+    dismissAnimatedRef.current = dismissAnimated;
+    dismissThresholdRef.current = dismissThreshold;
+  }, [dismissAnimated, dismissThreshold]);
+
   // Dedicated PanResponder for the top Grab Handle area — fluid 60/120fps gesture
-  const handlePanResponder = useRef(
+  // eslint-disable-next-line react-hooks/refs
+  const [handlePanResponder] = useState(() =>
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onStartShouldSetPanResponderCapture: () => true,
@@ -117,13 +135,12 @@ export function SwipeableDrawer({
         if (gestureState.dy > 0) {
           translateY.setValue(gestureState.dy);
         } else {
-          // Elastic resistance upward
           translateY.setValue(gestureState.dy * 0.12);
         }
       },
       onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > dismissThreshold || gestureState.vy > 0.45) {
-          dismissAnimated();
+        if (gestureState.dy > dismissThresholdRef.current || gestureState.vy > 0.45) {
+          dismissAnimatedRef.current();
         } else {
           Animated.spring(translateY, {
             toValue: 0,
@@ -136,14 +153,14 @@ export function SwipeableDrawer({
         }
       },
     })
-  ).current;
+  );
 
   // Sheet-level PanResponder for downward drags from non-scrolling areas (does NOT capture or block inner ScrollViews)
-  const sheetPanResponder = useRef(
+  // eslint-disable-next-line react-hooks/refs
+  const [sheetPanResponder] = useState(() =>
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only claim if clearly dragging downward and not a horizontal swipe or micro tap
         return gestureState.dy > 18 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 2;
       },
       onPanResponderMove: (_, gestureState) => {
@@ -154,8 +171,8 @@ export function SwipeableDrawer({
         }
       },
       onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > dismissThreshold || gestureState.vy > 0.45) {
-          dismissAnimated();
+        if (gestureState.dy > dismissThresholdRef.current || gestureState.vy > 0.45) {
+          dismissAnimatedRef.current();
         } else {
           Animated.spring(translateY, {
             toValue: 0,
@@ -168,7 +185,7 @@ export function SwipeableDrawer({
         }
       },
     })
-  ).current;
+  );
 
   if (!modalVisible) return null;
 

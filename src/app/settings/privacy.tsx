@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -38,7 +39,6 @@ import { useAppSettings } from "../../contexts/AppSettingsContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { SettingsActionModal } from "./_components/SettingsActionModal";
 import { SwipeableDrawer } from "./_components/SwipeableDrawer";
-import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 
 type VisibilityOption = "public" | "private";
 
@@ -53,7 +53,6 @@ export default function PrivacyAndData() {
 
   // Settings states with persisted fallbacks
   const [visibility, setVisibility] = useState<VisibilityOption>("public");
-  const [visibilityDropdownOpen, setVisibilityDropdownOpen] = useState<boolean>(false);
   const [locationSharing, setLocationSharing] = useState<boolean>(true);
   const [activityStatus, setActivityStatus] = useState<boolean>(false);
   const [hidePastTrips, setHidePastTrips] = useState<boolean>(false);
@@ -69,7 +68,6 @@ export default function PrivacyAndData() {
   // Clear Search History state
   const [showClearHistoryModal, setShowClearHistoryModal] = useState<boolean>(false);
   const [isClearingHistory, setIsClearingHistory] = useState<boolean>(false);
-  const [showLogoutModal, setShowLogoutModal] = useState<boolean>(false);
 
   // Helper for dynamic alpha tints
   const hexToRgba = (hex: string, alpha: number) => {
@@ -378,14 +376,7 @@ export default function PrivacyAndData() {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
 
-      {/* ── Top Floating Mask Gradient (Exact 6-Stop Dissolve matching chat) ── */}
-      <SettingsHeaderGradientMask
-        backgroundColor={colors.bg}
-        height={Platform.OS === "android" ? 96 : 90}
-        zIndex={15}
-      />
-
-      {/* ── Top Header: Exact circular button matching Settings page (modernHeaderBtn) ── */}
+      {/* ── Top Header: Standard circular button matching Settings page ── */}
       <View style={styles.header}>
         <Pressable
           onPress={() => router.back()}
@@ -394,7 +385,7 @@ export default function PrivacyAndData() {
             { backgroundColor: colors.card, borderColor: colors.cardBorder },
             pressed && styles.pressed,
           ]}
-          hitSlop={6}
+          hitSlop={8}
           accessibilityLabel="Go back"
         >
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
@@ -430,130 +421,116 @@ export default function PrivacyAndData() {
               </Text>
             </View>
 
-            {/* Small Dropdown Trigger Pill */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.smallDropdownPill,
+            {/* Segmented Toggle Buttons: Public / Private */}
+            <View
+              style={[
+                styles.toggleContainer,
                 {
-                  backgroundColor: isDark ? "rgba(226, 232, 240, 0.10)" : "rgba(0, 0, 0, 0.05)",
-                  borderColor: "transparent",
+                  backgroundColor: isDark
+                    ? "rgba(255, 255, 255, 0.08)"
+                    : "rgba(0, 0, 0, 0.05)",
                 },
-                pressed && styles.pressed,
               ]}
-              onPress={() => setVisibilityDropdownOpen((prev) => !prev)}
-              accessibilityRole="button"
-              accessibilityLabel={t("Profile Visibility")}
             >
-              <Text style={[styles.smallDropdownPillText, { color: colors.greyishWhite }]}>
-                {visibility === "public" ? t("Public") : t("Private")}
-              </Text>
-              <Ionicons
-                name={visibilityDropdownOpen ? "chevron-up" : "chevron-down"}
-                size={12}
-                color={colors.greyishWhite}
-                style={{ marginLeft: 4 }}
-              />
-            </Pressable>
-          </View>
-
-          {/* Compact Dropdown Menu directly under the trigger */}
-          {visibilityDropdownOpen && (
-            <View style={styles.compactDropdownContainer}>
-              <View
-                style={[
-                  styles.compactDropdownMenu,
-                  {
-                    backgroundColor: isDark ? "#18181D" : "#FFFFFF",
-                    borderColor: "transparent",
-                  },
+              <Pressable
+                style={({ pressed }) => [
+                  styles.toggleButton,
+                  visibility === "public" && [
+                    styles.toggleButtonActive,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(255, 255, 255, 0.18)"
+                        : "#FFFFFF",
+                    },
+                  ],
+                  pressed && styles.pressed,
                 ]}
-              >
-                {/* Public Option */}
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.compactDropdownItem,
-                    visibility === "public" && {
-                      backgroundColor: isDark ? "rgba(226, 232, 240, 0.10)" : "#F1F5F9",
-                    },
-                    pressed && styles.pressed,
-                  ]}
-                  onPress={() => {
+                onPress={() => {
+                  if (visibility !== "public") {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     handleSelectVisibility("public");
-                    setVisibilityDropdownOpen(false);
-                  }}
-                >
-                  <Ionicons
-                    name="globe-outline"
-                    size={14}
-                    color={colors.greyishWhite}
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text
-                    style={[
-                      styles.compactDropdownText,
-                      {
-                        color: colors.greyishWhite,
-                        fontWeight: visibility === "public" ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {t("Public")}
-                  </Text>
-                  {visibility === "public" && (
-                    <Ionicons
-                      name="checkmark"
-                      size={14}
-                      color={colors.greyishWhite}
-                      style={{ marginLeft: "auto" }}
-                    />
-                  )}
-                </Pressable>
-
-                <View style={[styles.compactDropdownDivider, { backgroundColor: colors.divider }]} />
-
-                {/* Private Option */}
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.compactDropdownItem,
-                    visibility === "private" && {
-                      backgroundColor: isDark ? "rgba(226, 232, 240, 0.10)" : "#F1F5F9",
+                  }
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: visibility === "public" }}
+                accessibilityLabel={t("Public")}
+              >
+                <Ionicons
+                  name="globe-outline"
+                  size={13}
+                  color={
+                    visibility === "public"
+                      ? colors.textPrimary
+                      : colors.textSecondary
+                  }
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.toggleButtonText,
+                    {
+                      color:
+                        visibility === "public"
+                          ? colors.textPrimary
+                          : colors.textSecondary,
                     },
-                    pressed && styles.pressed,
+                    visibility === "public" && styles.toggleButtonTextActive,
                   ]}
-                  onPress={() => {
-                    handleSelectVisibility("private");
-                    setVisibilityDropdownOpen(false);
-                  }}
                 >
-                  <Ionicons
-                    name="lock-closed-outline"
-                    size={14}
-                    color={colors.greyishWhite}
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text
-                    style={[
-                      styles.compactDropdownText,
-                      {
-                        color: colors.greyishWhite,
-                        fontWeight: visibility === "private" ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {t("Private")}
-                  </Text>
-                  {visibility === "private" && (
-                    <Ionicons
-                      name="checkmark"
-                      size={14}
-                      color={colors.greyishWhite}
-                      style={{ marginLeft: "auto" }}
-                    />
-                  )}
-                </Pressable>
-              </View>
+                  {t("Public")}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.toggleButton,
+                  visibility === "private" && [
+                    styles.toggleButtonActive,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(255, 255, 255, 0.18)"
+                        : "#FFFFFF",
+                    },
+                  ],
+                  pressed && styles.pressed,
+                ]}
+                onPress={() => {
+                  if (visibility !== "private") {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    handleSelectVisibility("private");
+                  }
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: visibility === "private" }}
+                accessibilityLabel={t("Private")}
+              >
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={13}
+                  color={
+                    visibility === "private"
+                      ? colors.textPrimary
+                      : colors.textSecondary
+                  }
+                  style={{ marginRight: 4 }}
+                />
+                <Text
+                  style={[
+                    styles.toggleButtonText,
+                    {
+                      color:
+                        visibility === "private"
+                          ? colors.textPrimary
+                          : colors.textSecondary,
+                    },
+                    visibility === "private" && styles.toggleButtonTextActive,
+                  ]}
+                >
+                  {t("Private")}
+                </Text>
+              </Pressable>
             </View>
-          )}
+          </View>
         </View>
 
         {/* ── 2. SHARING PREFERENCES ── */}
@@ -707,23 +684,7 @@ export default function PrivacyAndData() {
           </View>
         </View>
 
-        {/* ── 5. LOG OUT BUTTON ── */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.modernLogoutBtn,
-            {
-              borderColor: colors.logoutBorder,
-              backgroundColor: colors.logoutBg,
-            },
-            pressed && { opacity: 0.75 },
-          ]}
-          onPress={() => setShowLogoutModal(true)}
-        >
-          <Ionicons name="log-out-outline" size={20} color={colors.greyishWhite} />
-          <Text style={styles.modernLogoutText}>{t("logout", "Log Out")}</Text>
-        </Pressable>
-
-        <View style={{ height: 24 }} />
+        <View style={{ height: 32 }} />
       </ScrollView>
 
       {/* ── DOWNLOAD DATA SWIPEABLE DRAWER ── */}
@@ -849,38 +810,6 @@ export default function PrivacyAndData() {
         successButtonLabel={t("Done")}
         onDone={() => setShowClearHistoryModal(false)}
       />
-
-      {/* ── LOG OUT CONFIRMATION & SUCCESS FLOW ── */}
-      <SettingsActionModal
-        visible={showLogoutModal}
-        onClose={() => setShowLogoutModal(false)}
-        iconType="logout"
-        title={t("logout", "Log Out")}
-        message={t(
-          "Are you sure you want to log out of BunkMates? You can log back into your account anytime."
-        )}
-        confirmLabel={t("logout", "Log Out")}
-        cancelLabel={t("Cancel")}
-        confirmColor={colors.coral}
-        onConfirm={async () => {
-          try {
-            await auth.signOut();
-            return true;
-          } catch (e) {
-            console.log("Signout error:", e);
-            return false;
-          }
-        }}
-        successTitle={t("Logged Out")}
-        successMessage={t(
-          "You have been safely signed out of your BunkMates profile. We hope to see you on your next trip soon!"
-        )}
-        successButtonLabel={t("Done")}
-        onDone={() => {
-          setShowLogoutModal(false);
-          router.replace("/(auth)/login" as any);
-        }}
-      />
     </SafeAreaView>
   );
 }
@@ -909,7 +838,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   scrollContent: {
-    paddingTop: (Platform.OS === "android" ? 64 : 58) + 10,
+    paddingTop: 8,
     paddingBottom: 40,
   },
   pressed: {
@@ -918,18 +847,12 @@ const styles = StyleSheet.create({
 
   // Header matching ProfileSettings & ProfileEdit exactly
   header: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 14,
     gap: 14,
-    zIndex: 20,
-    backgroundColor: "transparent",
   },
   modernHeaderBtn: {
     width: 42,
@@ -969,48 +892,35 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
 
-  // Compact Dropdown in Greyish-White matching Bunkmates app theme
-  smallDropdownPill: {
+  // Segmented Toggle Button Group for Profile Visibility
+  toggleContainer: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 6,
-    paddingHorizontal: 11,
-    borderRadius: 12,
-    borderWidth: 0,
+    padding: 3,
+    borderRadius: 14,
   },
-  smallDropdownPillText: {
+  toggleButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 9,
+    borderRadius: 11,
+  },
+  toggleButtonActive: {
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.12,
+    shadowRadius: 2.5,
+    elevation: 2,
+  },
+  toggleButtonText: {
     fontSize: 12.5,
-    fontWeight: "600",
+    fontWeight: "500",
     letterSpacing: -0.2,
   },
-  compactDropdownContainer: {
-    alignItems: "flex-end",
-    paddingRight: 16,
-    paddingBottom: 12,
-    marginTop: -4,
-  },
-  compactDropdownMenu: {
-    width: 120,
-    borderRadius: 14,
-    borderWidth: 0,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  compactDropdownItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 9,
-    paddingHorizontal: 11,
-  },
-  compactDropdownText: {
-    fontSize: 13,
-  },
-  compactDropdownDivider: {
-    height: 0,
+  toggleButtonTextActive: {
+    fontWeight: "700",
   },
 
   // Row matching modernRow in Settings
