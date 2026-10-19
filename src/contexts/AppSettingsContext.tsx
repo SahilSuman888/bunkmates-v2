@@ -944,10 +944,11 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
       if (user) {
         try {
           const userDocRef = doc(db, "users", user.uid);
-          await updateDoc(userDocRef, {
-            accessibilityPreferences: prefs,
-            updatedAt: new Date().toISOString(),
+          const updates: any = { updatedAt: new Date().toISOString() };
+          Object.keys(prefs).forEach((k) => {
+            updates[`accessibilityPreferences.${k}`] = (prefs as any)[k];
           });
+          await updateDoc(userDocRef, updates);
         } catch (e) {
           console.log("updateAccessibilityPreferences Firestore error:", e);
         }
