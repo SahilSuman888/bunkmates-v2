@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import Swipeable from "react-native-gesture-handler/Swipeable";
 import { Ionicons } from "@expo/vector-icons";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 
 export default function NotificationCard({
   group,
@@ -16,15 +17,20 @@ export default function NotificationCard({
   onRead,
 }: any) {
   const latest = group.latest;
+  const { themeColors, accentColor, isDark, scaleFont } = useThemeToggle();
+  const dynamicAccent = accentColor || "#38bdf8";
 
   const renderRightActions = () => (
     <View style={styles.actions}>
-      <TouchableOpacity style={styles.readBtn} onPress={() => onRead(group)}>
-        <Ionicons name="checkmark-done" size={22} color="#0f0" />
+      <TouchableOpacity
+        style={[styles.readBtn, { backgroundColor: isDark ? "#1c1f28" : "#E2E8F0" }]}
+        onPress={() => onRead(group)}
+      >
+        <Ionicons name="checkmark-done" size={22} color={dynamicAccent} />
       </TouchableOpacity>
 
       <TouchableOpacity
-        style={styles.deleteBtn}
+        style={[styles.deleteBtn, { backgroundColor: isDark ? "#1c1f28" : "#E2E8F0" }]}
         onPress={() => onDelete(latest.id)}
       >
         <Ionicons name="trash" size={22} color="#ff4d4d" />
@@ -35,7 +41,14 @@ export default function NotificationCard({
   return (
     <Swipeable renderRightActions={renderRightActions}>
       <TouchableOpacity
-        style={[styles.card, !group.isSeen && styles.unread]}
+        style={[
+          styles.card,
+          {
+            backgroundColor: themeColors?.card || (isDark ? "#15161c" : "#FFFFFF"),
+            borderColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
+          },
+          !group.isSeen && { borderLeftWidth: 3, borderLeftColor: dynamicAccent },
+        ]}
         onPress={() => onOpen(group)}
       >
         <Image
@@ -48,14 +61,19 @@ export default function NotificationCard({
         />
 
         <View style={{ flex: 1 }}>
-          <Text style={styles.title}>{latest.title || "Notification"}</Text>
+          <Text style={[styles.title, { color: themeColors?.text || (isDark ? "#fff" : "#111827"), fontSize: scaleFont(14) }]}>
+            {latest.title || "Notification"}
+          </Text>
 
-          <Text style={styles.message} numberOfLines={1}>
+          <Text
+            style={[styles.message, { color: themeColors?.textSecondary || (isDark ? "#aaa" : "#6B7280"), fontSize: scaleFont(13) }]}
+            numberOfLines={1}
+          >
             {latest.content || latest.message}
           </Text>
         </View>
 
-        {!group.isSeen && <View style={styles.dot} />}
+        {!group.isSeen && <View style={[styles.dot, { backgroundColor: dynamicAccent }]} />}
       </TouchableOpacity>
     </Swipeable>
   );
@@ -67,51 +85,38 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 14,
     borderRadius: 14,
-    backgroundColor: "#15161c",
+    borderWidth: 1,
     marginBottom: 10,
   },
-
-  unread: {
-    borderLeftWidth: 3,
-    borderLeftColor: "#4f7cff",
-  },
-
   avatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
     marginRight: 10,
   },
-
   title: {
-    color: "#fff",
     fontWeight: "600",
   },
-
   message: {
-    color: "#aaa",
-    fontSize: 13,
+    marginTop: 2,
   },
-
   dot: {
     width: 8,
     height: 8,
-    backgroundColor: "#4f7cff",
     borderRadius: 4,
   },
-
   actions: {
     flexDirection: "row",
     alignItems: "center",
   },
-
   readBtn: {
-    backgroundColor: "#1c1f28",
     padding: 16,
+    justifyContent: "center",
+    alignItems: "center",
   },
-
   deleteBtn: {
-    backgroundColor: "#1c1f28",
     padding: 16,
+    justifyContent: "center",
+    alignItems: "center",
   },
 });

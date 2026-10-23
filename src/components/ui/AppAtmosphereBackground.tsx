@@ -5,11 +5,11 @@ import Svg, { Defs, RadialGradient, Stop, Rect } from 'react-native-svg';
 import { useThemeToggle } from '../../contexts/ThemeContext';
 
 export const AppAtmosphereBackground: React.FC = React.memo(() => {
-  const { background, isDark, themeColors, highContrastMode } = useThemeToggle();
+  const { background, isDark, themeColors, highContrastMode, reduceTransparency } = useThemeToggle();
   const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-  // Solid background mode or High Contrast Mode: clean solid base color handled directly by root/screen backgrounds
-  if (background.mode === 'solid' || highContrastMode) {
+  // Solid background mode, High Contrast Mode, or Reduce Transparency: clean solid base color handled directly by root/screen backgrounds
+  if (background.mode === 'solid' || highContrastMode || reduceTransparency) {
     return null;
   }
 

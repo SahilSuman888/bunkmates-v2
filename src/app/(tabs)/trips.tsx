@@ -48,6 +48,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import Svg, { Circle } from "react-native-svg";
 import { useUserGroups } from "../../hooks/useUserGroups";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SUGGESTED_CARD_WIDTH = Math.floor((SCREEN_WIDTH - 42) / 2);
@@ -208,6 +211,16 @@ export default function TripsScreen() {
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const user = auth.currentUser;
+  const { formatCurrency, formatDate, hidePastTrips } = useAppSettings();
+  const { t: tr } = useLanguage();
+  const { isDark, themeColors, accentColor, accent, scaleFont, fontScale } = useThemeToggle();
+
+  const isBrightAccent =
+    accentColor === "#FFFFFF" ||
+    accentColor === "#ffffff" ||
+    accentColor === "#e5e7eb" ||
+    accentColor === "#fbc02d";
+  const onAccentTextColor = isBrightAccent ? "#000000" : "#FFFFFF";
 
   // Real-time group chats hook (already manages groupChats for current user)
   const { groups = [] } = useUserGroups(user?.uid || null) || {};
@@ -657,6 +670,11 @@ export default function TripsScreen() {
 
       if (!matchQ || !matchP || !matchS || !matchE) return false;
 
+      // Privacy setting: hide past trips from general feed
+      if (hidePastTrips && activeTab === "All") {
+        if (tripEnd && tripEnd < today) return false;
+      }
+
       if (activeTab === "Upcoming") return tripStart ? tripStart > today : true;
       if (activeTab === "Ongoing") {
         return tripStart && tripEnd ? tripStart <= today && tripEnd >= today : true;
@@ -676,6 +694,7 @@ export default function TripsScreen() {
     sortPinnedFirst,
     today,
     parseFlexibleDate,
+    hidePastTrips,
   ]);
 
   const displayedTrips = useMemo(() => {
@@ -1740,11 +1759,11 @@ export default function TripsScreen() {
      ════════════════════════════════════════════════════════════════════ */
 
   return (
-    <View style={s.safe}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+    <View style={[s.safe, { backgroundColor: isDark ? "#0c0e15" : themeColors.background }]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
 
       {/* Top Safe Area background spacer cap */}
-      <View style={{ height: insets.top, width: "100%", backgroundColor: "#0c0e15", zIndex: 999 }} />
+      <View style={{ height: insets.top, width: "100%", backgroundColor: isDark ? "#0c0e15" : themeColors.background, zIndex: 999 }} />
 
       {/* ── Trips Page Native Blur Backdrop when Calendar Drawer is Open ── */}
       {calendarDrawerOpen && (
@@ -1798,8 +1817,8 @@ export default function TripsScreen() {
             {/* 1. Sleek Ambient Header */}
             <View style={s.topHeaderRow}>
               <View>
-                <Text style={s.welcomeSubText}>{greetingWord.toUpperCase()} • READY TO EXPLORE?</Text>
-                <Text style={s.mainGreeting}>Where next, {userFirstName}?</Text>
+                <Text style={s.welcomeSubText}>{greetingWord.toUpperCase()} • {tr("READY TO EXPLORE?", "READY TO EXPLORE?")}</Text>
+                <Text style={s.mainGreeting}>{tr("Where next", "Where next")}, {userFirstName}?</Text>
               </View>
               <View style={s.topHeaderRight}>
                 <NotificationBell />
@@ -1872,9 +1891,9 @@ export default function TripsScreen() {
                         {formatDateRange(nextTrip.startDate, nextTrip.endDate)}
                       </Text>
                     </View>
-                    <View style={s.spotlightActionBtn}>
-                      <Text style={s.spotlightActionText}>View Itinerary</Text>
-                      <Ionicons name="arrow-forward" size={13} color="#000000" />
+                    <View style={[s.spotlightActionBtn, { backgroundColor: accentColor }]}>
+                      <Text style={[s.spotlightActionText, { color: onAccentTextColor }]}>View Itinerary</Text>
+                      <Ionicons name="arrow-forward" size={13} color={onAccentTextColor} />
                     </View>
                   </View>
                 </View>
@@ -2036,13 +2055,19 @@ export default function TripsScreen() {
                       hitSlop={8}
                       style={[
                         s.calTodayBtn,
-                        isSameDay(selectedCalendarDate, new Date()) && s.calTodayBtnActive,
+                        isSameDay(selectedCalendarDate, new Date()) && [
+                          s.calTodayBtnActive,
+                          { backgroundColor: accentColor, borderColor: accentColor },
+                        ],
                       ]}
                     >
                       <Text
                         style={[
                           s.calTodayBtnText,
-                          isSameDay(selectedCalendarDate, new Date()) && s.calTodayBtnTextActive,
+                          isSameDay(selectedCalendarDate, new Date()) && [
+                            s.calTodayBtnTextActive,
+                            { color: onAccentTextColor },
+                          ],
                         ]}
                       >
                         Today
@@ -2135,7 +2160,10 @@ export default function TripsScreen() {
                         }}
                         style={[
                           s.calDayPill,
-                          isSelected && s.calDayPillSelected,
+                          isSelected && [
+                            s.calDayPillSelected,
+                            { backgroundColor: accentColor, borderColor: accentColor },
+                          ],
                           isCurrentToday && !isSelected && s.calDayPillCurrentToday,
                           hasTrips && !isSelected && !isCurrentToday && { borderColor: "rgba(255, 255, 255, 0.4)" },
                         ]}
@@ -2143,7 +2171,7 @@ export default function TripsScreen() {
                         <Text
                           style={[
                             s.calDayName,
-                            isSelected && s.calDayNameSelected,
+                            isSelected && [s.calDayNameSelected, { color: onAccentTextColor }],
                             isCurrentToday && !isSelected && s.calDayNameCurrentToday,
                           ]}
                         >
@@ -2152,7 +2180,7 @@ export default function TripsScreen() {
                         <Text
                           style={[
                             s.calDayNum,
-                            isSelected && s.calDayNumSelected,
+                            isSelected && [s.calDayNumSelected, { color: onAccentTextColor }],
                             isCurrentToday && !isSelected && s.calDayNumCurrentToday,
                           ]}
                         >
@@ -2164,14 +2192,14 @@ export default function TripsScreen() {
                           <View
                             style={[
                               s.calTodayDot,
-                              isSelected && { backgroundColor: "#000000" },
+                              isSelected && { backgroundColor: onAccentTextColor },
                             ]}
                           />
                         ) : hasTrips ? (
                           <View
                             style={[
                               s.calTripDot,
-                              { backgroundColor: isSelected ? "#000000" : dotColor },
+                              { backgroundColor: isSelected ? onAccentTextColor : dotColor },
                             ]}
                           />
                         ) : null}
@@ -2196,25 +2224,59 @@ export default function TripsScreen() {
                     { key: "Pinned", count: pinnedCount, icon: "bookmark" },
                     { key: "Past", count: pastCount, icon: "checkmark-circle" },
                   ] as const
-                ).map((t) => {
-                  const active = activeTab === t.key;
+                ).map((tabItem) => {
+                  const active = activeTab === tabItem.key;
                   return (
                     <Pressable
-                      key={t.key}
-                      onPress={() => setActiveTab(t.key as any)}
-                      style={[s.statusTabPill, active && s.statusTabPillActive]}
+                      key={tabItem.key}
+                      onPress={() => setActiveTab(tabItem.key as any)}
+                      style={[
+                        s.statusTabPill,
+                        active && [
+                          s.statusTabPillActive,
+                          { backgroundColor: accentColor, borderColor: accentColor },
+                        ],
+                      ]}
                     >
                       <Ionicons
-                        name={t.icon as any}
+                        name={tabItem.icon as any}
                         size={14}
-                        color={active ? "#ffffff" : "rgba(255, 255, 255, 0.45)"}
+                        color={active ? onAccentTextColor : "rgba(255, 255, 255, 0.45)"}
                       />
-                      <Text style={[s.statusTabText, active && s.statusTabTextActive]}>
-                        {t.key}
+                      <Text
+                        style={[
+                          s.statusTabText,
+                          active && [
+                            s.statusTabTextActive,
+                            { color: onAccentTextColor },
+                          ],
+                        ]}
+                      >
+                        {tr(tabItem.key, tabItem.key)}
                       </Text>
-                      <View style={[s.statusTabCount, active && s.statusTabCountActive]}>
-                        <Text style={[s.statusTabCountText, active && s.statusTabCountTextActive]}>
-                          {t.count}
+                      <View
+                        style={[
+                          s.statusTabCount,
+                          active && [
+                            s.statusTabCountActive,
+                            {
+                              backgroundColor: isBrightAccent
+                                ? "rgba(0,0,0,0.15)"
+                                : "rgba(255,255,255,0.22)",
+                            },
+                          ],
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            s.statusTabCountText,
+                            active && [
+                              s.statusTabCountTextActive,
+                              { color: onAccentTextColor },
+                            ],
+                          ]}
+                        >
+                          {tabItem.count}
                         </Text>
                       </View>
                     </Pressable>

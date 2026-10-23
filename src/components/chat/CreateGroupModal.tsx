@@ -17,6 +17,7 @@ import { collection, doc, getDoc, setDoc, serverTimestamp, addDoc } from "fireba
 import { db } from "../../lib/firebase";
 import { useUser } from "../../contexts/UserContext";
 import { Ionicons, Feather } from "@expo/vector-icons";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 
 export default function CreateGroupModal({
   visible,
@@ -27,6 +28,14 @@ export default function CreateGroupModal({
   onClose: () => void;
   onGroupCreated: (groupId: string) => void;
 }) {
+  const { isDark, themeColors, accentColor, scaleFont } = useThemeToggle();
+  const isBrightAccent =
+    accentColor === "#FFFFFF" ||
+    accentColor === "#ffffff" ||
+    accentColor === "#f59e0b" ||
+    accentColor === "#ffd700";
+  const onAccentTextColor = isBrightAccent ? "#000000" : "#FFFFFF";
+
   const { user: currentUser } = useUser();
   const [groupName, setGroupName] = useState("");
   const [groupDesc, setGroupDesc] = useState("");
@@ -139,7 +148,13 @@ export default function CreateGroupModal({
                 <Pressable
                   key={emoji}
                   onPress={() => setGroupIcon(emoji)}
-                  style={[styles.emojiBtn, groupIcon === emoji && styles.emojiBtnSelected]}
+                  style={[
+                    styles.emojiBtn,
+                    groupIcon === emoji && [
+                      styles.emojiBtnSelected,
+                      { backgroundColor: `${accentColor}33`, borderColor: accentColor },
+                    ],
+                  ]}
                 >
                   <Text style={{ fontSize: 22 }}>{emoji}</Text>
                 </Pressable>
@@ -147,18 +162,18 @@ export default function CreateGroupModal({
             </View>
 
             {/* INPUT FIELDS */}
-            <Text style={styles.label}>Group Name</Text>
+            <Text style={[styles.label, { color: themeColors.textSecondary }]}>Group Name</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { color: themeColors.text, backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "#f3f4f6", borderColor: themeColors.border }]}
               placeholder="e.g. Goa Trip Bunkers 2026"
               placeholderTextColor="#666"
               value={groupName}
               onChangeText={setGroupName}
             />
 
-            <Text style={styles.label}>Description (Optional)</Text>
+            <Text style={[styles.label, { color: themeColors.textSecondary }]}>Description (Optional)</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { color: themeColors.text, backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "#f3f4f6", borderColor: themeColors.border }]}
               placeholder="e.g. Planning stays, rides, and activities"
               placeholderTextColor="#666"
               value={groupDesc}
@@ -166,12 +181,12 @@ export default function CreateGroupModal({
             />
 
             {/* SELECT FRIENDS */}
-            <Text style={styles.label}>
+            <Text style={[styles.label, { color: themeColors.textSecondary }]}>
               Select Members ({selectedMembers.length} selected)
             </Text>
 
             {loadingFriends ? (
-              <ActivityIndicator size="small" color="#00e6b0" style={{ marginVertical: 12 }} />
+              <ActivityIndicator size="small" color={accentColor} style={{ marginVertical: 12 }} />
             ) : friendsList.length === 0 ? (
               <Text style={styles.noFriendsText}>
                 No BunkMate friends found. Add friends first to add them to groups!
@@ -183,7 +198,13 @@ export default function CreateGroupModal({
                   return (
                     <Pressable
                       key={item.uid}
-                      style={[styles.memberRow, isSelected && styles.memberRowSelected]}
+                      style={[
+                        styles.memberRow,
+                        isSelected && [
+                          styles.memberRowSelected,
+                          { backgroundColor: `${accentColor}25`, borderColor: accentColor },
+                        ],
+                      ]}
                       onPress={() => toggleMember(item.uid)}
                     >
                       <Image
@@ -192,13 +213,13 @@ export default function CreateGroupModal({
                         }}
                         style={styles.avatar}
                       />
-                      <Text style={styles.memberName}>
+                      <Text style={[styles.memberName, { color: themeColors.text }]}>
                         {item.displayName || item.name || "BunkMate"}
                       </Text>
                       <Ionicons
                         name={isSelected ? "checkbox" : "square-outline"}
                         size={22}
-                        color={isSelected ? "#00e6b0" : "#666"}
+                        color={isSelected ? accentColor : "#666"}
                       />
                     </Pressable>
                   );
@@ -208,16 +229,24 @@ export default function CreateGroupModal({
 
             {/* SUBMIT BUTTON */}
             <Pressable
-              style={[styles.createBtn, submitting && { opacity: 0.6 }]}
+              style={[
+                styles.createBtn,
+                {
+                  backgroundColor: accentColor,
+                  borderWidth: !isDark && isBrightAccent ? 1.5 : 0,
+                  borderColor: !isDark && isBrightAccent ? "#111827" : "transparent",
+                },
+                submitting && { opacity: 0.6 }
+              ]}
               onPress={handleCreate}
               disabled={submitting}
             >
               {submitting ? (
-                <ActivityIndicator size="small" color="#00140f" />
+                <ActivityIndicator size="small" color={onAccentTextColor} />
               ) : (
                 <>
-                  <Ionicons name="people-sharp" size={18} color="#00140f" />
-                  <Text style={styles.createBtnText}>Create Group</Text>
+                  <Ionicons name="people-sharp" size={18} color={onAccentTextColor} />
+                  <Text style={[styles.createBtnText, { color: onAccentTextColor }]}>Create Group</Text>
                 </>
               )}
             </Pressable>

@@ -40,6 +40,7 @@ export interface AppBlurViewProps extends ViewProps {
  * - Web: CSS backdrop-filter with smooth fallbacks.
  */
 import { OptimizedBlurWrapper } from "./OptimizedBlurWrapper";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 
 export { OptimizedBlurWrapper };
 
@@ -52,6 +53,32 @@ export function AppBlurView({
   borderHighlight = false,
   ...rest
 }: AppBlurViewProps) {
+  let reduceTransparency = false;
+  let isDark = tint !== "light";
+  try {
+    const theme = useThemeToggle();
+    if (theme) {
+      reduceTransparency = !!(theme.reduceTransparency || theme.highContrastMode);
+      isDark = theme.isDark;
+    }
+  } catch (_) {}
+
+  if (reduceTransparency) {
+    return (
+      <View
+        style={[
+          {
+            backgroundColor: isDark ? "#161618" : "#FFFFFF",
+          },
+          style,
+        ]}
+        {...rest}
+      >
+        {children}
+      </View>
+    );
+  }
+
   if (Platform.OS === "ios") {
     return (
       <ExpoBlurView

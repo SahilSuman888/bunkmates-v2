@@ -35,7 +35,11 @@ function ShareButton({ icon, label, showLabel = false, onPress, colors }: ShareB
       onPress={onPress}
       style={({ pressed }) => [
         styles.shareButton,
-        { backgroundColor: colors.buttonBg },
+        {
+          backgroundColor: colors.buttonBg,
+          borderColor: colors.shareBorder,
+          borderWidth: 1,
+        },
         pressed && styles.pressed,
       ]}
     >
@@ -50,29 +54,70 @@ function ShareButton({ icon, label, showLabel = false, onPress, colors }: ShareB
 export default function InviteFriendScreen() {
   const { t } = useLanguage();
   const { width } = useWindowDimensions();
+  const { isDark, accentColor, onAccentTextColor, accent, scaleFont } = useThemeToggle();
 
-  let themeMode: "dark" | "light" | "system" = "system";
-  let activeAccent = "";
-  try {
-    const themeContext = useThemeToggle();
-    if (themeContext && themeContext.mode) themeMode = themeContext.mode;
-    if (themeContext && themeContext.accentColor) activeAccent = themeContext.accentColor;
-  } catch (e) {}
+  const isWhite =
+    accent === "white" ||
+    accent === "navWhite" ||
+    accent === "#FFFFFF" ||
+    accent === "#ffffff" ||
+    accent?.toLowerCase() === "#ffffff" ||
+    accentColor?.toLowerCase() === "#ffffff";
 
-  const isDark =
-    themeMode === "dark" ||
-    (themeMode === "system" && Appearance.getColorScheme() === "dark");
+  const isBright =
+    isWhite ||
+    accent === "yellow" ||
+    accent === "sunflower" ||
+    accentColor === "#fbc02d" ||
+    accentColor === "#ffd700" ||
+    accentColor === "#f59e0b" ||
+    accentColor === "#FFFFFF" ||
+    accentColor === "#ffffff";
 
-  const colors = useMemo(() => ({
-    bg: isDark ? "#000000" : "#F1F1F1",
-    card: isDark ? "#161618" : "#FFFFFF",
-    textPrimary: isDark ? "#FFFFFF" : "#11141A",
-    textSecondary: isDark ? "#8E95A2" : "#7E8590",
-    buttonBg: isDark ? "#202024" : "#F4F5F7",
-    primaryBtnBg: activeAccent || (isDark ? "#FFFFFF" : "#000000"),
-    primaryBtnText: activeAccent ? "#FFFFFF" : (isDark ? "#000000" : "#FFFFFF"),
-    inputBg: isDark ? "#202024" : "#F4F5F7",
-  }), [isDark, activeAccent]);
+  const colors = useMemo(() => {
+    let btnBg = accentColor || (isDark ? "#FFFFFF" : "#111827");
+    let btnText = onAccentTextColor || (isDark ? "#000000" : "#FFFFFF");
+    let btnBorder = "transparent";
+    let btnBorderWidth = 0;
+
+    if (isWhite) {
+      if (isDark) {
+        btnBg = "#FFFFFF";
+        btnText = "#000000";
+        btnBorder = "transparent";
+        btnBorderWidth = 0;
+      } else {
+        btnBg = "#FFFFFF";
+        btnText = "#111827";
+        btnBorder = "#111827";
+        btnBorderWidth = 1.5;
+      }
+    } else if (isBright) {
+      btnBg = accentColor;
+      btnText = "#000000";
+      btnBorder = !isDark ? "rgba(0,0,0,0.15)" : "transparent";
+      btnBorderWidth = !isDark ? 1 : 0;
+    } else {
+      btnBg = accentColor;
+      btnText = "#FFFFFF";
+      btnBorder = "transparent";
+      btnBorderWidth = 0;
+    }
+
+    return {
+      bg: isDark ? "#000000" : "#F1F1F1",
+      card: isDark ? "#161618" : "#FFFFFF",
+      textPrimary: isDark ? "#FFFFFF" : "#11141A",
+      textSecondary: isDark ? "#8E95A2" : "#7E8590",
+      buttonBg: isDark ? "#202024" : "#F4F5F7",
+      primaryBtnBg: btnBg,
+      primaryBtnText: btnText,
+      primaryBtnBorder: btnBorder,
+      primaryBtnBorderWidth: btnBorderWidth,
+      inputBg: isDark ? "#202024" : "#F4F5F7",
+      shareBorder: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+    };
+  }, [isDark, accent, accentColor, onAccentTextColor, isWhite, isBright]);
 
   const qrSize = Math.min(width * 0.44, 200);
 
@@ -159,7 +204,7 @@ export default function InviteFriendScreen() {
         <Pressable
           onPress={() => {
             if (router.canGoBack()) router.back();
-            else router.replace("/ProfileSettings" as any);
+            else router.replace("/settings" as any);
           }}
           style={({ pressed }) => [
             styles.backButton,
@@ -216,12 +261,21 @@ export default function InviteFriendScreen() {
             onPress={handleCopyLink}
             style={({ pressed }) => [
               styles.copyButton,
-              { backgroundColor: colors.primaryBtnBg },
+              {
+                backgroundColor: colors.primaryBtnBg,
+                borderColor: colors.primaryBtnBorder,
+                borderWidth: colors.primaryBtnBorderWidth,
+              },
               pressed && styles.copyPressed,
             ]}
           >
-            <Text style={[styles.copyButtonText, { color: colors.primaryBtnText }]}>
-              Copy Download Link
+            <Ionicons
+              name="copy-outline"
+              size={18}
+              color={colors.primaryBtnText}
+            />
+            <Text style={[styles.copyButtonText, { color: colors.primaryBtnText, fontSize: scaleFont(14) }]}>
+              {t("Copy Download Link", "Copy Download Link")}
             </Text>
           </Pressable>
         </View>
@@ -325,6 +379,8 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     alignItems: "center",
     justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
   },
   copyButtonText: {
     fontSize: 14,

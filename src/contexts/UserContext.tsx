@@ -11,6 +11,7 @@ interface UserContextType {
   loading: boolean;
   // additional metadata stored in Firestore (e.g. display name, photoURL, etc.)
   userData?: any;
+  updateUserData?: (newData: Partial<any>) => void;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -27,6 +28,8 @@ interface UserProviderProps {
   children: ReactNode;
 }
 
+import { recordDeviceSessionInFirestore } from '../utils/sessionTracker';
+
 export const UserProvider = ({ children }: UserProviderProps) => {
   const [user, setUser] = useState<any>(null);
   const [userData, setUserData] = useState<any>(null);
@@ -36,6 +39,7 @@ export const UserProvider = ({ children }: UserProviderProps) => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
+        recordDeviceSessionInFirestore(firebaseUser).catch(console.error);
       } else {
         setUser(null);
         setUserData(null);
@@ -124,8 +128,18 @@ export const UserProvider = ({ children }: UserProviderProps) => {
     };
   }, [user]);
 
+  const updateUserData = React.useCallback((newData: Partial<any>) => {
+    setUserData((prev: any) => {
+      const merged = { ...(prev || {}), ...newData };
+      if (user?.uid) {
+        AsyncStorage.setItem(`@bunkmates_cached_profile_${user.uid}`, JSON.stringify(merged)).catch(() => {});
+      }
+      return merged;
+    });
+  }, [user?.uid]);
+
   return (
-    <UserContext.Provider value={{ user, loading, userData }}>
+    <UserContext.Provider value={{ user, loading, userData, updateUserData }}>
       {children}
     </UserContext.Provider>
   );

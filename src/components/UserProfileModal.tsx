@@ -46,6 +46,7 @@ import { useUser } from "../contexts/UserContext";
 import { useCall } from "../contexts/CallContext";
 import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { wallpaperList, DEFAULT_WALLPAPER_ASSET } from "../contexts/ChatSettingsContext";
+import { useThemeToggle } from "../contexts/ThemeContext";
 import PrivatePinModal from "./chat/PrivatePinModal";
 import PrivateLockSuccessModal from "./chat/PrivateLockSuccessModal";
 import WallpaperThemePreviewModal from "./chat/WallpaperThemePreviewModal";
@@ -73,6 +74,9 @@ export default function UserProfileModal({
   const insets = useSafeAreaInsets();
   const { user: currentUser } = useUser();
   const { startCall } = useCall();
+  const { themeColors, accentColor, onAccentTextColor, isDark, scaleFont } = useThemeToggle();
+  const modalAccent = accentColor || "#00e6b0";
+  const onModalAccentText = onAccentTextColor || "#000000";
 
   const targetUid = userId || initialUserData?.uid || initialUserData?.id;
 
@@ -979,13 +983,16 @@ export default function UserProfileModal({
             {/* ── QUICK ACTION BUTTONS: Message, Voice Call, Video Call ── */}
             {currentUser?.uid !== targetUid && (
               <View style={styles.quickCallRow}>
-                <Pressable style={styles.chatActionBtn} onPress={handleChatPress}>
-                  <Ionicons name="chatbubble-ellipses" size={16} color="#000000" />
-                  <Text style={styles.chatActionBtnText}>Message</Text>
+                <Pressable
+                  style={[styles.chatActionBtn, { backgroundColor: modalAccent }]}
+                  onPress={handleChatPress}
+                >
+                  <Ionicons name="chatbubble-ellipses" size={16} color={onModalAccentText} />
+                  <Text style={[styles.chatActionBtnText, { color: onModalAccentText, fontSize: scaleFont(13) }]}>Message</Text>
                 </Pressable>
 
                 <Pressable
-                  style={styles.voiceCallBtn}
+                  style={[styles.voiceCallBtn, { borderColor: `${modalAccent}88` }]}
                   onPress={() => {
                     onClose();
                     startCall({
@@ -997,8 +1004,8 @@ export default function UserProfileModal({
                     });
                   }}
                 >
-                  <Ionicons name="call" size={16} color="#00e6b0" />
-                  <Text style={styles.voiceCallBtnText}>Voice Call</Text>
+                  <Ionicons name="call" size={16} color={modalAccent} />
+                  <Text style={[styles.voiceCallBtnText, { color: modalAccent, fontSize: scaleFont(13) }]}>Voice Call</Text>
                 </Pressable>
 
                 <Pressable
@@ -1015,7 +1022,7 @@ export default function UserProfileModal({
                   }}
                 >
                   <Ionicons name="videocam" size={17} color="#ffffff" />
-                  <Text style={styles.videoCallBtnText}>Video Call</Text>
+                  <Text style={[styles.videoCallBtnText, { fontSize: scaleFont(13) }]}>Video Call</Text>
                 </Pressable>
               </View>
             )}

@@ -46,6 +46,8 @@ import LinkDrawer from "../../components/trip_components/LinkDrawer";
 import SettingsDrawer from "../../components/trip_components/SettingsDrawer";
 
 import { useGroqAI } from "../../hooks/useGroqAI";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
 import { functions } from "../../lib/firebase";
 import { httpsCallable } from "firebase/functions";
 
@@ -180,6 +182,8 @@ export default function TripDetails() {
   const user = auth.currentUser;
   const uid = user?.uid || null;
   const insets = useSafeAreaInsets();
+  const { themeColors, isDark, background } = useThemeToggle();
+  const { formatTemperature } = useAppSettings();
   const { groups = [] } = useUserGroups(uid) || {};
 
   /* ─── DATA STATE ─── */
@@ -734,8 +738,8 @@ Return strictly raw JSON format without reasoning or explanation:
   }
 
   return (
-    <View style={styles.root}>
-      <StatusBar barStyle="light-content" />
+    <View style={[styles.root, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       {/* ── FLOATING TOP BAR NAVIGATION (Fixed on screen top with safe-area) ── */}
       <View style={[styles.topBarFixed, { top: insets.top + 8 }]} pointerEvents="box-none">
@@ -785,7 +789,7 @@ Return strictly raw JSON format without reasoning or explanation:
               <View style={styles.weatherChip}>
                 <Text style={styles.weatherEmoji}>{weather.emoji || "🔥"}</Text>
                 <View style={styles.weatherTextWrap}>
-                  <Text style={styles.weatherTempText}>{weather.temp}°C</Text>
+                  <Text style={styles.weatherTempText}>{formatTemperature(weather.temp, "C")}</Text>
                   <Text style={styles.weatherDescText}>{weather.description}</Text>
                 </View>
                 <Text style={styles.weatherLocText}>

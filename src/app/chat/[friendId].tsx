@@ -28,6 +28,7 @@ import { Image as ExpoImage } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useChatSettings, wallpaperList, DEFAULT_WALLPAPER_ASSET, getWallpaperSource } from "../../contexts/ChatSettingsContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useCall } from "../../contexts/CallContext";
 import { compressAndResizeImage } from "../../lib/imageCompressor";
 import * as ImagePicker from "expo-image-picker";
@@ -180,6 +181,8 @@ const SwipeableMessageRow = ({
     extrapolate: "clamp",
   });
 
+  const { accentColor } = useThemeToggle();
+
   return (
     <View style={{ width: "100%", position: "relative" }}>
       <Animated.View
@@ -193,8 +196,16 @@ const SwipeableMessageRow = ({
         }}
         pointerEvents="none"
       >
-        <View style={styles.swipeReplyIconCircle}>
-          <Ionicons name="arrow-undo" size={16} color="#00e6b0" />
+        <View
+          style={[
+            styles.swipeReplyIconCircle,
+            {
+              backgroundColor: `${accentColor}33`,
+              borderColor: accentColor,
+            },
+          ]}
+        >
+          <Ionicons name="arrow-undo" size={16} color={accentColor} />
         </View>
       </Animated.View>
 
@@ -229,6 +240,29 @@ export default function ChatRoom() {
   const router = useRouter();
   const { user, userData } = useUser();
   const { startCall } = useCall();
+  const { isDark, themeColors, accentColor, accent, scaleFont, fontScale } = useThemeToggle();
+  const isBrightAccent =
+    accentColor === "#FFFFFF" ||
+    accentColor === "#ffffff" ||
+    accentColor === "#f59e0b" ||
+    accentColor === "#ffd700";
+  const onAccentTextColor = isBrightAccent ? "#000000" : "#FFFFFF";
+
+  const {
+    wallpaper,
+    fontSize,
+    theme: chatTheme,
+    enterIsSend,
+    readReceipts,
+    typingIndicator,
+    autoDownloadMedia,
+    saveToGallery,
+    linkPreviews,
+    disappearingTimer,
+    clearedAt,
+  } = useChatSettings();
+
+  const chatBaseFontSize = typeof fontSize === "number" && fontSize > 0 ? fontSize : 14.5;
 
   let friendId = (rawId as string) || "";
   if (friendId.includes("_") && user) {
@@ -237,7 +271,6 @@ export default function ChatRoom() {
   }
   const chatId = user && friendId ? [user.uid, friendId].sort().join("_") : null;
 
-  const { wallpaper, theme: chatTheme } = useChatSettings();
   const [messages, setMessages] = useState<any[]>(
     () => (chatId && memoryChatMsgs[chatId]) || []
   );
@@ -247,6 +280,93 @@ export default function ChatRoom() {
   );
   const [replyTo, setReplyTo] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
+  const typingTimeoutRef = useRef<any>(null);
+
+  const readReceiptsRef = useRef(readReceipts);
+  useEffect(() => {
+    readReceiptsRef.current = readReceipts;
+  }, [readReceipts]);
+
+  const getDisappearingExpiresAt = () => {
+    const nowMs = Date.now();
+    if (disappearingTimer === "24h") return nowMs + 24 * 3600 * 1000;
+    if (disappearingTimer === "7d") return nowMs + 7 * 24 * 3600 * 1000;
+    if (disappearingTimer === "30d") return nowMs + 30 * 24 * 3600 * 1000;
+    if (disappearingTimer === "90d") return nowMs + 90 * 24 * 60 * 60 * 1000;
+    return null;
+  };
+
+  const getMsgTimeMs = (timestamp: any): number => {
+    if (!timestamp) return 0;
+    if (typeof timestamp === "number") return timestamp;
+    if (typeof timestamp.toMillis === "function") return timestamp.toMillis();
+    if (timestamp.seconds) return timestamp.seconds * 1000;
+    if (typeof timestamp === "string") {
+      const parsed = new Date(timestamp).getTime();
+      return isNaN(parsed) ? 0 : parsed;
+    }
+    return 0;
+  };
+
+  const filteredMessages = React.useMemo(() => {
+    const clearedMs = clearedAt ? new Date(clearedAt).getTime() : 0;
+    const nowMs = Date.now();
+    return messages.filter((msg) => {
+      const msgMs = getMsgTimeMs(msg.timestamp);
+      if (clearedMs > 0 && msgMs > 0 && msgMs < clearedMs) {
+        return false;
+      }
+      if (msg.expiresAt && typeof msg.expiresAt === "number" && msg.expiresAt < nowMs) {
+        return false;
+      }
+      return true;
+    });
+  }, [messages, clearedAt]);
+
+  // Real-time friend typing listener
+  const [isFriendTyping, setIsFriendTyping] = useState(false);
+  useEffect(() => {
+    if (!chatId || !friendId) return;
+    const typingDocRef = doc(db, "chats", chatId, "typing", friendId);
+    const unsub = onSnapshot(
+      typingDocRef,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          const isRecent = Date.now() - (data.updatedAt || 0) < 4000;
+          setIsFriendTyping(!!data.isTyping && isRecent);
+        } else {
+          setIsFriendTyping(false);
+        }
+      },
+      () => {
+        setIsFriendTyping(false);
+      }
+    );
+    return () => unsub();
+  }, [chatId, friendId]);
+
+  // Real-time typing broadcaster with auto-reset debounce
+  const handleInputChange = (text: string) => {
+    setInput(text);
+    if (!typingIndicator || !chatId || !user) return;
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    setDoc(
+      doc(db, "chats", chatId, "typing", user.uid),
+      { isTyping: true, updatedAt: Date.now() },
+      { merge: true }
+    ).catch(() => {});
+
+    typingTimeoutRef.current = setTimeout(() => {
+      setDoc(
+        doc(db, "chats", chatId, "typing", user.uid),
+        { isTyping: false, updatedAt: Date.now() },
+        { merge: true }
+      ).catch(() => {});
+    }, 2500);
+  };
 
   // Full Screen Image Modal State (WhatsApp style)
   const [selectedImageItem, setSelectedImageItem] = useState<any | null>(null);
@@ -467,14 +587,16 @@ export default function ChatRoom() {
           JSON.stringify(msgs)
         ).catch(() => {});
 
-        msgs.forEach(async (msg) => {
-          if (msg.senderId !== user.uid && !msg.isRead) {
-            await updateDoc(
-              doc(db, "chats", chatId, "messages", msg.id),
-              { isRead: true }
-            ).catch(() => {});
-          }
-        });
+        if (readReceiptsRef.current) {
+          msgs.forEach(async (msg) => {
+            if (msg.senderId !== user.uid && !msg.isRead) {
+              await updateDoc(
+                doc(db, "chats", chatId, "messages", msg.id),
+                { isRead: true }
+              ).catch(() => {});
+            }
+          });
+        }
       },
       (err) => {
         console.log("[Chat] Messages offline fallback:", err.message);
@@ -516,12 +638,25 @@ export default function ChatRoom() {
       setReplyTo(null);
     }
 
+    // Clear typing in Firestore
+    if (typingIndicator) {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      setDoc(
+        doc(db, "chats", chatId, "typing", user.uid),
+        { isTyping: false, updatedAt: Date.now() },
+        { merge: true }
+      ).catch(() => {});
+    }
+
+    const expiresAt = getDisappearingExpiresAt();
+
     try {
       await addDoc(collection(db, "chats", chatId, "messages"), {
         text: messageText,
         senderId: user.uid,
         timestamp: serverTimestamp(),
         isRead: false,
+        expiresAt: expiresAt || null,
         replyTo: replyTarget
           ? {
               id: replyTarget.id || null,
@@ -617,6 +752,8 @@ export default function ChatRoom() {
     setShowImageEditor(false);
     setUploading(true);
 
+    const expiresAt = getDisappearingExpiresAt();
+
     try {
       // 1. Hardware/Skia compress & downscale to max 800px (< 80 KB) so it fits in Firestore easily
       const compressed = await compressAndResizeImage(uri, 800, 60);
@@ -645,6 +782,7 @@ export default function ChatRoom() {
         senderId: user.uid,
         timestamp: serverTimestamp(),
         isRead: false,
+        expiresAt: getDisappearingExpiresAt() || null,
         replyTo: replyTo
           ? {
               id: replyTo.id || null,
@@ -841,8 +979,8 @@ export default function ChatRoom() {
 
   const renderItem = ({ item, index }: any) => {
     const isOwn = item.senderId === user?.uid;
-    const prev = messages[index - 1];
-    const next = messages[index + 1];
+    const prev = filteredMessages[index - 1];
+    const next = filteredMessages[index + 1];
     const showDate = !prev || formatDate(prev.timestamp) !== formatDate(item.timestamp);
     const isNextFromSame =
       next &&
@@ -917,7 +1055,7 @@ export default function ChatRoom() {
                     <Ionicons
                       name="checkmark-done"
                       size={13}
-                      color={item.isRead ? "#38bdf8" : "#ffffff"}
+                      color={(readReceipts && item.isRead) ? "#38bdf8" : "#ffffff"}
                       style={{ marginLeft: 3 }}
                     />
                   </View>
@@ -957,13 +1095,17 @@ export default function ChatRoom() {
                   { maxWidth: isTablet ? 480 : "82%" },
                   dynamicCorners,
                   isOwn ? styles.bubbleOutgoing : styles.bubbleIncoming,
-                  isOwn && !!localChatBubbleColor ? { backgroundColor: localChatBubbleColor } : null,
+                  isOwn && !!localChatBubbleColor
+                    ? { backgroundColor: localChatBubbleColor }
+                    : isOwn
+                    ? { backgroundColor: accentColor }
+                    : null,
                 ]}
               >
                 {/* Replied Content Preview inside Bubble */}
                 {item.replyTo && (
-                  <View style={styles.replyBox}>
-                    <Text style={styles.replySenderName}>
+                  <View style={[styles.replyBox, { borderLeftColor: accentColor }]}>
+                    <Text style={[styles.replySenderName, { color: accentColor }]}>
                       {item.replyTo.senderName || (item.replyTo.senderId === user?.uid ? "You" : friendData?.name || "BunkMate")}
                     </Text>
                     {item.replyTo.imageUrl && (
@@ -1014,7 +1156,14 @@ export default function ChatRoom() {
 
                 {/* Message Text or Photo Caption */}
                 {item.text || item.deleted ? (
-                  <Text style={[styles.bubbleText, item.imageUrl && { marginTop: 4 }]}>
+                  <Text
+                    style={[
+                      styles.bubbleText,
+                      { fontSize: scaleFont(chatBaseFontSize) },
+                      item.imageUrl && { marginTop: 4 },
+                      isOwn && !localChatBubbleColor && { color: onAccentTextColor },
+                    ]}
+                  >
                     {item.deleted ? "🚫 This message was deleted" : item.text}
                   </Text>
                 ) : null}
@@ -1037,7 +1186,7 @@ export default function ChatRoom() {
                   <Ionicons
                     name="checkmark-done"
                     size={13}
-                    color={item.isRead ? "#38bdf8" : "#ffffff"}
+                    color={(readReceipts && item.isRead) ? (isBrightAccent ? "#0284c7" : accentColor) : "#ffffff"}
                     style={{ marginLeft: 3 }}
                   />
                 </View>
@@ -1064,8 +1213,8 @@ export default function ChatRoom() {
 
   const isDarkChat =
     chatTheme === "dark" ||
-    (chatTheme === "system" && Appearance.getColorScheme() === "dark") ||
-    true;
+    (chatTheme === "system" && isDark) ||
+    isDark;
 
   const headerTopPad = Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 6 : insets.top + 6;
   const HEADER_TOTAL_HEIGHT = headerTopPad + 52;
@@ -1149,8 +1298,14 @@ export default function ChatRoom() {
                   <Text style={styles.userName} numberOfLines={1}>
                     {friendData?.displayName || friendData?.name || friendData?.username || "BunkMate"}
                   </Text>
-                  <Text style={styles.userHandle} numberOfLines={1}>
-                    @{friendData?.username || "traveler"}
+                  <Text
+                    style={[
+                      styles.userHandle,
+                      isFriendTyping && typingIndicator ? { color: "#22c55e", fontWeight: "600" } : null,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {isFriendTyping && typingIndicator ? "typing..." : `@${friendData?.username || "traveler"}`}
                   </Text>
                 </View>
               </Pressable>
@@ -1171,7 +1326,7 @@ export default function ChatRoom() {
         {/* MESSAGE LIST: Auto scrolls and flows underneath floating top header and bottom bar */}
         <FlatList
           ref={flatListRef}
-          data={messages}
+          data={filteredMessages}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           style={showProfileModal ? { opacity: 0 } : undefined}
@@ -1248,9 +1403,18 @@ export default function ChatRoom() {
             >
               {/* WhatsApp-Style Reply Preview Bar */}
               {replyTo && (
-                <View style={styles.replyPreviewBar}>
+                <View
+                  style={[
+                    styles.replyPreviewBar,
+                    {
+                      borderLeftColor: accentColor,
+                      backgroundColor: isDark ? "rgba(18, 22, 28, 0.95)" : "rgba(240, 240, 240, 0.95)",
+                      borderColor: themeColors.border,
+                    },
+                  ]}
+                >
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.replyPreviewTitle}>
+                    <Text style={[styles.replyPreviewTitle, { color: accentColor }]}>
                       Replying to {replyTo.senderId === user?.uid ? "yourself" : friendData?.name || "BunkMate"}
                     </Text>
                     <Text style={styles.replyPreviewSubtitle} numberOfLines={1}>
@@ -1265,22 +1429,47 @@ export default function ChatRoom() {
 
               {/* Input Row */}
               <View style={styles.inputArea}>
-                <Pressable style={styles.cameraCircleBtn} onPress={pickImage} disabled={uploading}>
+                <Pressable
+                  style={[
+                    styles.cameraCircleBtn,
+                    {
+                      backgroundColor: isDark ? "#1c2329" : "#f3f4f6",
+                      borderColor: themeColors.border,
+                    },
+                  ]}
+                  onPress={pickImage}
+                  disabled={uploading}
+                >
                   {uploading ? (
-                    <ActivityIndicator size="small" color="#00e6b0" />
+                    <ActivityIndicator size="small" color={accentColor} />
                   ) : (
-                    <Feather name="camera" size={20} color="white" />
+                    <Feather name="camera" size={20} color={isDark ? "white" : "#111827"} />
                   )}
                 </Pressable>
 
-                <View style={styles.inputContainer}>
+                <View
+                  style={[
+                    styles.inputContainer,
+                    {
+                      backgroundColor: isDark ? "#1c2329" : "#f3f4f6",
+                      borderColor: themeColors.border,
+                    },
+                  ]}
+                >
                   <TextInput
                     value={input}
-                    onChangeText={setInput}
+                    onChangeText={handleInputChange}
                     placeholder="Type your message..."
-                    placeholderTextColor="#777777"
-                    style={styles.textInput}
-                    multiline
+                    placeholderTextColor={isDark ? "#777777" : "#9ca3af"}
+                    style={[styles.textInput, { color: themeColors.text, fontSize: scaleFont(chatBaseFontSize) }]}
+                    multiline={!enterIsSend}
+                    returnKeyType={enterIsSend ? "send" : "default"}
+                    blurOnSubmit={false}
+                    onSubmitEditing={() => {
+                      if (enterIsSend && input.trim()) {
+                        sendMessage();
+                      }
+                    }}
                   />
                 </View>
 
@@ -1288,8 +1477,8 @@ export default function ChatRoom() {
                   style={[
                     styles.sendButtonCircle,
                     input.trim()
-                      ? { backgroundColor: "#00e6b0" }
-                      : { backgroundColor: "#3e444c", opacity: 0.65 },
+                      ? { backgroundColor: accentColor }
+                      : { backgroundColor: isDark ? "#3e444c" : "#e5e7eb", opacity: 0.65 },
                   ]}
                   onPress={() => sendMessage()}
                   disabled={!input.trim()}
@@ -1297,7 +1486,7 @@ export default function ChatRoom() {
                   <Ionicons
                     name="send"
                     size={18}
-                    color={input.trim() ? "#000000" : "rgba(255,255,255,0.7)"}
+                    color={input.trim() ? onAccentTextColor : isDark ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.4)"}
                     style={{ marginLeft: 2 }}
                   />
                 </Pressable>
@@ -2561,5 +2750,72 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.4,
     shadowRadius: 4,
+  },
+  timerPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  timerPillText: {
+    color: "#10B981",
+    fontSize: 9.5,
+    fontWeight: "700",
+  },
+  dataSaverMediaCard: {
+    width: 220,
+    height: 140,
+    borderRadius: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.35)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+  dataSaverMediaText: {
+    color: "#E2E8F0",
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  linkCard: {
+    marginTop: 6,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.25)",
+    borderWidth: 1,
+    borderColor: "rgba(56, 189, 248, 0.25)",
+  },
+  linkDomainText: {
+    color: "#38BDF8",
+    fontSize: 11,
+    fontWeight: "700",
+    flex: 1,
+  },
+  linkUrlText: {
+    color: "#94A3B8",
+    fontSize: 10,
+    marginTop: 2,
+  },
+  modalTopBar: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 50 : (StatusBar.currentHeight || 30) + 10,
+    left: 20,
+    right: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    zIndex: 10,
+  },
+  downloadModalButton: {
+    padding: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderRadius: 20,
   },
 });

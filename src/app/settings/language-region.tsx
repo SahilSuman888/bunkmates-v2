@@ -1,0 +1,1241 @@
+// **@** Language & Region Settings — Pixel-perfect UI matching design system with greyish-white icons, circular back button, dynamic theme adaptability (zero red), and real Firestore & AsyncStorage persistence
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ScrollView,
+  Platform,
+  Switch,
+  Modal,
+  StatusBar,
+  Appearance,
+  Animated,
+  TextInput,
+  FlatList,
+  Alert,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons, Feather } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { auth, db } from "../../lib/firebase";
+import { useThemeToggle } from "../../contexts/ThemeContext";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { ACCENT_COLORS } from "../../theme/theme";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
+import { INDIAN_LANGUAGES, IndianLanguageOption } from "../../contexts/indianLanguagesData";
+
+export type LanguageOption = IndianLanguageOption;
+
+export interface RegionOption {
+  code: string;
+  name: string;
+  flag: string;
+  defaultFirstDay: "Sunday" | "Monday" | "Saturday";
+  defaultDateFormat: string;
+  default24Hour: boolean;
+}
+
+export interface DateFormatOption {
+  format: string;
+  label: string;
+}
+
+export interface FirstDayOption {
+  day: "Sunday" | "Monday" | "Saturday";
+  desc: string;
+  weekDays: string[];
+}
+
+export const LANGUAGES: LanguageOption[] = INDIAN_LANGUAGES;
+
+export const REGIONS: RegionOption[] = [
+  { code: "IN", name: "India (Default)", flag: "🇮🇳", defaultFirstDay: "Monday", defaultDateFormat: "DD/MM/YYYY", default24Hour: false },
+];
+
+export const DATE_FORMATS: DateFormatOption[] = [
+  { format: "MM/DD/YYYY", label: "Month / Day / Year (US Standard)" },
+  { format: "DD/MM/YYYY", label: "Day / Month / Year (UK, India, Global)" },
+  { format: "YYYY-MM-DD", label: "Year-Month-Day (ISO 8601 Standard)" },
+  { format: "DD MMM YYYY", label: "Day Month Name Year" },
+  { format: "MMM DD, YYYY", label: "Month Name Day, Year" },
+];
+
+export const FIRST_DAY_OPTIONS: FirstDayOption[] = [
+  { day: "Sunday", desc: "Common in United States, Canada, Japan", weekDays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] },
+  { day: "Monday", desc: "Standard in Europe, India, ISO 8601", weekDays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+  { day: "Saturday", desc: "Standard in Middle Eastern regions", weekDays: ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"] },
+];
+
+// Helper to format any date dynamically
+export function formatDynamicDate(format: string, date: Date = new Date()): string {
+  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+  const day = pad(date.getDate());
+  const monthNum = pad(date.getMonth() + 1);
+  const year = date.getFullYear();
+  const monthNamesShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const monthShort = monthNamesShort[date.getMonth()];
+
+  switch (format) {
+    case "MM/DD/YYYY":
+      return `${monthNum}/${day}/${year}`;
+    case "DD/MM/YYYY":
+      return `${day}/${monthNum}/${year}`;
+    case "YYYY-MM-DD":
+      return `${year}-${monthNum}-${day}`;
+    case "DD MMM YYYY":
+      return `${day} ${monthShort} ${year}`;
+    case "MMM DD, YYYY":
+      return `${monthShort} ${day}, ${year}`;
+    default:
+      return `${monthNum}/${day}/${year}`;
+  }
+}
+
+// Helper to format any time dynamically
+export function formatDynamicTime(is24Hour: boolean, date: Date = new Date(), showSeconds: boolean = true): string {
+  const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+  let hours = date.getHours();
+  const mins = pad(date.getMinutes());
+  const secs = pad(date.getSeconds());
+
+  if (is24Hour) {
+    return showSeconds ? `${pad(hours)}:${mins}:${secs}` : `${pad(hours)}:${mins}`;
+  } else {
+    const ampm = hours >= 12 ? "PM" : "AM";
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    return showSeconds ? `${hours}:${mins}:${secs} ${ampm}` : `${hours}:${mins} ${ampm}`;
+  }
+}
+
+export default function LanguageRegionSettings() {
+  const router = useRouter();
+
+  // Language & Translation Context
+  const {
+    language: contextLang,
+    languageCode: contextLangCode,
+    changeLanguage,
+    t,
+  } = useLanguage();
+  const { updateLocalePreferences } = useAppSettings();
+
+  // Auth & user state
+  const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // States matching reference image defaults
+  const [language, setLanguage] = useState<string>(contextLang || "English (India)");
+  const [languageCode, setLanguageCode] = useState<string>(contextLangCode || "en-IN");
+  const [region, setRegion] = useState<string>("India (Default)");
+  const [regionCode, setRegionCode] = useState<string>("IN");
+  const [dateFormat, setDateFormat] = useState<string>("DD/MM/YYYY");
+  const [timeFormat24, setTimeFormat24] = useState<boolean>(false);
+  const [firstDayOfWeek, setFirstDayOfWeek] = useState<"Sunday" | "Monday" | "Saturday">("Monday");
+
+  // Synchronize with global language context cleanly via useEffect
+  useEffect(() => {
+    if (contextLang) setLanguage(contextLang);
+    if (contextLangCode) setLanguageCode(contextLangCode);
+  }, [contextLang, contextLangCode]);
+
+  // Dynamic ticking clock state (ticks every second)
+  const [currentClock, setCurrentClock] = useState<Date>(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentClock(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Modals state
+  const [languageModalVisible, setLanguageModalVisible] = useState(false);
+  const [regionModalVisible, setRegionModalVisible] = useState(false);
+  const [dateFormatModalVisible, setDateFormatModalVisible] = useState(false);
+  const [firstDayModalVisible, setFirstDayModalVisible] = useState(false);
+
+  // Modal search queries
+  const [langSearch, setLangSearch] = useState("");
+  const [regionSearch, setRegionSearch] = useState("");
+
+  // Floating save/action toast state
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastOpacity] = useState(() => new Animated.Value(0));
+
+  const triggerToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    Animated.sequence([
+      Animated.timing(toastOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.delay(1600),
+      Animated.timing(toastOpacity, {
+        toValue: 0,
+        duration: 220,
+        useNativeDriver: true,
+      }),
+    ]).start(() => setToastMessage(null));
+  }, [toastOpacity]);
+
+  // Dynamic Theme matching Settings page & ThemeContext
+  let themeMode: "dark" | "light" | "system" = "system";
+  let dynamicAccent = "#FF5A5F";
+  let dynamicThemeColors: any = null;
+  try {
+    const themeContext = useThemeToggle();
+    if (themeContext) {
+      if (themeContext.mode) themeMode = themeContext.mode;
+      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
+      dynamicThemeColors = themeContext.themeColors;
+    }
+  } catch (e) {
+    // fallback safe
+  }
+
+  const isDark =
+    themeMode === "dark" ||
+    (themeMode === "system" && Appearance.getColorScheme() === "dark");
+
+  // Dynamic solid colors
+  const colors = useMemo(() => {
+    const isWhiteAccent =
+      dynamicAccent === "white" ||
+      dynamicAccent === "navWhite" ||
+      dynamicAccent === "#FFFFFF" ||
+      dynamicAccent === "#ffffff" ||
+      dynamicAccent?.toLowerCase() === "#ffffff";
+
+    const isBrightAccent =
+      isWhiteAccent ||
+      dynamicAccent === "#fbc02d" ||
+      dynamicAccent === "#ffd700" ||
+      dynamicAccent === "#f59e0b";
+
+    const onAccentText = isBrightAccent ? "#000000" : "#FFFFFF";
+    const greyishWhite = isDark ? "#E2E8F0" : "#4B5563";
+    const activeText = isWhiteAccent
+      ? (isDark ? "#FFFFFF" : "#111827")
+      : dynamicAccent;
+
+    return {
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      divider: "transparent",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      greyishWhite: greyishWhite,
+      accent: dynamicAccent,
+      onAccentText,
+      isWhiteAccent,
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
+      chevron: isDark ? "#555860" : "#B4B9C2",
+      switchActive: dynamicAccent,
+      switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
+      activeText: activeText,
+      activeBorder: "transparent",
+      activeRowBg: isDark ? "#222226" : "rgba(0, 0, 0, 0.03)",
+      inputBg: isDark ? "#202024" : "#F2F4F7",
+      modalOverlay: "rgba(0, 0, 0, 0.65)",
+      toastBg: isDark ? "#1F2937" : "#111827",
+      toastText: "#F9FAFB",
+      previewBg: isDark ? "#202024" : "#FFFFFF",
+      previewBorder: "transparent",
+      chipBg: isDark ? "#2A2A30" : "#EEF2F6",
+      weekdayActiveBg: isDark ? "#2C2C32" : "#E5E7EB",
+    };
+  }, [isDark, dynamicAccent, dynamicThemeColors]);
+
+  // Auth observer
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  // Restore local cache & real-time Firestore sync
+  useEffect(() => {
+    (async () => {
+      try {
+        const cached = await AsyncStorage.getItem("@bunkmates_locale_preferences");
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed.language) setLanguage(parsed.language);
+          if (parsed.languageCode) setLanguageCode(parsed.languageCode);
+          if (parsed.region && parsed.region.includes("India")) setRegion("India (Default)");
+          else setRegion("India (Default)");
+          setRegionCode("IN");
+          if (parsed.dateFormat) setDateFormat(parsed.dateFormat);
+          if (parsed.timeFormat24 !== undefined) setTimeFormat24(parsed.timeFormat24);
+          if (parsed.firstDayOfWeek) setFirstDayOfWeek(parsed.firstDayOfWeek);
+        }
+      } catch (e) {
+        console.log("AsyncStorage read error:", e);
+      }
+    })();
+
+    if (authLoading || !user) return;
+
+    const userDocRef = doc(db, "users", user.uid);
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      (snap) => {
+        if (snap.exists()) {
+          const uData = snap.data();
+          const p = uData.localePreferences || {};
+          if (p.language) setLanguage(p.language);
+          if (p.languageCode) setLanguageCode(p.languageCode);
+          setRegion("India (Default)");
+          setRegionCode("IN");
+          if (p.dateFormat) setDateFormat(p.dateFormat);
+          if (p.timeFormat24 !== undefined) setTimeFormat24(p.timeFormat24);
+          if (p.firstDayOfWeek) setFirstDayOfWeek(p.firstDayOfWeek);
+        }
+      },
+      (error) => {
+        console.log("Firestore locale snapshot error:", error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user, authLoading]);
+
+  // Persistence handler with dot-notation merge
+  const savePreferences = async (updated: Partial<{
+    language: string;
+    languageCode: string;
+    region: string;
+    regionCode: string;
+    dateFormat: string;
+    timeFormat24: boolean;
+    firstDayOfWeek: "Sunday" | "Monday" | "Saturday";
+  }>) => {
+    updateLocalePreferences(updated as any);
+    AsyncStorage.getItem("@bunkmates_locale_preferences").then((cached) => {
+      const existing = cached ? JSON.parse(cached) : {};
+      const current = { ...existing, ...updated };
+      AsyncStorage.setItem("@bunkmates_locale_preferences", JSON.stringify(current)).catch(() => {});
+    }).catch(() => {});
+
+    if (user) {
+      const userDocRef = doc(db, "users", user.uid);
+      const updates: any = { updatedAt: new Date().toISOString() };
+      Object.keys(updated).forEach((k) => {
+        updates[`localePreferences.${k}`] = (updated as any)[k];
+      });
+      updateDoc(userDocRef, updates).catch((e) => {
+        console.log("Firestore write error:", e);
+      });
+    }
+  };
+
+  // Selection handlers with dynamic smart logic
+  const handleSelectLanguage = (lang: LanguageOption) => {
+    setLanguageModalVisible(false);
+    setLanguage(lang.name);
+    setLanguageCode(lang.code);
+    changeLanguage(lang.name, lang.code as any).catch(() => {});
+    savePreferences({ language: lang.name, languageCode: lang.code }).catch(() => {});
+    triggerToast(`${t("app_language", "Language")}: ${lang.name}`);
+  };
+
+  const handleSelectRegion = (reg: RegionOption) => {
+    setRegion(reg.name);
+    setRegionCode(reg.code);
+
+    // Dynamic Regional auto-preset suggestion:
+    // When changing region, offer to also match typical date format and week start
+    Alert.alert(
+      `Set Regional Formats for ${reg.name}?`,
+      `Would you like to automatically update your date format (${reg.defaultDateFormat}), 24-hour time (${reg.default24Hour ? "On" : "Off"}), and first day of week (${reg.defaultFirstDay}) to match ${reg.name}?`,
+      [
+        {
+          text: "Keep Current Formats",
+          style: "cancel",
+          onPress: () => {
+            savePreferences({ region: reg.name, regionCode: reg.code });
+            triggerToast(`Region set to ${reg.name}`);
+          },
+        },
+        {
+          text: "Apply Regional Defaults",
+          style: "default",
+          onPress: () => {
+            setDateFormat(reg.defaultDateFormat);
+            setTimeFormat24(reg.default24Hour);
+            setFirstDayOfWeek(reg.defaultFirstDay);
+            savePreferences({
+              region: reg.name,
+              regionCode: reg.code,
+              dateFormat: reg.defaultDateFormat,
+              timeFormat24: reg.default24Hour,
+              firstDayOfWeek: reg.defaultFirstDay,
+            });
+            triggerToast(`Region & formats updated for ${reg.name}`);
+          },
+        },
+      ]
+    );
+
+    setRegionModalVisible(false);
+  };
+
+  const handleSelectDateFormat = (df: DateFormatOption) => {
+    setDateFormat(df.format);
+    savePreferences({ dateFormat: df.format });
+    setDateFormatModalVisible(false);
+    triggerToast(`Date format: ${df.format}`);
+  };
+
+  const handleTimeFormatToggle = (val: boolean) => {
+    setTimeFormat24(val);
+    savePreferences({ timeFormat24: val });
+    triggerToast(val ? "24-hour clock enabled" : "12-hour clock enabled");
+  };
+
+  const handleSelectFirstDay = (day: "Sunday" | "Monday" | "Saturday") => {
+    setFirstDayOfWeek(day);
+    savePreferences({ firstDayOfWeek: day });
+    setFirstDayModalVisible(false);
+    triggerToast(`First day of week: ${day}`);
+  };
+
+  // Filtered lists for search modals
+  const filteredLanguages = useMemo(() => {
+    const q = langSearch.trim().toLowerCase();
+    if (!q) return LANGUAGES;
+    return LANGUAGES.filter(
+      (l) =>
+        l.name.toLowerCase().includes(q) ||
+        l.nativeName.toLowerCase().includes(q) ||
+        l.code.toLowerCase().includes(q)
+    );
+  }, [langSearch]);
+
+  const filteredRegions = useMemo(() => {
+    const q = regionSearch.trim().toLowerCase();
+    if (!q) return REGIONS;
+    return REGIONS.filter(
+      (r) =>
+        r.name.toLowerCase().includes(q) ||
+        r.code.toLowerCase().includes(q)
+    );
+  }, [regionSearch]);
+
+  // Dynamic greetings translation for the currently selected language
+  const activeGreeting = useMemo(() => {
+    const found = LANGUAGES.find((l) => l.name === language || l.code === languageCode);
+    return found ? found.greeting : "Welcome to Bunkmates";
+  }, [language, languageCode]);
+
+  // Formatted date-time live example that dynamically ticks
+  const liveDateString = useMemo(() => {
+    return formatDynamicDate(dateFormat, currentClock);
+  }, [dateFormat, currentClock]);
+
+  const liveTimeString = useMemo(() => {
+    return formatDynamicTime(timeFormat24, currentClock, true);
+  }, [timeFormat24, currentClock]);
+
+  // Dynamic 7-day week sequence based on selected firstDayOfWeek
+  const dynamicWeekDays = useMemo(() => {
+    const option = FIRST_DAY_OPTIONS.find((f) => f.day === firstDayOfWeek);
+    return option ? option.weekDays : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  }, [firstDayOfWeek]);
+
+  // Today's day abbreviation to highlight
+  const todayDayAbbr = useMemo(() => {
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return days[currentClock.getDay()];
+  }, [currentClock]);
+
+  return (
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top"]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+
+      {/* Floating Save/Status Toast */}
+      {toastMessage && (
+        <Animated.View
+          style={[
+            styles.toastBox,
+            {
+              backgroundColor: colors.toastBg,
+              opacity: toastOpacity,
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <Ionicons name="checkmark-circle" size={18} color="#10B981" style={{ marginRight: 8 }} />
+          <Text style={[styles.toastText, { color: colors.toastText }]}>{toastMessage}</Text>
+        </Animated.View>
+      )}
+
+      {/* Header with Circular Back Button */}
+      <View style={styles.header}>
+        <Pressable
+          onPress={() => router.back()}
+          style={({ pressed }) => [
+            styles.modernHeaderBtn,
+            {
+              backgroundColor: colors.card,
+              opacity: pressed ? 0.7 : 1,
+            },
+          ]}
+          accessibilityLabel={t("back", "Back")}
+          accessibilityRole="button"
+        >
+          <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+        </Pressable>
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+          {t("language_region_title", "Language & Region")}
+        </Text>
+        <View style={styles.headerRightSpacer} />
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Dynamic Live Locale & Formats Preview Card */}
+        <View style={[styles.previewCard, { backgroundColor: colors.previewBg }]}>
+          <View style={styles.previewTopRow}>
+            <View style={styles.previewLabelRow}>
+              <Ionicons name="sparkles" size={14} color={colors.textSecondary} style={{ marginRight: 6 }} />
+              <Text style={[styles.previewLabel, { color: colors.textSecondary }]}>
+                {t("live_preview", "LIVE DYNAMIC PREVIEW")}
+              </Text>
+            </View>
+            <View style={[styles.previewChip, { backgroundColor: colors.chipBg }]}>
+              <Text style={[styles.previewChipText, { color: colors.textPrimary }]}>{regionCode}</Text>
+            </View>
+          </View>
+
+          {/* Dynamic Ticking Time & Date */}
+          <Text style={[styles.previewDateTime, { color: colors.textPrimary }]}>
+            {liveDateString} • {liveTimeString}
+          </Text>
+
+          {/* Localized Greeting & Details */}
+          <Text style={[styles.previewGreeting, { color: colors.textPrimary }]}>
+            &ldquo;{activeGreeting}&rdquo;
+          </Text>
+
+          <Text style={[styles.previewDetails, { color: colors.textSecondary }]}>
+            {t("app_language", "Language")}: {language} • {t("week_begins_on", "Week begins on")} {firstDayOfWeek === "Sunday" ? t("sunday", "Sunday") : firstDayOfWeek === "Monday" ? t("monday", "Monday") : t("saturday", "Saturday")}
+          </Text>
+
+          {/* Dynamic 7-day Week Strip Preview */}
+          <View style={styles.weekStrip}>
+            {dynamicWeekDays.map((d) => {
+              const isToday = d === todayDayAbbr;
+              return (
+                <View
+                  key={d}
+                  style={[
+                    styles.weekDayPill,
+                    {
+                      backgroundColor: isToday ? colors.switchActive : colors.chipBg,
+                      borderWidth: (isToday && colors.isWhiteAccent && !isDark) ? 1 : 0,
+                      borderColor: "#111827",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.weekDayPillText,
+                      {
+                        color: isToday ? colors.onAccentText : colors.textSecondary,
+                        fontWeight: isToday ? "700" : "500",
+                      },
+                    ]}
+                  >
+                    {d}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* ========================================================
+            1. LOCALE SECTION
+        ========================================================= */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("locale_section", "LOCALE")}
+        </Text>
+        <View style={[styles.cardGroup, { backgroundColor: colors.card }]}>
+          {/* App Language */}
+          <Pressable
+            onPress={() => {
+              setLangSearch("");
+              setLanguageModalVisible(true);
+            }}
+            style={({ pressed }) => [styles.rowItem, pressed && styles.rowPressed]}
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="globe-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={[styles.rowContent]}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("app_language", "App Language")}
+              </Text>
+              <View style={styles.rightGroup}>
+                <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>{language}</Text>
+                <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
+              </View>
+            </View>
+          </Pressable>
+
+          {/* Region (Fixed to India Default - Right arrow removed) */}
+          <View style={styles.rowItem}>
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Feather name="map" size={19} color={colors.greyishWhite} />
+            </View>
+            <View style={[styles.rowContent]}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("region", "Region")}
+              </Text>
+              <View style={styles.rightGroup}>
+                <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>{region}</Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* ========================================================
+            2. SYSTEM FORMATS SECTION
+        ========================================================= */}
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+          {t("system_formats_section", "SYSTEM FORMATS")}
+        </Text>
+        <View style={[styles.cardGroup, { backgroundColor: colors.card }]}>
+          {/* Date Format */}
+          <Pressable
+            onPress={() => setDateFormatModalVisible(true)}
+            style={({ pressed }) => [styles.rowItem, pressed && styles.rowPressed]}
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="calendar-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={[styles.rowContent]}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("date_format", "Date Format")}
+              </Text>
+              <View style={styles.rightGroup}>
+                <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>{dateFormat}</Text>
+                <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
+              </View>
+            </View>
+          </Pressable>
+
+          {/* Time Format (24-Hour) */}
+          <View style={styles.rowItem}>
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="time-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={[styles.rowContent]}>
+              <View style={styles.labelGroup}>
+                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                  {t("time_format_24", "Time Format (24-Hour)")}
+                </Text>
+                <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
+                  {t("time_format_desc", "Use 24-hour clock instead of 12-hour")}
+                </Text>
+              </View>
+              <Switch
+                value={timeFormat24}
+                onValueChange={handleTimeFormatToggle}
+                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          </View>
+
+          {/* First Day of Week */}
+          <Pressable
+            onPress={() => setFirstDayModalVisible(true)}
+            style={({ pressed }) => [styles.rowItem, pressed && styles.rowPressed]}
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="calendar" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={[styles.rowContent]}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
+                {t("first_day_of_week", "First Day of Week")}
+              </Text>
+              <View style={styles.rightGroup}>
+                <Text style={[styles.rightValueText, { color: colors.textSecondary }]}>
+                  {firstDayOfWeek === "Sunday" ? t("sunday", "Sunday") : firstDayOfWeek === "Monday" ? t("monday", "Monday") : t("saturday", "Saturday")}
+                </Text>
+                <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
+              </View>
+            </View>
+          </Pressable>
+        </View>
+
+        <View style={{ height: 40 }} />
+      </ScrollView>
+
+      {/* ========================================================
+          MODAL 1: LANGUAGE PICKER (SWIPEABLE DRAWER)
+      ========================================================= */}
+      <SwipeableDrawer
+        visible={languageModalVisible}
+        onClose={() => setLanguageModalVisible(false)}
+        showHandle={true}
+        enableSheetDrag={false}
+        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
+      >
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+            {t("select_language", "Select App Language")}
+          </Text>
+          <Pressable
+            onPress={() => setLanguageModalVisible(false)}
+            style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Pressable>
+        </View>
+
+        {/* Search Input */}
+        <View style={[styles.searchBox, { backgroundColor: colors.inputBg }]}>
+          <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
+          <TextInput
+            style={[styles.searchInput, { color: colors.textPrimary }]}
+            placeholder={t("search_languages", "Search languages...")}
+            placeholderTextColor={colors.textSecondary}
+            value={langSearch}
+            onChangeText={setLangSearch}
+            autoCorrect={false}
+          />
+          {langSearch.length > 0 && (
+            <Pressable onPress={() => setLangSearch("")}>
+              <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+            </Pressable>
+          )}
+        </View>
+
+        <FlatList
+          data={filteredLanguages}
+          keyExtractor={(item) => item.code}
+          showsVerticalScrollIndicator={false}
+          style={{ maxHeight: 380 }}
+          renderItem={({ item }) => {
+            const isSelected = languageCode === item.code || language === item.name;
+            return (
+              <Pressable
+                onPress={() => handleSelectLanguage(item)}
+                style={({ pressed }) => [
+                  styles.modalListItem,
+                  isSelected && { backgroundColor: colors.activeRowBg },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Text style={styles.flagIcon}>{item.flag}</Text>
+                <View style={styles.modalItemTextGroup}>
+                  <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
+                    {item.name}
+                  </Text>
+                  <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
+                    {item.nativeName} • &ldquo;{item.greeting}&rdquo;
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
+                )}
+              </Pressable>
+            );
+          }}
+        />
+      </SwipeableDrawer>
+
+      {/* ========================================================
+          MODAL 2: REGION PICKER
+      ========================================================= */}
+      <SwipeableDrawer
+        visible={regionModalVisible}
+        onClose={() => setRegionModalVisible(false)}
+        showHandle={true}
+        enableSheetDrag={false}
+        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
+      >
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+            {t("select_region", "Select Region")}
+          </Text>
+          <Pressable
+            onPress={() => setRegionModalVisible(false)}
+            style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Pressable>
+        </View>
+
+        {/* Search Input */}
+        <View style={[styles.searchBox, { backgroundColor: colors.inputBg }]}>
+          <Ionicons name="search" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
+          <TextInput
+            style={[styles.searchInput, { color: colors.textPrimary }]}
+            placeholder={t("search_region", "Search country or region...")}
+            placeholderTextColor={colors.textSecondary}
+            value={regionSearch}
+            onChangeText={setRegionSearch}
+            autoCorrect={false}
+          />
+          {regionSearch.length > 0 && (
+            <Pressable onPress={() => setRegionSearch("")}>
+              <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+            </Pressable>
+          )}
+        </View>
+
+        <FlatList
+          data={filteredRegions}
+          keyExtractor={(item) => item.code}
+          showsVerticalScrollIndicator={false}
+          style={{ maxHeight: 380 }}
+          renderItem={({ item }) => {
+            const isSelected = region === item.name;
+            return (
+              <Pressable
+                onPress={() => handleSelectRegion(item)}
+                style={({ pressed }) => [
+                  styles.modalListItem,
+                  isSelected && { backgroundColor: colors.activeRowBg },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Text style={styles.flagIcon}>{item.flag}</Text>
+                <View style={styles.modalItemTextGroup}>
+                  <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
+                    {item.name}
+                  </Text>
+                  <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
+                    Format: {item.defaultDateFormat} • Starts {item.defaultFirstDay}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
+                )}
+              </Pressable>
+            );
+          }}
+        />
+      </SwipeableDrawer>
+
+      {/* ========================================================
+          MODAL 3: DATE FORMAT PICKER (SWIPEABLE DRAWER)
+      ========================================================= */}
+      <SwipeableDrawer
+        visible={dateFormatModalVisible}
+        onClose={() => setDateFormatModalVisible(false)}
+        showHandle={true}
+        enableSheetDrag={false}
+        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
+      >
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+            {t("choose_date_format", "Choose Date Format")}
+          </Text>
+          <Pressable
+            onPress={() => setDateFormatModalVisible(false)}
+            style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Pressable>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {DATE_FORMATS.map((item) => {
+            const isSelected = dateFormat === item.format;
+            const liveSample = formatDynamicDate(item.format, currentClock);
+            return (
+              <Pressable
+                key={item.format}
+                onPress={() => handleSelectDateFormat(item)}
+                style={({ pressed }) => [
+                  styles.modalListItem,
+                  isSelected && { backgroundColor: colors.activeRowBg },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <View style={[styles.iconBoxSmall, { backgroundColor: colors.iconBoxBg }]}>
+                  <Ionicons name="calendar-outline" size={17} color={colors.greyishWhite} />
+                </View>
+                <View style={styles.modalItemTextGroup}>
+                  <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
+                    {item.format}
+                  </Text>
+                  <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
+                    {t("today", "Today")}: {liveSample} • {item.label}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
+                )}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </SwipeableDrawer>
+
+      {/* ========================================================
+          MODAL 4: FIRST DAY OF WEEK PICKER (SWIPEABLE DRAWER)
+      ========================================================= */}
+      <SwipeableDrawer
+        visible={firstDayModalVisible}
+        onClose={() => setFirstDayModalVisible(false)}
+        showHandle={true}
+        enableSheetDrag={false}
+        sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
+      >
+        <View style={styles.sheetHeader}>
+          <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>
+            {t("first_day_of_week", "First Day of Week")}
+          </Text>
+          <Pressable
+            onPress={() => setFirstDayModalVisible(false)}
+            style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
+          >
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Pressable>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {FIRST_DAY_OPTIONS.map((item) => {
+            const isSelected = firstDayOfWeek === item.day;
+            return (
+              <Pressable
+                key={item.day}
+                onPress={() => handleSelectFirstDay(item.day)}
+                style={({ pressed }) => [
+                  styles.modalListItem,
+                  isSelected && { backgroundColor: colors.activeRowBg },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <View style={[styles.iconBoxSmall, { backgroundColor: colors.iconBoxBg }]}>
+                  <Ionicons name="today-outline" size={17} color={colors.greyishWhite} />
+                </View>
+                <View style={styles.modalItemTextGroup}>
+                  <Text style={[styles.modalItemTitle, { color: colors.textPrimary, fontWeight: isSelected ? "700" : "500" }]}>
+                    {item.day}
+                  </Text>
+                  <Text style={[styles.modalItemSubtitle, { color: colors.textSecondary }]}>
+                    {item.desc}
+                  </Text>
+                  {/* Mini week day sequence preview */}
+                  <View style={{ flexDirection: "row", gap: 4, marginTop: 4 }}>
+                    {item.weekDays.map((wd, i) => (
+                      <View
+                        key={wd}
+                        style={{
+                          paddingHorizontal: 4,
+                          paddingVertical: 1,
+                          borderRadius: 4,
+                          backgroundColor: i === 0 ? colors.switchActive : colors.chipBg,
+                          borderWidth: (i === 0 && colors.isWhiteAccent && !isDark) ? 1 : 0,
+                          borderColor: "#111827",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 9,
+                            fontWeight: "600",
+                            color: i === 0 ? colors.onAccentText : colors.textSecondary,
+                          }}
+                        >
+                          {wd}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+                {isSelected && (
+                  <Ionicons name="checkmark-circle" size={22} color={colors.switchActive} />
+                )}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </SwipeableDrawer>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    paddingTop: Platform.OS === "android" ? 12 : 8,
+    paddingBottom: 12,
+  },
+  modernHeaderBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+  },
+  headerRightSpacer: {
+    width: 42,
+  },
+  scrollContent: {
+    paddingHorizontal: 18,
+    paddingBottom: 40,
+  },
+  previewCard: {
+    borderRadius: 28,
+    borderWidth: 0,
+    padding: 16,
+    marginTop: 6,
+    marginBottom: 24,
+  },
+  previewTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  previewLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  previewLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+  },
+  previewChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  previewChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  previewDateTime: {
+    fontSize: 17,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+    marginBottom: 4,
+  },
+  previewGreeting: {
+    fontSize: 13,
+    fontWeight: "600",
+    fontStyle: "italic",
+    marginBottom: 4,
+  },
+  previewDetails: {
+    fontSize: 12,
+    fontWeight: "500",
+    marginBottom: 10,
+  },
+  weekStrip: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  weekDayPill: {
+    flex: 1,
+    marginHorizontal: 2,
+    paddingVertical: 5,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  weekDayPillText: {
+    fontSize: 10,
+  },
+  sectionHeading: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    marginBottom: 10,
+    marginTop: 4,
+    textTransform: "uppercase",
+  },
+  cardGroup: {
+    borderRadius: 28,
+    borderWidth: 0,
+    overflow: "hidden",
+    marginBottom: 24,
+  },
+  rowItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  rowPressed: {
+    opacity: 0.7,
+  },
+  iconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+  },
+  iconBoxSmall: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  rowContent: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 2,
+  },
+  labelGroup: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  rowTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    letterSpacing: -0.2,
+  },
+  rowSubtitle: {
+    fontSize: 12,
+    fontWeight: "400",
+    marginTop: 3,
+    lineHeight: 16,
+  },
+  rightGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  rightValueText: {
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  modalBackdrop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  bottomSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderTopWidth: 0,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: Platform.OS === "ios" ? 40 : 28,
+  },
+  sheetHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 14,
+    opacity: 0.4,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  sheetTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+  },
+  sheetCloseBtn: {
+    padding: 4,
+  },
+  searchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 14,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 0,
+  },
+  modalListItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    marginVertical: 2,
+  },
+  flagIcon: {
+    fontSize: 22,
+    marginRight: 12,
+  },
+  modalItemTextGroup: {
+    flex: 1,
+  },
+  modalItemTitle: {
+    fontSize: 15,
+  },
+  modalItemSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  // Toast
+  toastBox: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 54 : 36,
+    alignSelf: "center",
+    zIndex: 9999,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  toastText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+});

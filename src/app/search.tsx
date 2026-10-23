@@ -16,6 +16,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useUser } from "../contexts/UserContext";
+import { useLanguage } from "../contexts/LanguageContext";
+import { useThemeToggle } from "../contexts/ThemeContext";
 import { db } from "../lib/firebase";
 import Animated, { FadeIn } from "react-native-reanimated";
 import {
@@ -34,6 +36,8 @@ const { width } = Dimensions.get("window");
 export default function SearchScreen() {
   const router = useRouter();
   const { user } = useUser();
+  const { t } = useLanguage();
+  const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -243,26 +247,26 @@ export default function SearchScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" />
-      <View style={styles.container}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+      <View style={[styles.container, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
         {/* Fixed Search Bar */}
         {searchOpen && (
-          <Animated.View entering={FadeIn} style={styles.searchBarContainer}>
+          <Animated.View entering={FadeIn} style={[styles.searchBarContainer, { backgroundColor: themeColors.card, borderBottomWidth: 0 }]}>
             {/* **@** Back Button */}
             <Pressable
               onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/home" as any))}
               style={{ padding: 4 }}
               accessibilityLabel="Go Back"
             >
-              <Ionicons name="arrow-back" size={24} color="#fff" />
+              <Ionicons name="arrow-back" size={24} color={themeColors.text} />
             </Pressable>
-            <View style={styles.searchInputWrapper}>
-              <Ionicons name="search-outline" size={20} color="#fff" />
+            <View style={[styles.searchInputWrapper, { backgroundColor: isDark ? "#202024" : "#F4F5F7" }]}>
+              <Ionicons name="search-outline" size={20} color={themeColors.textSecondary} />
               <TextInput
-                style={styles.searchInput}
-                placeholder="Find people, trips, or places..."
-                placeholderTextColor="#666"
+                style={[styles.searchInput, { color: themeColors.text }]}
+                placeholder={t("Find people, trips, or places...", "Search destination, user, or trip...")}
+                placeholderTextColor={themeColors.textSecondary}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 autoFocus
@@ -280,7 +284,7 @@ export default function SearchScreen() {
               }}
               style={styles.closeButton}
             >
-              <Text style={styles.closeButtonText}>Cancel</Text>
+              <Text style={styles.closeButtonText}>{t("Cancel")}</Text>
             </Pressable>
           </Animated.View>
         )}
@@ -311,7 +315,7 @@ export default function SearchScreen() {
                 style={[styles.searchButton, { flex: 1, marginBottom: 0 }]}
               >
                 <Ionicons name="search-outline" size={20} color="#888" />
-                <Text style={styles.searchButtonText}>Search Exploration</Text>
+                <Text style={styles.searchButtonText}>{t("Search Exploration")}</Text>
               </Pressable>
             </View>
           )}
@@ -340,7 +344,7 @@ export default function SearchScreen() {
                           activeTab === tab && styles.tabTextActive,
                         ]}
                       >
-                        {tab.toUpperCase()}
+                        {t(tab.toUpperCase())}
                       </Text>
                     </Pressable>
                   ))}
@@ -387,7 +391,7 @@ export default function SearchScreen() {
 
                     {(activeTab === "all" || activeTab === "users") && results.users.length > 0 && (
                       <View style={styles.groupContainer}>
-                        <Text style={styles.groupTitle}>Users ({results.users.length})</Text>
+                        <Text style={styles.groupTitle}>{t("Users")} ({results.users.length})</Text>
                         {results.users.slice(0, activeTab === "all" ? 5 : 50).map((user, i) => (
                           <ResultCard
                             key={user.id}
@@ -402,7 +406,7 @@ export default function SearchScreen() {
 
                     {(activeTab === "all" || activeTab === "trips") && results.trips.length > 0 && (
                       <View style={styles.groupContainer}>
-                        <Text style={styles.groupTitle}>Trips ({results.trips.length})</Text>
+                        <Text style={styles.groupTitle}>{t("Trips")} ({results.trips.length})</Text>
                         {results.trips.map((trip, i) => (
                           <ResultCard
                             key={trip.id}
@@ -430,7 +434,7 @@ export default function SearchScreen() {
                 )
               ) : searchHistory.length > 0 ? (
                 <View style={styles.historyContainer}>
-                  <Text style={styles.historyTitle}>Recent Searches</Text>
+                  <Text style={styles.historyTitle}>{t("Recent Searches")}</Text>
                   {searchHistory.slice(0, 5).map((item, i) => (
                     <Pressable
                       key={i}
@@ -445,8 +449,8 @@ export default function SearchScreen() {
               ) : (
                 <View style={styles.emptyContainer}>
                   <Ionicons name="search-outline" size={48} color="rgba(255,255,255,0.2)" />
-                  <Text style={styles.emptyText}>Start searching</Text>
-                  <Text style={styles.emptySubtext}>Find users, trips, and places</Text>
+                  <Text style={styles.emptyText}>{t("Start searching")}</Text>
+                  <Text style={styles.emptySubtext}>{t("Find users, trips, and places")}</Text>
                 </View>
               )}
             </>
@@ -575,6 +579,7 @@ function ResultCard({
 // User Drawer Content
 function UserDrawerContent({ user, onClose }: { user: any; onClose: () => void }) {
   const router = useRouter();
+  const { t } = useLanguage();
 
   return (
     <ScrollView style={styles.drawerScrollView} showsVerticalScrollIndicator={false}>
@@ -589,36 +594,40 @@ function UserDrawerContent({ user, onClose }: { user: any; onClose: () => void }
 
         <View style={styles.userChips}>
           <View style={styles.chip}>
-            <Text style={styles.chipText}>Public</Text>
+            <Text style={styles.chipText}>
+              {user.privacy?.profileVisibility === "private" || user.profileVisibility === "private"
+                ? t("Private")
+                : t("Public")}
+            </Text>
           </View>
         </View>
       </View>
 
       <View style={styles.userDetails}>
-        <Text style={styles.detailLabel}>Username</Text>
+        <Text style={styles.detailLabel}>{t("Username")}</Text>
         <Text style={styles.detailValue}>@{user.username || "username"}</Text>
 
-        <Text style={styles.detailLabel}>Email</Text>
+        <Text style={styles.detailLabel}>{t("Email")}</Text>
         <Text style={styles.detailValue}>{user.email}</Text>
 
         {user.location && (
           <>
-            <Text style={styles.detailLabel}>Location</Text>
+            <Text style={styles.detailLabel}>{t("Location")}</Text>
             <Text style={styles.detailValue}>{user.location}</Text>
           </>
         )}
 
         {user.occupation && (
           <>
-            <Text style={styles.detailLabel}>Occupation</Text>
+            <Text style={styles.detailLabel}>{t("Occupation")}</Text>
             <Text style={styles.detailValue}>{user.occupation}</Text>
           </>
         )}
       </View>
 
       <View style={styles.userActions}>
-        <Pressable style={styles.actionButton} onPress={() => router.push(`/profile/${user.uid}` as any)}>
-          <Text style={styles.actionButtonText}>View Profile</Text>
+        <Pressable style={styles.actionButton} onPress={() => router.push(`/profile/${user.uid || user.id}` as any)}>
+          <Text style={styles.actionButtonText}>{t("View Profile")}</Text>
         </Pressable>
       </View>
     </ScrollView>
@@ -628,6 +637,7 @@ function UserDrawerContent({ user, onClose }: { user: any; onClose: () => void }
 // Place Drawer Content
 function PlaceDrawerContent({ place, onClose }: { place: any; onClose: () => void }) {
   const router = useRouter();
+  const { t } = useLanguage();
   const fallbackUrl = place.fallbackImageUrl || getFallbackPhoto(place.category || place.type || "", place.name || "");
   const initialUri = place.imageUrl || place.imageThumbnail || place.images?.[0] || fallbackUrl;
   const [currentImage, setCurrentImage] = useState<string>(initialUri);
@@ -710,7 +720,7 @@ function PlaceDrawerContent({ place, onClose }: { place: any; onClose: () => voi
 
         <View style={styles.placeActions}>
           <Pressable style={[styles.actionButton, { flex: 1 }]} onPress={onClose}>
-            <Text style={styles.actionButtonText}>Close</Text>
+            <Text style={styles.actionButtonText}>{t("Close")}</Text>
           </Pressable>
           <Pressable
             style={[styles.actionButton, styles.primaryButton, { flex: 1, marginLeft: 10 }]}
@@ -732,7 +742,7 @@ function PlaceDrawerContent({ place, onClose }: { place: any; onClose: () => voi
               });
             }}
           >
-            <Text style={[styles.actionButtonText, { color: "#000" }]}>View Details</Text>
+            <Text style={[styles.actionButtonText, { color: "#000" }]}>{t("View Details")}</Text>
           </Pressable>
         </View>
       </View>

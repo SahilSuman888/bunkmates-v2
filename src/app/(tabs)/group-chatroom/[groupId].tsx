@@ -46,10 +46,11 @@ import GroupInfoDrawer from "../../../components/group_chat/GroupInfoDrawer";
 import UserProfileModal from "../../../components/UserProfileModal";
 import { BlurView } from "expo-blur";
 import { sendGroupChatMessageNotification } from "../../../lib/sendAppNotification";
-import { DEFAULT_WALLPAPER_ASSET, getWallpaperSource } from "../../../contexts/ChatSettingsContext";
+import { DEFAULT_WALLPAPER_ASSET, getWallpaperSource, useChatSettings } from "../../../contexts/ChatSettingsContext";
 import WallpaperThemePreviewModal from "../../../components/chat/WallpaperThemePreviewModal";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
+import { useThemeToggle } from "../../../contexts/ThemeContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -84,6 +85,13 @@ export default function GroupChatroom() {
   const router = useRouter();
   const { user } = useUser();
   const { startCall } = useCall();
+  const { isDark, themeColors, accentColor, accent, scaleFont, fontScale } = useThemeToggle();
+  const isBrightAccent =
+    accentColor === "#FFFFFF" ||
+    accentColor === "#ffffff" ||
+    accentColor === "#f59e0b" ||
+    accentColor === "#ffd700";
+  const onAccentTextColor = isBrightAccent ? "#000000" : "#FFFFFF";
 
   const groupKey = (groupId as string) || "";
   const { messages, loading: messagesLoading } = useGroupChat(groupKey);
@@ -91,6 +99,41 @@ export default function GroupChatroom() {
   const [groupData, setGroupData] = useState<any>(null);
   const [memberUsers, setMemberUsers] = useState<any[]>([]);
   const [createdByUser, setCreatedByUser] = useState<any>(null);
+
+  const {
+    wallpaper,
+    enterIsSend,
+    disappearingTimer,
+    clearedAt,
+    fontSize,
+  } = useChatSettings();
+
+  const getDisappearingExpiresAt = () => {
+    const nowMs = Date.now();
+    if (disappearingTimer === "24h") return nowMs + 24 * 3600 * 1000;
+    if (disappearingTimer === "7d") return nowMs + 7 * 24 * 3600 * 1000;
+    if (disappearingTimer === "30d") return nowMs + 30 * 24 * 3600 * 1000;
+    if (disappearingTimer === "90d") return nowMs + 90 * 24 * 60 * 60 * 1000;
+    return null;
+  };
+
+  const filteredMessages = useMemo(() => {
+    if (!messages) return [];
+    const clearedMs = clearedAt ? new Date(clearedAt).getTime() : 0;
+    const nowMs = Date.now();
+    return messages.filter((msg: any) => {
+      let msgMs = 0;
+      if (msg.timestamp) {
+        if (typeof msg.timestamp === "number") msgMs = msg.timestamp;
+        else if (typeof msg.timestamp.toMillis === "function") msgMs = msg.timestamp.toMillis();
+        else if (msg.timestamp.seconds) msgMs = msg.timestamp.seconds * 1000;
+        else if (typeof msg.timestamp === "string") msgMs = new Date(msg.timestamp).getTime() || 0;
+      }
+      if (clearedMs > 0 && msgMs > 0 && msgMs < clearedMs) return false;
+      if (msg.expiresAt && typeof msg.expiresAt === "number" && msg.expiresAt < nowMs) return false;
+      return true;
+    });
+  }, [messages, clearedAt]);
 
   const [input, setInput] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -373,6 +416,7 @@ export default function GroupChatroom() {
     setUploading(true);
 
     try {
+      const expiresAt = getDisappearingExpiresAt();
       const msgObj = customPayload || {
         text: textToSend,
         imageUrl: pendingImage || null,
@@ -381,6 +425,7 @@ export default function GroupChatroom() {
         senderAvatar: user.photoURL || null,
         timestamp: serverTimestamp(),
         type: pendingImage ? "image" : "text",
+        expiresAt: expiresAt || null,
         replyTo: replyTo
           ? { text: replyTo.text, senderId: replyTo.senderId, senderName: replyTo.senderName }
           : null,
@@ -792,9 +837,17 @@ export default function GroupChatroom() {
                     onPress={() => handleToggleChecklistItem(item.id, idx, isCompleted)}
                     style={s.checklistItemRow}
                   >
-                    <View style={[s.checkboxSquare, isCompleted && s.checkboxSquareChecked]}>
+                    <View
+                      style={[
+                        s.checkboxSquare,
+                        isCompleted && [
+                          s.checkboxSquareChecked,
+                          { backgroundColor: accentColor, borderColor: accentColor },
+                        ],
+                      ]}
+                    >
                       {isCompleted && (
-                        <Ionicons name="checkmark" size={14} color="#000000" />
+                        <Ionicons name="checkmark" size={14} color={onAccentTextColor} />
                       )}
                     </View>
                     <Text style={[s.checklistItemText, isCompleted && s.checklistItemTextChecked]}>
@@ -890,7 +943,11 @@ export default function GroupChatroom() {
           style={[
             s.msgBubble,
             isOwn ? s.msgBubbleOwn : s.msgBubbleOther,
-            isOwn && !!localGroupBubbleColor ? { backgroundColor: localGroupBubbleColor } : null,
+            isOwn && !!localGroupBubbleColor
+              ? { backgroundColor: localGroupBubbleColor }
+              : isOwn
+              ? { backgroundColor: accentColor }
+              : null,
           ]}
         >
           {/* Sender Name for incoming group messages (Image 2) */}
@@ -900,8 +957,8 @@ export default function GroupChatroom() {
 
           {/* Reply Preview */}
           {item.replyTo && (
-            <View style={s.replyBox}>
-              <Text style={s.replyBoxSender}>{item.replyTo.senderName}</Text>
+            <View style={[s.replyBox, { borderLeftColor: accentColor }]}>
+              <Text style={[s.replyBoxSender, { color: accentColor }]}>{item.replyTo.senderName}</Text>
               <Text style={s.replyBoxText} numberOfLines={1}>
                 {item.replyTo.text}
               </Text>
@@ -924,7 +981,17 @@ export default function GroupChatroom() {
           )}
 
           {/* Message Text */}
-          {item.text ? <Text style={s.msgText}>{item.text}</Text> : null}
+          {item.text ? (
+            <Text
+              style={[
+                s.msgText,
+                { fontSize: scaleFont(14.5) },
+                isOwn && !localGroupBubbleColor && { color: onAccentTextColor },
+              ]}
+            >
+              {item.text}
+            </Text>
+          ) : null}
 
           {/* Timestamp Row (High-contrast micro pill) */}
           <View style={s.msgMetaRow}>
@@ -967,7 +1034,7 @@ export default function GroupChatroom() {
 
   const headerTopPad = Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 6 : insets.top + 6;
   const HEADER_TOTAL_HEIGHT = headerTopPad + 52;
-  const backgroundSource = getWallpaperSource(localGroupWallpaper || DARK_WAVE_WALLPAPER);
+  const backgroundSource = getWallpaperSource(localGroupWallpaper || wallpaper);
 
   return (
     <ImageBackground
@@ -1077,7 +1144,7 @@ export default function GroupChatroom() {
         >
           <FlatList
             ref={flatListRef}
-            data={messages}
+            data={filteredMessages}
             renderItem={renderMessage}
             keyExtractor={(item) => item.id}
             ListHeaderComponent={renderListHeader}
@@ -1201,7 +1268,14 @@ export default function GroupChatroom() {
                       value={input}
                       onChangeText={setInput}
                       style={s.textInput}
-                      multiline
+                      multiline={!enterIsSend}
+                      returnKeyType={enterIsSend ? "send" : "default"}
+                      blurOnSubmit={false}
+                      onSubmitEditing={() => {
+                        if (enterIsSend && (input.trim() || pendingImage)) {
+                          sendMessage();
+                        }
+                      }}
                     />
                   </View>
 
@@ -1211,15 +1285,15 @@ export default function GroupChatroom() {
                     style={[
                       s.sendButtonCircle,
                       (input.trim() || pendingImage)
-                        ? { backgroundColor: "#ffffff" }
-                        : { backgroundColor: "#3e444c", opacity: 0.65 },
+                        ? { backgroundColor: accentColor }
+                        : { backgroundColor: isDark ? "#3e444c" : "#e5e7eb", opacity: 0.65 },
                     ]}
                     hitSlop={8}
                   >
                     <Ionicons
                       name="send"
                       size={18}
-                      color={(input.trim() || pendingImage) ? "#000000" : "rgba(255, 255, 255, 0.7)"}
+                      color={(input.trim() || pendingImage) ? onAccentTextColor : isDark ? "rgba(255, 255, 255, 0.7)" : "rgba(0, 0, 0, 0.4)"}
                       style={{ marginLeft: 2 }}
                     />
                   </Pressable>
@@ -1336,15 +1410,15 @@ export default function GroupChatroom() {
               {/* Ring All Members */}
               <Pressable
                 onPress={() => handleRingAllMembers(pendingCallType)}
-                style={s.callAllBtn}
+                style={[s.callAllBtn, { backgroundColor: accentColor }]}
               >
                 <Ionicons
                   name={pendingCallType === "video" ? "videocam" : "call"}
                   size={20}
-                  color="#000000"
+                  color={onAccentTextColor}
                   style={{ marginRight: 10 }}
                 />
-                <Text style={s.callAllText}>Call Group (All Members)</Text>
+                <Text style={[s.callAllText, { color: onAccentTextColor }]}>Call Group (All Members)</Text>
               </Pressable>
 
               <Text style={s.orCallIndividualLabel}>Or call individual bunkmate:</Text>

@@ -1,28 +1,39 @@
 import React from 'react';
 import { ScrollView, View, Text, StyleSheet } from 'react-native';
 import { BlurView } from '../../../components/ui/AppBlurView';
-import dayjs from 'dayjs'; // Ensure dayjs is installed for easy formatting
+import dayjs from 'dayjs';
 import WeatherIcon from './WeatherIcon';
+import { useAppSettings } from '../../../contexts/AppSettingsContext';
 
-export default function HourlyForecast({ data }: { data: any[] }) {
+export default function HourlyForecast({
+  data,
+  maxItems = 16,
+}: {
+  data: any[];
+  maxItems?: number;
+}) {
+  const { formatTemperature } = useAppSettings();
+
   if (!data || data.length === 0) return null;
+
+  const displayData = data.slice(0, maxItems);
 
   return (
     <View style={styles.sectionContainer}>
-      <Text style={styles.sectionTitle}>HOURLY FORECAST</Text>
+      <Text style={styles.sectionTitle}>HOURLY & DAILY FORECAST</Text>
       <ScrollView 
         horizontal 
         showsHorizontalScrollIndicator={false} 
         contentContainerStyle={styles.scrollContent}
       >
-        {data.slice(0, 8).map((item, index) => (
+        {displayData.map((item, index) => (
           <BlurView key={index} intensity={20} tint="dark" style={styles.hourCard}>
             <Text style={styles.timeText}>
-              {dayjs.unix(item.dt).format('HH:mm')}
+              {dayjs.unix(item.dt).format('ddd HH:mm')}
             </Text>
-            <WeatherIcon condition={item.weather[0].main} size={24} />
+            <WeatherIcon condition={item.weather?.[0]?.main || 'Clear'} size={24} />
             <Text style={styles.tempText}>
-              {Math.round(item.main.temp)}°
+              {formatTemperature(item.main?.temp ?? 20, "C")}
             </Text>
           </BlurView>
         ))}

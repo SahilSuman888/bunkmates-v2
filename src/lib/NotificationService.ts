@@ -139,19 +139,15 @@ export function triggerInAppNotificationBanner(payload: AppNotificationPayload) 
   });
 }
 
+import safeNotifications, { isExpoGo } from "./safeNotifications";
+
 // -------------------------------------------------------------
-// Local Expo-Notifications Dispatcher (safe lazy load)
+// Local Notifications Dispatcher (safe lazy load with Expo Go guard)
 // -------------------------------------------------------------
 
-let ExpoNotifications: typeof import("expo-notifications") | null = null;
 async function getExpoNotifications() {
-  if (ExpoNotifications !== null) return ExpoNotifications;
-  try {
-    ExpoNotifications = await import("expo-notifications");
-  } catch {
-    ExpoNotifications = null;
-  }
-  return ExpoNotifications;
+  if (isExpoGo) return null;
+  return safeNotifications;
 }
 
 // -------------------------------------------------------------

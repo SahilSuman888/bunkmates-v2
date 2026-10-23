@@ -34,6 +34,8 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import NotificationBell from "../../components/NotificationBell";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BlurView } from "expo-blur";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -103,6 +105,8 @@ const getDynamicFontFamily = (style?: string) => {
 function MarkdownRenderer({ content, fontStyle }: { content: string; fontStyle?: string }) {
   const dynamicFont = getDynamicFontFamily(fontStyle);
   const lines = content.split("\n");
+  const { isDark, themeColors, scaleFont } = useThemeToggle();
+  const textColor = themeColors.text;
 
   const renderInline = (text: string, keyPrefix: string) => {
     // Splits text matching **bold**, *italic*, `code`
@@ -113,27 +117,27 @@ function MarkdownRenderer({ content, fontStyle }: { content: string; fontStyle?:
       const key = `${keyPrefix}-${index}`;
       if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
         return (
-          <Text key={key} style={[s.mdBold, { fontFamily: dynamicFont }]}>
+          <Text key={key} style={[s.mdBold, { fontFamily: dynamicFont, color: textColor, fontSize: scaleFont(15) }]}>
             {part.slice(2, -2)}
           </Text>
         );
       }
       if (part.startsWith("*") && part.endsWith("*") && part.length >= 2) {
         return (
-          <Text key={key} style={[s.mdItalic, { fontFamily: dynamicFont }]}>
+          <Text key={key} style={[s.mdItalic, { fontFamily: dynamicFont, color: textColor, fontSize: scaleFont(15) }]}>
             {part.slice(1, -1)}
           </Text>
         );
       }
       if (part.startsWith("`") && part.endsWith("`") && part.length >= 2) {
         return (
-          <Text key={key} style={s.mdInlineCode}>
+          <Text key={key} style={[s.mdInlineCode, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.07)", fontSize: scaleFont(14) }]}>
             {part.slice(1, -1)}
           </Text>
         );
       }
       return (
-        <Text key={key} style={[s.mdText, { fontFamily: dynamicFont }]}>
+        <Text key={key} style={[s.mdText, { fontFamily: dynamicFont, color: textColor, fontSize: scaleFont(15) }]}>
           {part}
         </Text>
       );
@@ -170,7 +174,7 @@ function MarkdownRenderer({ content, fontStyle }: { content: string; fontStyle?:
     // Heading 1
     if (line.startsWith("# ")) {
       elements.push(
-        <Text key={`h1-${i}`} style={[s.mdH1, { fontFamily: dynamicFont }]}>
+        <Text key={`h1-${i}`} style={[s.mdH1, { fontFamily: dynamicFont, color: textColor, fontSize: scaleFont(24) }]}>
           {renderInline(line.slice(2), `h1-${i}`)}
         </Text>
       );
@@ -180,7 +184,7 @@ function MarkdownRenderer({ content, fontStyle }: { content: string; fontStyle?:
     // Heading 2
     if (line.startsWith("## ")) {
       elements.push(
-        <Text key={`h2-${i}`} style={[s.mdH2, { fontFamily: dynamicFont }]}>
+        <Text key={`h2-${i}`} style={[s.mdH2, { fontFamily: dynamicFont, color: textColor, fontSize: scaleFont(20) }]}>
           {renderInline(line.slice(3), `h2-${i}`)}
         </Text>
       );
@@ -190,7 +194,7 @@ function MarkdownRenderer({ content, fontStyle }: { content: string; fontStyle?:
     // Heading 3
     if (line.startsWith("### ")) {
       elements.push(
-        <Text key={`h3-${i}`} style={[s.mdH3, { fontFamily: dynamicFont }]}>
+        <Text key={`h3-${i}`} style={[s.mdH3, { fontFamily: dynamicFont, color: textColor, fontSize: scaleFont(17) }]}>
           {renderInline(line.slice(4), `h3-${i}`)}
         </Text>
       );
@@ -283,7 +287,7 @@ function MarkdownRenderer({ content, fontStyle }: { content: string; fontStyle?:
 
     // Regular line / paragraph
     elements.push(
-      <Text key={`p-${i}`} style={[s.mdParagraph, { fontFamily: dynamicFont }]}>
+      <Text key={`p-${i}`} style={[s.mdParagraph, { fontFamily: dynamicFont, color: textColor, fontSize: scaleFont(15) }]}>
         {renderInline(line, `p-${i}`)}
       </Text>
     );
@@ -298,6 +302,15 @@ const memoryCachedNotes: Record<string, NoteData[]> = {};
 
 export default function NotesScreen() {
   const insets = useSafeAreaInsets();
+  const { t } = useLanguage();
+  const { isDark, themeColors, accentColor, scaleFont, fontScale } = useThemeToggle();
+
+  const isBrightAccent =
+    accentColor === "#FFFFFF" ||
+    accentColor === "#ffffff" ||
+    accentColor === "#e5e7eb" ||
+    accentColor === "#fbc02d";
+  const onAccentTextColor = isBrightAccent ? "#000000" : "#FFFFFF";
 
   // Auth & User Profile
   const [authInitialized, setAuthInitialized] = useState(false);
@@ -981,29 +994,44 @@ export default function NotesScreen() {
   };
 
   return (
-    <View style={s.screenContainer}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+    <View style={[s.screenContainer, { backgroundColor: themeColors.background }]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={themeColors.background} />
 
       {/* ── TOP HEADER (Image 1) ── */}
       <View style={[s.topHeader, { paddingTop: insets.top + 10 }]}>
-        <Text style={s.topHeaderTitle}>Notes</Text>
+        <Text style={[s.topHeaderTitle, { color: themeColors.text, fontSize: scaleFont(28) }]}>
+          {t("notes", "Notes")}
+        </Text>
         <NotificationBell />
       </View>
 
       {/* ── SEARCH & FILTER ROW (Image 1) ── */}
       <View style={s.searchBarRow}>
-        <View style={s.searchField}>
-          <Feather name="search" size={17} color="#777c8e" style={{ marginRight: 10 }} />
+        <View
+          style={[
+            s.searchField,
+            {
+              backgroundColor: isDark ? "#111218" : "#FFFFFF",
+              borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
+            },
+          ]}
+        >
+          <Feather
+            name="search"
+            size={17}
+            color={themeColors.textSecondary}
+            style={{ marginRight: 10 }}
+          />
           <TextInput
-            placeholder="Search notes..."
-            placeholderTextColor="#686d80"
+            placeholder={t("search_notes", "Search notes...")}
+            placeholderTextColor={themeColors.textSecondary}
             value={searchQuery}
             onChangeText={setSearchQuery}
-            style={s.searchInput}
+            style={[s.searchInput, { color: themeColors.text, fontSize: scaleFont(14.5) }]}
           />
           {searchQuery.length > 0 && (
             <Pressable onPress={() => setSearchQuery("")} hitSlop={10}>
-              <Ionicons name="close-circle" size={18} color="#777c8e" />
+              <Ionicons name="close-circle" size={18} color={themeColors.textSecondary} />
             </Pressable>
           )}
         </View>
@@ -1011,10 +1039,16 @@ export default function NotesScreen() {
         {/* 3-Lines Filter Options Button (Opens Image 3) */}
         <Pressable
           onPress={() => setConfigModalOpen(true)}
-          style={s.filterToggleBtn}
+          style={[
+            s.filterToggleBtn,
+            {
+              backgroundColor: isDark ? "#111218" : "#FFFFFF",
+              borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
+            },
+          ]}
           hitSlop={8}
         >
-          <Ionicons name="options-outline" size={20} color="#ffffff" />
+          <Ionicons name="options-outline" size={20} color={themeColors.text} />
         </Pressable>
       </View>
 
@@ -1022,6 +1056,12 @@ export default function NotesScreen() {
       <View style={s.scopePillsRow}>
         {(["All", "Pinned", "Shared"] as const).map((scope) => {
           const active = activeScope === scope;
+          const scopeLabel =
+            scope === "All"
+              ? t("all", "All")
+              : scope === "Pinned"
+              ? t("pinned", "Pinned")
+              : t("shared", "Shared");
           return (
             <Pressable
               key={scope}
@@ -1029,10 +1069,29 @@ export default function NotesScreen() {
                 setActiveScope(scope);
                 AsyncStorage.setItem(STORAGE_SCOPE_KEY, scope);
               }}
-              style={[s.scopePill, active && s.scopePillActive]}
+              style={[
+                s.scopePill,
+                active
+                  ? { backgroundColor: accentColor, borderColor: accentColor }
+                  : {
+                      backgroundColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.05)",
+                      borderColor: "transparent",
+                    },
+              ]}
             >
               {scope === "Pinned" && <Text style={{ marginRight: 4, fontSize: 12 }}>📌</Text>}
-              <Text style={[s.scopePillText, active && s.scopePillTextActive]}>{scope}</Text>
+              <Text
+                style={[
+                  s.scopePillText,
+                  {
+                    color: active ? onAccentTextColor : themeColors.textSecondary,
+                    fontSize: scaleFont(13),
+                    fontWeight: active ? "900" : "700",
+                  },
+                ]}
+              >
+                {scopeLabel}
+              </Text>
             </Pressable>
           );
         })}
@@ -1041,7 +1100,7 @@ export default function NotesScreen() {
       {/* ── NOTES LIST (Image 1) ── */}
       {loading ? (
         <View style={s.centerBox}>
-          <ActivityIndicator size="large" color="#ffffff" />
+          <ActivityIndicator size="large" color={accentColor} />
         </View>
       ) : filteredNotes.length > 0 ? (
         <ScrollView
@@ -1055,11 +1114,21 @@ export default function NotesScreen() {
                 <Pressable
                   key={note.id}
                   onPress={() => handleOpenNoteDetail(note)}
-                  style={[s.noteCard, viewMode === "grid" && s.noteCardGrid]}
+                  style={[
+                    s.noteCard,
+                    viewMode === "grid" && s.noteCardGrid,
+                    {
+                      backgroundColor: themeColors.card,
+                      borderColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.06)",
+                    },
+                  ]}
                 >
                   <View style={s.noteCardHeader}>
                     <View style={{ flex: 1, marginRight: 8 }}>
-                      <Text style={s.noteCardTitle} numberOfLines={2}>
+                      <Text
+                        style={[s.noteCardTitle, { color: themeColors.text, fontSize: scaleFont(16.5) }]}
+                        numberOfLines={2}
+                      >
                         {note.title || "Untitled"}
                       </Text>
                     </View>
@@ -1072,17 +1141,23 @@ export default function NotesScreen() {
                       hitSlop={12}
                       style={s.dotsBtn}
                     >
-                      <Ionicons name="ellipsis-vertical" size={18} color="rgba(255, 255, 255, 0.7)" />
+                      <Ionicons name="ellipsis-vertical" size={18} color={themeColors.textSecondary} />
                     </Pressable>
                   </View>
 
-                  <Text style={s.noteCardSnippet} numberOfLines={viewMode === "grid" ? 4 : 3}>
+                  <Text
+                    style={[
+                      s.noteCardSnippet,
+                      { color: themeColors.textSecondary, fontSize: scaleFont(13.5) },
+                    ]}
+                    numberOfLines={viewMode === "grid" ? 4 : 3}
+                  >
                     {snippet}
                   </Text>
 
                   {note.pinned && (
-                    <View style={s.pinnedBadge}>
-                      <MaterialCommunityIcons name="pin" size={13} color="#00e676" />
+                    <View style={[s.pinnedBadge, { backgroundColor: accentColor }]}>
+                      <MaterialCommunityIcons name="pin" size={13} color={onAccentTextColor} />
                     </View>
                   )}
                 </Pressable>
@@ -1092,22 +1167,32 @@ export default function NotesScreen() {
         </ScrollView>
       ) : (
         <View style={s.emptyBox}>
-          <Feather name="file-text" size={44} color="rgba(255, 255, 255, 0.2)" />
-          <Text style={s.emptyTitle}>
-            {searchQuery ? "No matching notes" : "No notes yet"}
+          <Feather name="file-text" size={44} color={themeColors.textSecondary} />
+          <Text style={[s.emptyTitle, { color: themeColors.text, fontSize: scaleFont(16) }]}>
+            {searchQuery ? t("no_matching_notes", "No matching notes") : t("no_notes_yet", "No notes yet")}
           </Text>
-          <Text style={s.emptySubtitle}>
+          <Text style={[s.emptySubtitle, { color: themeColors.textSecondary, fontSize: scaleFont(13) }]}>
             {searchQuery
-              ? "Try adjusting your search or clear filters"
-              : "Tap the pencil button below to create a note"}
+              ? t("try_adjusting_search", "Try adjusting your search or clear filters")
+              : t("tap_pencil_to_create", "Tap the pencil button below to create a note")}
           </Text>
         </View>
       )}
 
       {/* ── FLOATING CREATE NOTE BUTTON (Image 1) ── */}
       <View style={[s.floatingFabWrapper, { bottom: insets.bottom + 80 }]} pointerEvents="box-none">
-        <Pressable onPress={handleOpenCreateWorkspace} style={s.fabButton} hitSlop={8}>
-          <Feather name="edit-3" size={21} color="#ffffff" />
+        <Pressable
+          onPress={handleOpenCreateWorkspace}
+          style={[
+            s.fabButton,
+            {
+              backgroundColor: accentColor,
+              borderColor: accentColor,
+            },
+          ]}
+          hitSlop={8}
+        >
+          <Feather name="edit-3" size={21} color={onAccentTextColor} />
         </Pressable>
       </View>
 
@@ -1120,17 +1205,17 @@ export default function NotesScreen() {
         transparent={false}
         onRequestClose={() => setDetailOpen(false)}
       >
-        <View style={[s.detailScreenContainer, { paddingTop: insets.top + 8 }]}>
-          <StatusBar barStyle="light-content" backgroundColor="#000000" />
+        <View style={[s.detailScreenContainer, { backgroundColor: themeColors.background, paddingTop: insets.top + 8 }]}>
+          <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={themeColors.background} />
 
           {/* Top Bar with Circular Back Button */}
           <View style={s.detailTopBar}>
             <Pressable
               onPress={() => setDetailOpen(false)}
-              style={s.detailBackBtn}
+              style={[s.detailBackBtn, { backgroundColor: isDark ? "#202024" : "#FFFFFF" }]}
               hitSlop={8}
             >
-              <Ionicons name="arrow-back" size={20} color="#ffffff" />
+              <Ionicons name="arrow-back" size={20} color={themeColors.text} />
             </Pressable>
           </View>
 
@@ -1139,7 +1224,16 @@ export default function NotesScreen() {
             contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
           >
             {/* Note Title (Monospace typography) */}
-            <Text style={[s.detailTitleText, { fontFamily: getDynamicFontFamily(detailNote?.fontStyle) }]}>
+            <Text
+              style={[
+                s.detailTitleText,
+                {
+                  fontFamily: getDynamicFontFamily(detailNote?.fontStyle),
+                  color: themeColors.text,
+                  fontSize: scaleFont(26),
+                },
+              ]}
+            >
               {detailNote?.title || "Untitled"}
             </Text>
 
@@ -1261,34 +1355,38 @@ export default function NotesScreen() {
         transparent={false}
         onRequestClose={handleSaveNoteManually}
       >
-        <View style={[s.workspaceContainer, { paddingTop: insets.top + 8 }]}>
-          <StatusBar barStyle="light-content" backgroundColor="#000000" />
+        <View style={[s.workspaceContainer, { backgroundColor: themeColors.background, paddingTop: insets.top + 8 }]}>
+          <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={themeColors.background} />
 
           {/* Top Bar: Back | Title & Auto-save indicator | Save Button */}
           <View style={s.workspaceTopBar}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
               <Pressable
                 onPress={handleSaveNoteManually}
-                style={s.workspaceBackBtn}
+                style={[s.workspaceBackBtn, { backgroundColor: isDark ? "#202024" : "#FFFFFF" }]}
                 hitSlop={8}
               >
-                <Ionicons name="arrow-back" size={20} color="#ffffff" />
+                <Ionicons name="arrow-back" size={20} color={themeColors.text} />
               </Pressable>
               <View>
-                <Text style={s.workspaceHeaderTitle}>
+                <Text style={[s.workspaceHeaderTitle, { color: themeColors.text }]}>
                   {activeNote ? "Edit Note" : "Create Note"}
                 </Text>
                 {autoSaveStatus === "saving" && (
                   <Text style={s.autoSaveLabel}>Saving...</Text>
                 )}
                 {autoSaveStatus === "saved" && (
-                  <Text style={[s.autoSaveLabel, { color: "#00e676" }]}>Saved ✓</Text>
+                  <Text style={[s.autoSaveLabel, { color: accentColor }]}>Saved ✓</Text>
                 )}
               </View>
             </View>
 
-            <Pressable onPress={handleSaveNoteManually} style={s.savePillBtn} hitSlop={8}>
-              <Text style={s.savePillText}>Save</Text>
+            <Pressable
+              onPress={handleSaveNoteManually}
+              style={[s.savePillBtn, { backgroundColor: accentColor }]}
+              hitSlop={8}
+            >
+              <Text style={[s.savePillText, { color: onAccentTextColor }]}>Save</Text>
             </Pressable>
           </View>
 
@@ -1299,11 +1397,18 @@ export default function NotesScreen() {
           >
             {/* Title Input */}
             <TextInput
-              placeholder="Enter title..."
-              placeholderTextColor="#5a5e70"
+              placeholder={t("enter_title", "Enter title...")}
+              placeholderTextColor={themeColors.textSecondary}
               value={noteTitle}
               onChangeText={setNoteTitle}
-              style={[s.workspaceTitleInput, { fontFamily: getDynamicFontFamily(fontStyle) }]}
+              style={[
+                s.workspaceTitleInput,
+                {
+                  fontFamily: getDynamicFontFamily(fontStyle),
+                  color: themeColors.text,
+                  fontSize: scaleFont(26),
+                },
+              ]}
               multiline={false}
             />
 
@@ -1330,14 +1435,21 @@ export default function NotesScreen() {
 
             {/* Note Content Editor */}
             <TextInput
-              placeholder="Start writing your note..."
-              placeholderTextColor="#5a5e70"
+              placeholder={t("start_writing_note", "Start writing your note...")}
+              placeholderTextColor={themeColors.textSecondary}
               value={noteContent}
               onChangeText={setNoteContent}
               onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
               multiline
               textAlignVertical="top"
-              style={[s.workspaceContentInput, { fontFamily: getDynamicFontFamily(fontStyle) }]}
+              style={[
+                s.workspaceContentInput,
+                {
+                  fontFamily: getDynamicFontFamily(fontStyle),
+                  color: themeColors.text,
+                  fontSize: scaleFont(15),
+                },
+              ]}
             />
           </ScrollView>
 

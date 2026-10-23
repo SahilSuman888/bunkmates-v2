@@ -36,6 +36,7 @@ export const db = getFirestore(app);
 export const functions = getFunctions(app);
 export const storage = getStorage(app);
 
+
 // Note: For React Native, Firebase Messaging should be initialized using:
 // import messaging from '@react-native-firebase/messaging';
 // export const firebaseMessaging = messaging();

@@ -25,13 +25,19 @@ export interface ThemeColors {
   onActionPrimary: string;
   isHighContrast: boolean;
   colorBlindMode: string;
+  boldText?: boolean;
 }
 
 export const ACCENT_COLORS = {
   coral: '#FF5A5F',
-  blue: '#1976d2',
-  green: '#43a047',
+  default: '#FF5A5F',
+  white: '#FFFFFF',
+  navWhite: '#FFFFFF',
+  '#FFFFFF': '#FFFFFF',
+  '#ffffff': '#FFFFFF',
   orange: '#f9971f',
+  green: '#43a047',
+  blue: '#1976d2',
   purple: '#7c3aed',
   turquoise: '#00bcd6',
   skyblue: '#009de6',
@@ -126,7 +132,8 @@ export const getTheme = (
   mode: 'dark' | 'light' | 'system',
   accentKey: string = 'coral',
   isHighContrast: boolean = false,
-  colorBlindMode: string = 'Off'
+  colorBlindMode: string = 'Off',
+  boldText: boolean = false
 ): ThemeColors => {
   let effective = mode;
   if (mode === 'system') {
@@ -134,12 +141,23 @@ export const getTheme = (
     effective = cs === 'light' ? 'light' : 'dark';
   }
 
-  const resolvedAccent =
-    (ACCENT_COLORS as Record<string, string>)[accentKey] || ACCENT_COLORS.coral;
-
   const isDark = effective === 'dark';
   const base = isDark ? darkThemeBase : lightThemeBase;
   const semantic = getCvdSemanticColors(isDark, colorBlindMode);
+
+  const isWhite =
+    accentKey === 'white' ||
+    accentKey === 'navWhite' ||
+    accentKey === '#FFFFFF' ||
+    accentKey === '#ffffff' ||
+    accentKey?.toLowerCase() === '#ffffff';
+
+  let resolvedAccent =
+    (ACCENT_COLORS as Record<string, string>)[accentKey] ||
+    (accentKey.startsWith('#') ? accentKey : ACCENT_COLORS.coral);
+  if (isWhite) {
+    resolvedAccent = isDark ? '#FFFFFF' : '#111827';
+  }
 
   if (isHighContrast) {
     return {
@@ -159,6 +177,7 @@ export const getTheme = (
       accentBg: hexToRgba(resolvedAccent, isDark ? 0.22 : 0.14),
       isHighContrast: true,
       colorBlindMode,
+      boldText,
     };
   }
 
@@ -170,6 +189,7 @@ export const getTheme = (
     accentBg: hexToRgba(resolvedAccent, isDark ? 0.16 : 0.10),
     isHighContrast: false,
     colorBlindMode,
+    boldText,
   };
 };
 

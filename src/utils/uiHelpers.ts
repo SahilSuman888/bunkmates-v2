@@ -46,7 +46,12 @@ export const getAQILabel = (aqi: number): string => {
   return 'Hazardous';
 };
 
-export const triggerHaptic = (pattern: number = 10) => {
-  // Haptics for React Native - will be handled by native code
-  // This is a placeholder for future enhancement
+import { triggerAppHaptic, HapticType } from '../contexts/AppSettingsContext';
+
+export const triggerHaptic = (pattern: number | HapticType = 10) => {
+  if (typeof pattern === 'string') {
+    triggerAppHaptic(pattern);
+  } else {
+    triggerAppHaptic('selection');
+  }
 };

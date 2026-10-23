@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -18,12 +18,15 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
   where,
 } from "firebase/firestore";
 
 import { useUser } from "../contexts/UserContext";
 import { auth, db } from "../lib/firebase";
+import { useThemeToggle } from "../contexts/ThemeContext";
+import { SkeletonLoadingScreen } from "../components/ui/SkeletonLoadingScreen";
 
 type ProfileData = {
   name?: string;
@@ -37,7 +40,8 @@ type ProfileData = {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, loading: authLoading } = useUser();
+  const { user, loading: authLoading, userData } = useUser();
+  const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
   const { width, height } = useWindowDimensions();
 
   const [loading, setLoading] = useState(true);
@@ -70,26 +74,29 @@ export default function ProfileScreen() {
       return;
     }
 
-    const loadProfile = async () => {
-      try {
-        /*
-         * -----------------------------
-         * Load user profile
-         * -----------------------------
-         */
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
+    // Prefill immediately if cached userData is already available
+    if (userData && !profile) {
+      setProfile(userData as ProfileData);
+      setLoading(false);
+    }
 
-        if (userSnap.exists()) {
-          setProfile(userSnap.data() as ProfileData);
-        } else {
-          setProfile({
-            name: user.displayName || "User",
-            email: user.email || "",
-            photoURL: user.photoURL || "",
-            type: "Dev Beta",
-          });
-        }
+    const userRef = doc(db, "users", user.uid);
+    const unsub = onSnapshot(userRef, (userSnap) => {
+      if (userSnap.exists()) {
+        setProfile(userSnap.data() as ProfileData);
+      } else {
+        setProfile({
+          name: user.displayName || "User",
+          email: user.email || "",
+          photoURL: user.photoURL || "",
+          type: "Dev Beta",
+        });
+      }
+      setLoading(false);
+    });
+
+    const loadStats = async () => {
+      try {
 
         /*
          * -----------------------------
@@ -163,7 +170,9 @@ export default function ProfileScreen() {
       }
     };
 
-    loadProfile();
+    loadStats();
+
+    return () => unsub();
   }, [authLoading, user]);
 
   const handleLogout = async () => {
@@ -176,11 +185,7 @@ export default function ProfileScreen() {
   };
 
   if (authLoading || loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#ffffff" />
-      </View>
-    );
+    return <SkeletonLoadingScreen title="Profile" showAvatarCard={true} itemCount={3} />;
   }
 
   const displayName =
@@ -215,7 +220,7 @@ export default function ProfileScreen() {
     "https://i.pravatar.cc/600?img=12";
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={[

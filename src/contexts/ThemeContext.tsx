@@ -33,6 +33,7 @@ export interface ThemeContextType {
   accent: string;
   setAccent: (accent: string) => void;
   accentColor: string;
+  onAccentTextColor: string;
   toggleTheme: () => void;
   background: BackgroundSettings;
   setBackground: (bg: BackgroundSettings) => void;
@@ -50,6 +51,12 @@ export interface ThemeContextType {
   highContrastMode: boolean;
   colorBlindMode: string;
   largeTouchTargets: boolean;
+  boldText: boolean;
+  reduceTransparency: boolean;
+  reduceMotionAccessibility: boolean;
+  hapticFeedback: boolean;
+  audioCues: boolean;
+  screenReaderCompat: boolean;
 }
 
 const ThemeToggleContext = createContext<ThemeContextType | undefined>(undefined);
@@ -279,33 +286,66 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
   }, [fontScale]);
 
   const resolvedAccentKey = accent === 'default' ? 'coral' : accent;
-  const accentColor = useMemo(() => {
-    return (ACCENT_COLORS as Record<string, string>)[resolvedAccentKey] || ACCENT_COLORS.coral;
-  }, [resolvedAccentKey]);
+  const isWhiteAccent =
+    resolvedAccentKey === 'white' ||
+    resolvedAccentKey === 'navWhite' ||
+    resolvedAccentKey === '#FFFFFF' ||
+    resolvedAccentKey === '#ffffff' ||
+    resolvedAccentKey?.toLowerCase() === '#ffffff';
 
-  let appSettingsHighContrast = false;
-  let appSettingsReduceMotion = false;
-  let appSettingsColorBlind = "Off";
-  let appSettingsLargeTouch = true;
-  try {
-    const appSettings = useAppSettings();
-    if (appSettings) {
-      appSettingsHighContrast = appSettings.highContrastMode;
-      appSettingsReduceMotion = appSettings.reduceMotion;
-      appSettingsColorBlind = appSettings.colorBlindMode;
-      appSettingsLargeTouch = appSettings.largeTouchTargets;
+  const accentColor = useMemo(() => {
+    if (isWhiteAccent) {
+      return isDark ? '#FFFFFF' : '#111827';
     }
-  } catch (e) {}
+    return (
+      (ACCENT_COLORS as Record<string, string>)[resolvedAccentKey] ||
+      (resolvedAccentKey.startsWith('#') ? resolvedAccentKey : ACCENT_COLORS.coral)
+    );
+  }, [resolvedAccentKey, isDark, isWhiteAccent]);
+
+  // ⚠️ IMPORTANT: useAppSettings() MUST be called unconditionally at the top level of the
+  // component, never inside try/catch. Wrapping a hook in try/catch violates Rules of Hooks
+  // and causes React to silently skip it on error paths, breaking the entire accessibility pipeline.
+  const appSettings = useAppSettings();
+  const appSettingsHighContrast = appSettings.highContrastMode;
+  const appSettingsReduceMotion = appSettings.reduceMotion;
+  const appSettingsColorBlind = appSettings.colorBlindMode;
+  const appSettingsLargeTouch = appSettings.largeTouchTargets;
+  const appSettingsBoldText = appSettings.boldText;
+  const appSettingsReduceTransparency = appSettings.reduceTransparency;
+  const appSettingsHapticFeedback = appSettings.hapticFeedback;
+  const appSettingsAudioCues = appSettings.audioCues;
+  const appSettingsScreenReader = appSettings.screenReaderCompat;
 
   const themeColors = useMemo(() => {
-    return getTheme(isDark ? 'dark' : 'light', resolvedAccentKey, appSettingsHighContrast, appSettingsColorBlind);
-  }, [isDark, resolvedAccentKey, appSettingsHighContrast, appSettingsColorBlind]);
+    return getTheme(isDark ? 'dark' : 'light', resolvedAccentKey, appSettingsHighContrast, appSettingsColorBlind, appSettingsBoldText);
+  }, [isDark, resolvedAccentKey, appSettingsHighContrast, appSettingsColorBlind, appSettingsBoldText]);
 
   const tokens = useMemo(() => {
     return getDesignTokens(isDark ? 'dark' : 'light', appSettingsHighContrast);
   }, [isDark, appSettingsHighContrast]);
 
   const effectiveReduceAnimations = reduceAnimations || appSettingsReduceMotion;
+
+  const onAccentTextColor = useMemo(() => {
+    if (isWhiteAccent) {
+      return isDark ? '#000000' : '#FFFFFF';
+    }
+    const key = resolvedAccentKey.toLowerCase();
+    if (
+      key === 'yellow' ||
+      key === 'sunflower' ||
+      key === '#fbc02d' ||
+      key === '#ffd700' ||
+      key === '#f59e0b' ||
+      accentColor.toLowerCase() === '#fbc02d' ||
+      accentColor.toLowerCase() === '#ffd700' ||
+      accentColor.toLowerCase() === '#f59e0b'
+    ) {
+      return '#000000';
+    }
+    return '#FFFFFF';
+  }, [resolvedAccentKey, isDark, isWhiteAccent, accentColor]);
 
   const contextValue = useMemo<ThemeContextType>(() => ({
     mode,
@@ -314,6 +354,7 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
     accent,
     setAccent,
     accentColor,
+    onAccentTextColor,
     accentBg: themeColors.accentBg,
     toggleTheme,
     background,
@@ -331,6 +372,12 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
     highContrastMode: appSettingsHighContrast,
     colorBlindMode: appSettingsColorBlind,
     largeTouchTargets: appSettingsLargeTouch,
+    boldText: appSettingsBoldText,
+    reduceTransparency: appSettingsReduceTransparency,
+    reduceMotionAccessibility: appSettingsReduceMotion,
+    hapticFeedback: appSettingsHapticFeedback,
+    audioCues: appSettingsAudioCues,
+    screenReaderCompat: appSettingsScreenReader,
   }), [
     mode,
     isDark,
@@ -338,6 +385,7 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
     accent,
     setAccent,
     accentColor,
+    onAccentTextColor,
     themeColors,
     toggleTheme,
     background,
@@ -354,6 +402,12 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
     appSettingsHighContrast,
     appSettingsColorBlind,
     appSettingsLargeTouch,
+    appSettingsBoldText,
+    appSettingsReduceTransparency,
+    appSettingsReduceMotion,
+    appSettingsHapticFeedback,
+    appSettingsAudioCues,
+    appSettingsScreenReader,
   ]);
 
   return (

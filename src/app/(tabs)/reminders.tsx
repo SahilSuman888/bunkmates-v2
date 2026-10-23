@@ -28,6 +28,8 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { Feather, Ionicons } from "@expo/vector-icons";
+import { useLanguage } from "../../contexts/LanguageContext";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -45,7 +47,9 @@ const memoryCachedReminders: Record<string, ReminderItem[]> = {};
 
 export default function RemindersScreen() {
   const router = useRouter();
+  const { isDark, themeColors, accentColor, background, scaleFont } = useThemeToggle();
   const { user, loading: authLoading } = useUser();
+  const { t } = useLanguage();
 
   const [reminders, setReminders] = useState<ReminderItem[]>(() => {
     return (user?.uid && memoryCachedReminders[user.uid]) || [];
@@ -266,20 +270,25 @@ export default function RemindersScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#000000" />
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
+      <StatusBar
+        barStyle={isDark ? "light-content" : "dark-content"}
+        backgroundColor={themeColors.background}
+      />
 
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: background.mode === "solid" ? themeColors.background : "transparent" }]}>
         {/* HEADER */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerTitle}>Reminders</Text>
-            <Text style={styles.headerSubtitle}>
-              {groupedReminders.active.length} Active • {groupedReminders.past.length} Overdue
+            <Text style={[styles.headerTitle, { color: themeColors.text, fontSize: scaleFont(28) }]}>
+              {t("reminders", "Reminders")}
+            </Text>
+            <Text style={[styles.headerSubtitle, { color: themeColors.textSecondary, fontSize: scaleFont(12.5) }]}>
+              {groupedReminders.active.length} {t("active", "Active")} • {groupedReminders.past.length} {t("overdue", "Overdue")}
             </Text>
           </View>
-          <Pressable onPress={() => handleOpenForm()} style={styles.headerAddBtn}>
-            <Ionicons name="add" size={22} color="#000000" />
+          <Pressable onPress={() => handleOpenForm()} style={[styles.headerAddBtn, { backgroundColor: accentColor, borderWidth: 0 }]}>
+            <Ionicons name="add" size={22} color="#ffffff" />
           </Pressable>
         </View>
 
@@ -289,7 +298,7 @@ export default function RemindersScreen() {
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholder="Search reminders..."
+            placeholder={t("search_reminders", "Search reminders...")}
             placeholderTextColor="#666"
             style={styles.searchInput}
           />
@@ -302,12 +311,12 @@ export default function RemindersScreen() {
 
         {loading ? (
           <View style={styles.loadingBox}>
-            <ActivityIndicator size="large" color="#00e6b0" />
+            <ActivityIndicator size="large" color={accentColor} />
           </View>
         ) : (
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
             {/* ACTIVE REMINDERS */}
-            <Text style={styles.sectionHeader}>UPCOMING & ACTIVE</Text>
+            <Text style={styles.sectionHeader}>{t("UPCOMING & ACTIVE")}</Text>
             {groupedReminders.active.length > 0 ? (
               groupedReminders.active.map((item) => (
                 <View key={item.id} style={styles.reminderCard}>
@@ -337,7 +346,7 @@ export default function RemindersScreen() {
               ))
             ) : (
               <View style={styles.emptyCard}>
-                <Text style={{ color: "#666", fontSize: 12 }}>No active reminders right now ✨</Text>
+                <Text style={{ color: "#666", fontSize: 12 }}>{t("No active reminders right now", "No active reminders right now ✨")}</Text>
               </View>
             )}
 
@@ -349,7 +358,7 @@ export default function RemindersScreen() {
                   style={styles.accordionHeader}
                 >
                   <Text style={styles.accordionTitle}>
-                    OVERDUE ({groupedReminders.past.length})
+                    {t("Overdue", "OVERDUE")} ({groupedReminders.past.length})
                   </Text>
                   <Ionicons
                     name={showPast ? "chevron-up" : "chevron-down"}
@@ -396,7 +405,7 @@ export default function RemindersScreen() {
                   style={styles.accordionHeader}
                 >
                   <Text style={styles.accordionTitle}>
-                    COMPLETED ({groupedReminders.completed.length})
+                    {t("Completed", "COMPLETED")} ({groupedReminders.completed.length})
                   </Text>
                   <Ionicons
                     name={showCompleted ? "chevron-up" : "chevron-down"}
@@ -443,14 +452,14 @@ export default function RemindersScreen() {
             <View style={styles.modalSheet}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>
-                  {editingReminder ? "Edit Reminder" : "Add New Reminder"}
+                  {editingReminder ? t("Edit Reminder") : t("Create Reminder", "Add New Reminder")}
                 </Text>
                 <Pressable onPress={() => setModalOpen(false)}>
                   <Ionicons name="close" size={22} color="#ffffff" />
                 </Pressable>
               </View>
 
-              <Text style={styles.fieldLabel}>Reminder Note</Text>
+              <Text style={styles.fieldLabel}>{t("Reminder Note")}</Text>
               <TextInput
                 value={formText}
                 onChangeText={setFormText}
@@ -461,7 +470,7 @@ export default function RemindersScreen() {
 
               <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Date (YYYY-MM-DD)</Text>
+                  <Text style={styles.fieldLabel}>{t("Date (YYYY-MM-DD)")}</Text>
                   <TextInput
                     value={formDate}
                     onChangeText={setFormDate}
@@ -472,7 +481,7 @@ export default function RemindersScreen() {
                 </View>
 
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Time (HH:mm)</Text>
+                  <Text style={styles.fieldLabel}>{t("Time (HH:mm)")}</Text>
                   <TextInput
                     value={formTime}
                     onChangeText={setFormTime}
@@ -484,7 +493,7 @@ export default function RemindersScreen() {
               </View>
 
               <Pressable onPress={handleSaveForm} style={styles.saveBtn}>
-                <Text style={styles.saveBtnText}>Save Reminder</Text>
+                <Text style={styles.saveBtnText}>{t("Save Reminder")}</Text>
               </Pressable>
             </View>
           </View>

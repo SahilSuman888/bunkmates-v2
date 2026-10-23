@@ -70,9 +70,21 @@ const bundledWallpaperSources: Record<string, ImageSourcePropType> = {
 };
 
 export const getWallpaperSource = (
-  wallpaperIdOrUri: string | null | undefined
+  wallpaperIdOrUri: string | number | ImageSourcePropType | null | undefined
 ): ImageSourcePropType => {
   if (!wallpaperIdOrUri || wallpaperIdOrUri === "default") {
+    return DEFAULT_WALLPAPER_ASSET;
+  }
+
+  // If already a resolved asset number (from require) or ImageURISource object
+  if (typeof wallpaperIdOrUri === "number") {
+    return wallpaperIdOrUri;
+  }
+  if (typeof wallpaperIdOrUri === "object") {
+    return wallpaperIdOrUri as ImageSourcePropType;
+  }
+
+  if (typeof wallpaperIdOrUri !== "string") {
     return DEFAULT_WALLPAPER_ASSET;
   }
 
@@ -147,7 +159,7 @@ export interface ChatSettingsContextType extends ChatPreferences {
 
   // Archive & Storage Management
   archivedChatIds: string[];
-  isChatArchived: (chatId: string) => boolean;
+  isChatArchived: (chatId?: string | null) => boolean;
   toggleArchiveChat: (chatId: string) => Promise<void>;
   clearedAt: string | null;
   deletedAt: string | null;
@@ -290,10 +302,13 @@ export const ChatSettingsProvider = ({ children }: { children: ReactNode }) => {
       if (user) {
         try {
           const userDocRef = doc(db, "users", user.uid);
-          await updateDoc(userDocRef, {
-            chatPreferences: prefs,
+          const updates: Record<string, any> = {
             updatedAt: new Date().toISOString(),
+          };
+          Object.entries(prefs).forEach(([key, val]) => {
+            updates[`chatPreferences.${key}`] = val;
           });
+          await updateDoc(userDocRef, updates);
         } catch (e) {
           console.log("Firestore write chatPreferences error:", e);
         }
@@ -322,7 +337,7 @@ export const ChatSettingsProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const isChatArchived = useCallback(
-    (chatId: string) => archivedChatIds.includes(chatId),
+    (chatId?: string | null) => Boolean(chatId && archivedChatIds.includes(chatId)),
     [archivedChatIds]
   );
 

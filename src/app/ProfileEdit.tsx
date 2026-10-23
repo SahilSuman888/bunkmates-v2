@@ -21,15 +21,15 @@ import { Ionicons, Feather } from "@expo/vector-icons";
 import { useUser } from "../contexts/UserContext";
 import { useThemeToggle } from "../contexts/ThemeContext"; // **@** Dynamic theme hook
 import { useLanguage } from "../contexts/LanguageContext";
-import { auth, db, storage } from "../lib/firebase";
+import { auth, db } from "../lib/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
 import * as ImagePicker from "expo-image-picker";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import * as FileSystem from "expo-file-system";
 
 export default function EditProfile() {
   const router = useRouter();
-  const { user } = useUser();
+  const { user, updateUserData } = useUser();
   const { t } = useLanguage();
 
   const [loading, setLoading] = useState(!user);
@@ -49,47 +49,87 @@ export default function EditProfile() {
   });
 
   // **@** Dynamic theme integration matching settings page
-  let themeMode: "dark" | "light" | "system" = "system";
-  let dynamicThemeColors: any = null;
-  let dynamicAccent = "#FF5A5F";
-  try {
-    const themeContext = useThemeToggle();
-    if (themeContext) {
-      themeMode = themeContext.mode;
-      dynamicThemeColors = themeContext.themeColors;
-      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
+  const {
+    mode: themeMode,
+    themeColors: dynamicThemeColors,
+    accentColor: dynamicAccent,
+    onAccentTextColor,
+    accent,
+    isDark,
+    scaleFont,
+  } = useThemeToggle();
+
+  const isWhiteAccent =
+    accent === "white" ||
+    accent === "navWhite" ||
+    accent === "#FFFFFF" ||
+    accent === "#ffffff" ||
+    accent?.toLowerCase() === "#ffffff" ||
+    dynamicAccent?.toLowerCase() === "#ffffff";
+
+  const isBrightAccent =
+    isWhiteAccent ||
+    accent === "yellow" ||
+    accent === "sunflower" ||
+    dynamicAccent === "#fbc02d" ||
+    dynamicAccent === "#ffd700" ||
+    dynamicAccent === "#f59e0b";
+
+  // **@** Curated color palette with dynamic white & bright accent contrast support
+  const colors = useMemo(() => {
+    let saveBtnBg = dynamicAccent || (isDark ? "#FFFFFF" : "#111827");
+    let saveBtnText = onAccentTextColor || (isDark ? "#000000" : "#FFFFFF");
+    let saveBtnBorder = "transparent";
+    let saveBtnBorderWidth = 0;
+
+    if (isWhiteAccent) {
+      if (isDark) {
+        saveBtnBg = "#FFFFFF";
+        saveBtnText = "#000000";
+        saveBtnBorder = "transparent";
+        saveBtnBorderWidth = 0;
+      } else {
+        saveBtnBg = "#FFFFFF";
+        saveBtnText = "#111827";
+        saveBtnBorder = "#111827";
+        saveBtnBorderWidth = 1.5;
+      }
+    } else if (isBrightAccent) {
+      saveBtnBg = dynamicAccent;
+      saveBtnText = "#000000";
+      saveBtnBorder = !isDark ? "rgba(0,0,0,0.15)" : "transparent";
+      saveBtnBorderWidth = !isDark ? 1 : 0;
+    } else {
+      saveBtnBg = dynamicAccent;
+      saveBtnText = "#FFFFFF";
+      saveBtnBorder = "transparent";
+      saveBtnBorderWidth = 0;
     }
-  } catch (e) {
-    // fallback to system
-  }
 
-  const isDark =
-    themeMode === "dark" ||
-    (themeMode === "system" && Appearance.getColorScheme() === "dark");
-
-  // **@** Curated color palette matching screenshot with dynamic dark/light support
-  const colors = useMemo(() => ({
-    bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
-    card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
-    cardBorder: "transparent",
-    inputBg: isDark ? "#202024" : "#F3F4F6",
-    inputBorder: "transparent",
-    textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
-    textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
-    sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#8E8E93"),
-    greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
-    iconBoxBg: isDark ? "#222226" : "#F3F4F6",
-    saveBtnBg: dynamicAccent,
-    saveBtnBorder: "transparent",
-    saveBtnText: "#FFFFFF",
-    cameraBadgeBg: isDark ? "#26282E" : "#E2E8F0",
-    iconColor: isDark ? "#E2E8F0" : "#4B5563",
-    warningBg: isDark ? "rgba(245, 158, 11, 0.09)" : "#FFF8ED",
-    warningBorder: "transparent",
-    warningText: isDark ? "#FCD34D" : "#9A3412",
-    warningIcon: isDark ? "#F59E0B" : "#EA580C",
-    placeholder: isDark ? "#555860" : "#9CA3AF",
-  }), [isDark, dynamicThemeColors, dynamicAccent]);
+    return {
+      bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
+      cardBorder: "transparent",
+      inputBg: isDark ? "#202024" : "#F3F4F6",
+      inputBorder: "transparent",
+      textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#8E8E93"),
+      greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
+      iconBoxBg: isDark ? "#222226" : "#F3F4F6",
+      saveBtnBg,
+      saveBtnBorder,
+      saveBtnBorderWidth,
+      saveBtnText,
+      cameraBadgeBg: isDark ? "#26282E" : "#E2E8F0",
+      iconColor: isDark ? "#E2E8F0" : "#4B5563",
+      warningBg: isDark ? "rgba(245, 158, 11, 0.09)" : "#FFF8ED",
+      warningBorder: "transparent",
+      warningText: isDark ? "#FCD34D" : "#9A3412",
+      warningIcon: isDark ? "#F59E0B" : "#EA580C",
+      placeholder: isDark ? "#555860" : "#9CA3AF",
+    };
+  }, [isDark, dynamicThemeColors, dynamicAccent, onAccentTextColor, isWhiteAccent, isBrightAccent]);
 
   // **@** Fetch profile from Firestore with backwards compatibility for split names
   useEffect(() => {
@@ -128,86 +168,109 @@ export default function EditProfile() {
     })();
   }, [user]);
 
-  // **@** Image picker from photo library
+  // **@** Image picker from photo library — encodes as string for direct Firestore persistence
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.35,
+        base64: true,
+      });
 
-    if (!result.canceled && result.assets && result.assets[0]) {
-      setData((prev) => ({ ...prev, photoURL: result.assets[0].uri }));
+      if (!result.canceled && result.assets && result.assets[0]) {
+        const asset = result.assets[0];
+        let photoString = asset.uri;
+
+        if (asset.base64) {
+          const mimeType = asset.mimeType || "image/jpeg";
+          photoString = `data:${mimeType};base64,${asset.base64}`;
+        } else if (asset.uri.startsWith("file://") || asset.uri.startsWith("content://")) {
+          try {
+            const b64 = await FileSystem.readAsStringAsync(asset.uri, {
+              encoding: "base64",
+            });
+            photoString = `data:image/jpeg;base64,${b64}`;
+          } catch (e) {
+            console.log("FileSystem base64 read fallback error:", e);
+          }
+        }
+
+        setData((prev) => ({ ...prev, photoURL: photoString }));
+      }
+    } catch (err) {
+      console.log("pickImage error:", err);
     }
   };
 
-  // **@** Comprehensive save handler updating Firestore & Firebase Auth
+  // **@** Comprehensive save handler updating Firestore directly with photoURL string (No Firebase Storage)
   const handleSave = async () => {
     if (!user || saving) return;
 
     try {
       setSaving(true);
 
-      let finalPhotoURL = data.photoURL;
+      let finalPhotoURL = data.photoURL || "";
 
-      // **@** Upload local image to Firebase Storage if newly selected
-      if (finalPhotoURL && !finalPhotoURL.startsWith("http")) {
-        let blob: Blob | null = null;
+      // Ensure any local file URI is converted to base64 string
+      if (finalPhotoURL.startsWith("file://") || finalPhotoURL.startsWith("content://")) {
         try {
-          const resp = await fetch(finalPhotoURL);
-          blob = await resp.blob();
-        } catch (fetchErr) {
-          try {
-            blob = await new Promise((resolve, reject) => {
-              const xhr = new XMLHttpRequest();
-              xhr.onload = function () {
-                resolve(xhr.response);
-              };
-              xhr.onerror = function () {
-                reject(new TypeError("Network request failed"));
-              };
-              xhr.responseType = "blob";
-              xhr.open("GET", finalPhotoURL, true);
-              xhr.send(null);
-            });
-          } catch (xhrErr) {
-            console.log("Upload conversion failed:", fetchErr, xhrErr);
-            throw xhrErr || fetchErr;
-          }
-        }
-
-        if (blob) {
-          const storageRef = ref(storage, `profileImages/${user.uid}.jpg`);
-          await uploadBytes(storageRef, blob as any);
-          finalPhotoURL = await getDownloadURL(storageRef);
+          const b64 = await FileSystem.readAsStringAsync(finalPhotoURL, {
+            encoding: "base64",
+          });
+          finalPhotoURL = `data:image/jpeg;base64,${b64}`;
+        } catch (e) {
+          console.log("Base64 string fallback error:", e);
         }
       }
 
       // **@** Build composite full name from first & last name
       const computedName = `${data.firstName.trim()} ${data.lastName.trim()}`.trim() || data.displayName.trim();
 
-      // **@** Persist all fields to Firestore
-      await updateDoc(doc(db, "users", user.uid), {
+      // **@** Optimistic zero-latency local update across entire app
+      updateUserData?.({
         firstName: data.firstName.trim(),
         lastName: data.lastName.trim(),
         name: computedName,
-        displayName: data.displayName.trim(),
+        displayName: data.displayName.trim() || computedName,
         username: data.username.trim(),
         mobile: data.mobile.trim(),
         phone: data.mobile.trim(),
         bio: data.bio.trim(),
         homeCity: data.homeCity.trim(),
         photoURL: finalPhotoURL,
+      });
+
+      // **@** Persist all fields to Firestore users/{uid} document directly
+      // Schema strictly matches reference: photoURL : string
+      await updateDoc(doc(db, "users", user.uid), {
+        firstName: data.firstName.trim(),
+        lastName: data.lastName.trim(),
+        name: computedName,
+        displayName: data.displayName.trim() || computedName,
+        username: data.username.trim(),
+        mobile: data.mobile.trim(),
+        phone: data.mobile.trim(),
+        bio: data.bio.trim(),
+        homeCity: data.homeCity.trim(),
+        photoURL: finalPhotoURL, // Saved directly to Firestore as string!
         updatedAt: new Date(),
       });
 
-      // **@** Sync display name and avatar with Firebase Auth
+      // Also safely sync display name with Firebase Auth
       if (auth.currentUser) {
-        await updateProfile(auth.currentUser, {
-          displayName: data.displayName.trim() || computedName,
-          photoURL: finalPhotoURL,
-        });
+        try {
+          const authUpdates: { displayName?: string; photoURL?: string } = {
+            displayName: data.displayName.trim() || computedName,
+          };
+          if (finalPhotoURL.startsWith("http") && finalPhotoURL.length < 2048) {
+            authUpdates.photoURL = finalPhotoURL;
+          }
+          await updateProfile(auth.currentUser, authUpdates);
+        } catch (authErr) {
+          console.log("Firebase Auth updateProfile non-fatal error:", authErr);
+        }
       }
 
       Alert.alert("Success", "Profile updated successfully!", [
@@ -264,6 +327,7 @@ export default function EditProfile() {
               {
                 backgroundColor: colors.saveBtnBg,
                 borderColor: colors.saveBtnBorder,
+                borderWidth: colors.saveBtnBorderWidth,
               },
               saving && { opacity: 0.6 },
               pressed && styles.pressed,
@@ -274,7 +338,9 @@ export default function EditProfile() {
             {saving ? (
               <ActivityIndicator size="small" color={colors.saveBtnText} />
             ) : (
-              <Text style={[styles.savePillText, { color: colors.saveBtnText }]}>{t("Save")}</Text>
+              <Text style={[styles.savePillText, { color: colors.saveBtnText, fontSize: scaleFont(14) }]}>
+                {t("Save")}
+              </Text>
             )}
           </Pressable>
         </View>

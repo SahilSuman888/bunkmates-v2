@@ -16,6 +16,7 @@ import { collection, query, getDocs, limit } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useUser } from "../../contexts/UserContext";
 import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useThemeToggle } from "../../contexts/ThemeContext";
 
 export default function AddFriendModal({
   visible,
@@ -28,6 +29,14 @@ export default function AddFriendModal({
   onSelectUser: (user: any) => void;
   onCreateGroup?: () => void;
 }) {
+  const { isDark, themeColors, accentColor, scaleFont } = useThemeToggle();
+  const isBrightAccent =
+    accentColor === "#FFFFFF" ||
+    accentColor === "#ffffff" ||
+    accentColor === "#f59e0b" ||
+    accentColor === "#ffd700";
+  const onAccentTextColor = isBrightAccent ? "#000000" : "#FFFFFF";
+
   const { user: currentUser } = useUser();
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -77,24 +86,38 @@ export default function AddFriendModal({
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#08090b" />
+      <View style={[styles.container, { backgroundColor: themeColors.background }]}>
+        <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={themeColors.background} />
 
         {/* HEADER matching Screenshot 3 & 4 */}
         <View style={styles.header}>
-          <Pressable style={styles.backCircleBtn} onPress={onClose}>
-            <Ionicons name="arrow-back" size={20} color="white" />
+          <Pressable
+            style={[
+              styles.backCircleBtn,
+              { backgroundColor: isDark ? "#1b1e24" : "#e5e7eb" },
+            ]}
+            onPress={onClose}
+          >
+            <Ionicons name="arrow-back" size={20} color={themeColors.text} />
           </Pressable>
-          <Text style={styles.headerTitle}>New Chat</Text>
+          <Text style={[styles.headerTitle, { color: themeColors.text, fontSize: scaleFont(20) }]}>New Chat</Text>
         </View>
 
         {/* SEARCH BAR matching Screenshot 3 */}
-        <View style={styles.searchBarContainer}>
-          <Feather name="search" size={18} color="#888888" />
+        <View
+          style={[
+            styles.searchBarContainer,
+            {
+              backgroundColor: isDark ? "#13161c" : "#f3f4f6",
+              borderColor: themeColors.border,
+            },
+          ]}
+        >
+          <Feather name="search" size={18} color={isDark ? "#888888" : "#9ca3af"} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: themeColors.text, fontSize: scaleFont(14) }]}
             placeholder="Search friends by name or username"
-            placeholderTextColor="#666666"
+            placeholderTextColor={isDark ? "#666666" : "#9ca3af"}
             value={searchText}
             onChangeText={setSearchText}
           />
@@ -183,8 +206,16 @@ export default function AddFriendModal({
                   </View>
 
                   {isMultiSelectMode && (
-                    <View style={[styles.checkboxCircle, isSelected && styles.checkboxSelected]}>
-                      {isSelected && <Ionicons name="checkmark" size={14} color="#000000" />}
+                    <View
+                      style={[
+                        styles.checkboxCircle,
+                        isSelected && [
+                          styles.checkboxSelected,
+                          { backgroundColor: accentColor, borderColor: accentColor },
+                        ],
+                      ]}
+                    >
+                      {isSelected && <Ionicons name="checkmark" size={14} color={onAccentTextColor} />}
                     </View>
                   )}
                 </Pressable>
@@ -203,6 +234,11 @@ export default function AddFriendModal({
             <Pressable
               style={[
                 styles.continueBtn,
+                {
+                  backgroundColor: accentColor,
+                  borderWidth: !isDark && isBrightAccent ? 1.5 : 0,
+                  borderColor: !isDark && isBrightAccent ? "#111827" : "transparent",
+                },
                 selectedUserIds.length === 0 && { opacity: 0.5 },
               ]}
               disabled={selectedUserIds.length === 0}
@@ -215,7 +251,7 @@ export default function AddFriendModal({
                 }
               }}
             >
-              <Text style={styles.continueBtnText}>CONTINUE</Text>
+              <Text style={[styles.continueBtnText, { color: onAccentTextColor }]}>CONTINUE</Text>
             </Pressable>
           </View>
         )}

@@ -22,6 +22,7 @@ import {
 import Animated from "./reanimatedShim";
 // ...existing code...
 import { MotiView } from "moti";
+import { useLanguage } from "../contexts/LanguageContext";
 
 interface WishlistItem {
   name: string;
@@ -30,6 +31,7 @@ interface WishlistItem {
 }
 
 export default function WishlistScreen() {
+  const { t } = useLanguage();
   const [formData, setFormData] = useState<WishlistItem>({
     name: "",
     email: "",
@@ -91,8 +93,8 @@ export default function WishlistScreen() {
         >
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.headerSub}>Share your ideas</Text>
-            <Text style={styles.headerTitle}>Wishlist</Text>
+            <Text style={styles.headerSub}>{t("Share your ideas")}</Text>
+            <Text style={styles.headerTitle}>{t("Wishlist")}</Text>
           </View>
 
           {/* Illustration */}
@@ -114,10 +116,9 @@ export default function WishlistScreen() {
 
           {/* Info */}
           <View style={styles.infoContainer}>
-            <Text style={styles.infoTitle}>Have a Feature Idea?</Text>
+            <Text style={styles.infoTitle}>{t("Have a Feature Idea?")}</Text>
             <Text style={styles.infoText}>
-              Share your feature requests and suggestions. We'd love to hear
-              from you and make Bunkmates even better!
+              {t("Share your feature requests and suggestions. We'd love to hear from you and make Bunkmates even better!", "Share your feature requests and suggestions. We'd love to hear from you and make Bunkmates even better!")}
             </Text>
           </View>
 
@@ -125,7 +126,7 @@ export default function WishlistScreen() {
           <View style={styles.formContainer}>
             {/* Name Input */}
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Full Name</Text>
+              <Text style={styles.label}>{t("Full Name")}</Text>
               <View style={styles.inputWrapper}>
                 <MaterialCommunityIcons
                   name="account"
@@ -146,7 +147,7 @@ export default function WishlistScreen() {
 
             {/* Email Input */}
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email Address</Text>
+              <Text style={styles.label}>{t("Email Address")}</Text>
               <View style={styles.inputWrapper}>
                 <MaterialCommunityIcons
                   name="email"
@@ -168,7 +169,7 @@ export default function WishlistScreen() {
 
             {/* Reason Input */}
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Feature Idea</Text>
+              <Text style={styles.label}>{t("Feature Idea")}</Text>
               <View style={[styles.inputWrapper, styles.textAreaWrapper]}>
                 <MaterialCommunityIcons
                   name="lightbulb"
@@ -178,7 +179,7 @@ export default function WishlistScreen() {
                 />
                 <TextInput
                   style={[styles.input, styles.textArea]}
-                  placeholder="Describe your idea..."
+                  placeholder={t("Describe your idea...")}
                   placeholderTextColor="#666"
                   multiline={true}
                   numberOfLines={5}
@@ -200,7 +201,7 @@ export default function WishlistScreen() {
               ]}
             >
               <Text style={styles.submitButtonText}>
-                {loading ? "Submitting..." : "Submit Feedback"}
+                {loading ? t("Submitting...") : t("Submit Feedback")}
               </Text>
             </Pressable>
           </View>
@@ -219,9 +220,9 @@ export default function WishlistScreen() {
                   size={64}
                   color="#00f721"
                 />
-                <Text style={styles.successTitle}>Thank You!</Text>
+                <Text style={styles.successTitle}>{t("Thank You!")}</Text>
                 <Text style={styles.successText}>
-                  Your feedback has been submitted
+                  {t("Your feedback has been submitted")}
                 </Text>
               </View>
             </MotiView>
@@ -229,9 +230,9 @@ export default function WishlistScreen() {
 
           {/* Footer Info */}
           <View style={styles.footerContainer}>
-            <Icon name="lock-check" text="Your data is private" />
-            <Icon name="bell-check" text="We'll notify you on updates" />
-            <Icon name="heart" text="Your feedback matters" />
+            <Icon name="lock-check" text={t("Your data is private")} />
+            <Icon name="bell-check" text={t("We'll notify you on updates")} />
+            <Icon name="heart" text={t("Your feedback matters")} />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -243,7 +244,7 @@ export default function WishlistScreen() {
 // ICON INFO COMPONENT
 // ════════════════════════════════════════════════════════════════
 
-function Icon({ name, text }: { name: string; text: string }) {
+function Icon({ name, text }: { name: any; text: string }) {
   return (
     <MotiView
       from={{ opacity: 0, translateX: -20 }}
