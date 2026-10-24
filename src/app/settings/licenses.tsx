@@ -1,13 +1,8 @@
 import React from "react";
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  StatusBar,
-} from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View, StatusBar, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useThemeToggle } from "../../contexts/ThemeContext";
@@ -86,6 +81,8 @@ const libraries = [
 ];
 
 export default function LicensesScreen() {
+  const insets = useSafeAreaInsets();
+  const topInset = insets.top > 0 ? insets.top : Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 44;
   const router = useRouter();
   const { isDark, themeColors, scaleFont } = useThemeToggle();
 
@@ -96,13 +93,25 @@ export default function LicensesScreen() {
     >
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={themeColors.background}
+        
+        zIndex={15}
+      />
+
       {/* Header with Circular Back Button */}
-      <View style={styles.header}>
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: themeColors.card },
-            pressed && { opacity: 0.7 },
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           onPress={() => router.back()}
           hitSlop={8}
@@ -127,7 +136,10 @@ export default function LicensesScreen() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: Math.max(insets.bottom, 24) + 32 },
+        ]}
       >
         <Text style={[styles.title, { color: themeColors.text, fontSize: scaleFont(22) }]}>
           Third-Party{"\n"}Licenses &{"\n"}Attributions
@@ -147,25 +159,24 @@ export default function LicensesScreen() {
 
         <View style={[styles.cardGroup, { backgroundColor: themeColors.card }]}>
           {libraries.map((library, index) => (
-            <View
-              key={library.name}
-              style={[
-                styles.library,
-                index < libraries.length - 1 && [styles.libraryBorder, { borderBottomColor: themeColors.divider }],
-              ]}
-            >
-              <Text style={[styles.libraryName, { color: themeColors.text, fontSize: scaleFont(12) }]}>
-                {library.name}
-              </Text>
-              <Text
-                style={[
-                  styles.libraryDescription,
-                  { color: themeColors.textSecondary, fontSize: scaleFont(11) },
-                ]}
-              >
-                {library.functionality} — {library.license}
-              </Text>
-            </View>
+            <React.Fragment key={library.name}>
+              <View style={styles.library}>
+                <Text style={[styles.libraryName, { color: themeColors.text, fontSize: scaleFont(12) }]}>
+                  {library.name}
+                </Text>
+                <Text
+                  style={[
+                    styles.libraryDescription,
+                    { color: themeColors.textSecondary, fontSize: scaleFont(11) },
+                  ]}
+                >
+                  {library.functionality} — {library.license}
+                </Text>
+              </View>
+              {index < libraries.length - 1 && (
+                <View style={[styles.divider, { backgroundColor: themeColors.divider }]} />
+              )}
+            </React.Fragment>
           ))}
         </View>
 
@@ -310,8 +321,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  libraryBorder: {
-    borderBottomWidth: 1,
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
   },
   libraryName: {
     fontWeight: "700",

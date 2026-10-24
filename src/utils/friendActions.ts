@@ -8,6 +8,11 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 
+import {
+  sendFriendRequestNotification,
+  sendFriendAcceptedNotification,
+} from '../lib/sendAppNotification';
+
 /**
  * Send friend request
  */
@@ -21,6 +26,14 @@ export const sendFriendRequest = async (targetUserId: string) => {
       friendRequests: arrayUnion(user.uid),
       updatedAt: serverTimestamp(),
     });
+
+    // Send push notification & create in-app notification document
+    sendFriendRequestNotification({
+      receiverId: targetUserId,
+      senderId: user.uid,
+      senderName: user.displayName || 'A BunkMate',
+      senderAvatar: user.photoURL || '',
+    }).catch((err) => console.warn('[friendActions] sendFriendRequestNotification error:', err));
   } catch (error) {
     console.error('Error sending friend request:', error);
     throw error;
@@ -50,6 +63,14 @@ export const acceptFriendRequest = async (fromUserId: string) => {
       friends: arrayUnion(user.uid),
       updatedAt: serverTimestamp(),
     });
+
+    // Send push notification & create in-app notification document for original sender
+    sendFriendAcceptedNotification({
+      receiverId: fromUserId,
+      senderId: user.uid,
+      senderName: user.displayName || 'A BunkMate',
+      senderAvatar: user.photoURL || '',
+    }).catch((err) => console.warn('[friendActions] sendFriendAcceptedNotification error:', err));
   } catch (error) {
     console.error('Error accepting friend request:', error);
     throw error;

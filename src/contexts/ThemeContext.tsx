@@ -9,7 +9,13 @@ import React, {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Appearance } from 'react-native';
-import { getTheme, ACCENT_COLORS, ThemeColors } from '../theme/theme';
+import {
+  getTheme,
+  ACCENT_COLORS,
+  ThemeColors,
+  isBrightColor,
+  getContrastingTextColor,
+} from '../theme/theme';
 import { getDesignTokens } from '../theme/designSystem';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
@@ -34,6 +40,9 @@ export interface ThemeContextType {
   setAccent: (accent: string) => void;
   accentColor: string;
   onAccentTextColor: string;
+  accentTextColor: string;
+  isBrightAccent: boolean;
+  isWhiteAccent: boolean;
   toggleTheme: () => void;
   background: BackgroundSettings;
   setBackground: (bg: BackgroundSettings) => void;
@@ -92,10 +101,15 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
   // Compute effective dark mode state
   const isDark = useMemo(() => {
     if (mode === 'system') {
+      if (locationMode === 'auto') {
+        const curHour = new Date().getHours();
+        const isNightTime = curHour >= 19 || curHour < 6;
+        return isNightTime || systemColorScheme === 'dark';
+      }
       return systemColorScheme === 'dark';
     }
     return mode === 'dark';
-  }, [mode, systemColorScheme]);
+  }, [mode, systemColorScheme, locationMode]);
 
   // Load from AsyncStorage on startup
   useEffect(() => {
@@ -294,14 +308,13 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
     resolvedAccentKey?.toLowerCase() === '#ffffff';
 
   const accentColor = useMemo(() => {
-    if (isWhiteAccent) {
-      return isDark ? '#FFFFFF' : '#111827';
-    }
     return (
       (ACCENT_COLORS as Record<string, string>)[resolvedAccentKey] ||
       (resolvedAccentKey.startsWith('#') ? resolvedAccentKey : ACCENT_COLORS.coral)
     );
-  }, [resolvedAccentKey, isDark, isWhiteAccent]);
+  }, [resolvedAccentKey]);
+
+  const isBrightAccent = useMemo(() => isBrightColor(accentColor), [accentColor]);
 
   // ⚠️ IMPORTANT: useAppSettings() MUST be called unconditionally at the top level of the
   // component, never inside try/catch. Wrapping a hook in try/catch violates Rules of Hooks
@@ -327,25 +340,18 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
 
   const effectiveReduceAnimations = reduceAnimations || appSettingsReduceMotion;
 
+  // High-contrast foreground color for text/icons placed on top of an accent-colored background
   const onAccentTextColor = useMemo(() => {
-    if (isWhiteAccent) {
-      return isDark ? '#000000' : '#FFFFFF';
+    return getContrastingTextColor(accentColor, isDark ? '#000000' : '#11141A', '#FFFFFF');
+  }, [accentColor, isDark]);
+
+  // High-contrast color for text/icons when accent color is used as foreground on normal app surfaces
+  const accentTextColor = useMemo(() => {
+    if (isBrightAccent) {
+      return isDark ? accentColor : '#11141A';
     }
-    const key = resolvedAccentKey.toLowerCase();
-    if (
-      key === 'yellow' ||
-      key === 'sunflower' ||
-      key === '#fbc02d' ||
-      key === '#ffd700' ||
-      key === '#f59e0b' ||
-      accentColor.toLowerCase() === '#fbc02d' ||
-      accentColor.toLowerCase() === '#ffd700' ||
-      accentColor.toLowerCase() === '#f59e0b'
-    ) {
-      return '#000000';
-    }
-    return '#FFFFFF';
-  }, [resolvedAccentKey, isDark, isWhiteAccent, accentColor]);
+    return accentColor;
+  }, [accentColor, isDark, isBrightAccent]);
 
   const contextValue = useMemo<ThemeContextType>(() => ({
     mode,
@@ -355,6 +361,9 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
     setAccent,
     accentColor,
     onAccentTextColor,
+    accentTextColor,
+    isBrightAccent,
+    isWhiteAccent,
     accentBg: themeColors.accentBg,
     toggleTheme,
     background,
@@ -386,6 +395,8 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
     setAccent,
     accentColor,
     onAccentTextColor,
+    accentTextColor,
+    isBrightAccent,
     themeColors,
     toggleTheme,
     background,

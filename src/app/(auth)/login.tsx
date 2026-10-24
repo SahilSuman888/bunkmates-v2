@@ -71,6 +71,8 @@ import GoogleColoredIcon from '../../components/auth/GoogleColoredIcon';
 import PasswordCriteriaGrid from '../../components/auth/PasswordCriteriaGrid';
 import UserProfileCard from '../../components/auth/UserProfileCard';
 import { extractResetCode, parseAuthParams } from '../../lib/authUrlHelper';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { PENDING_QR_LOGIN_KEY } from '../../lib/qrLoginService';
 
 let GoogleSignin: any = null;
 try {
@@ -163,11 +165,18 @@ export default function AuthScreen() {
 
   const initialMode = useMemo<ViewMode>(() => {
     if (parsedParams.isReset) return 'reset-password';
+    if (params.reason === 'qr-login') return 'login';
     if (params.mode && ['welcome', 'login', 'signup', 'forgot-password', 'reset-password', 'continue'].includes(params.mode)) {
       return params.mode as ViewMode;
     }
     return 'welcome';
-  }, [params.mode, parsedParams.isReset]);
+  }, [params.mode, params.reason, parsedParams.isReset]);
+
+  useEffect(() => {
+    if (params.session && typeof params.session === 'string') {
+      AsyncStorage.setItem(PENDING_QR_LOGIN_KEY, params.session).catch(() => {});
+    }
+  }, [params.session]);
 
   const [viewMode, setViewMode] = useState<ViewMode>(initialMode);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -969,8 +978,21 @@ export default function AuthScreen() {
     }
   };
 
-  const handleContinueToApp = () => {
+  const handleContinueToApp = async () => {
     haptic('medium');
+    try {
+      const pendingSession = await AsyncStorage.getItem(PENDING_QR_LOGIN_KEY);
+      if (pendingSession) {
+        await AsyncStorage.removeItem(PENDING_QR_LOGIN_KEY);
+        router.replace({
+          pathname: '/qr-login',
+          params: { session: pendingSession },
+        } as any);
+        return;
+      }
+    } catch (e) {
+      console.log('Error checking pending QR login in handleContinueToApp:', e);
+    }
     router.replace('/(tabs)/home');
   };
 
@@ -1260,6 +1282,21 @@ export default function AuthScreen() {
                         style={{ marginRight: 8 }}
                       />
                       <Text style={styles.successText}>{resetSuccessMessage}</Text>
+                    </Animated.View>
+                  ) : null}
+
+                  {/* QR Login Notification Banner */}
+                  {params.reason === 'qr-login' ? (
+                    <Animated.View entering={makeItemEntering(60)} style={[styles.successBanner, { backgroundColor: 'rgba(59, 130, 246, 0.15)', borderColor: 'rgba(59, 130, 246, 0.3)' }]}>
+                      <Ionicons
+                        name="laptop-outline"
+                        size={18}
+                        color="#60a5fa"
+                        style={{ marginRight: 8 }}
+                      />
+                      <Text style={[styles.successText, { color: '#93c5fd' }]}>
+                        Sign in to approve desktop login request.
+                      </Text>
                     </Animated.View>
                   ) : null}
 

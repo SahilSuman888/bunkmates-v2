@@ -27,6 +27,7 @@ import { BlurView } from "expo-blur";
 import Svg, { Path, Rect } from "react-native-svg";
 
 import { useLanguage } from "../contexts/LanguageContext";
+import { parseQRLoginPayload } from "../lib/qrLoginService";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const QR_SIZE = SCREEN_W * 0.68;
@@ -71,6 +72,37 @@ export default function QRCodeScreen({ onBack }: QRCodeScreenProps = {}) {
     if (isProcessing || scanned) return;
     setIsProcessing(true);
     setScanned(true);
+
+    // 1. Intercept Desktop QR Login or Device Pairing QR codes
+    if (
+      decodedText &&
+      (decodedText.includes("qr-login") ||
+        decodedText.includes("pair") ||
+        decodedText.includes("sessionId=") ||
+        decodedText.includes("session=") ||
+        decodedText.includes("pairingId=") ||
+        decodedText.startsWith("bunk_qr_") ||
+        decodedText.startsWith("pair_") ||
+        decodedText.includes("app.bunkmates.xyz") ||
+        decodedText.includes("localhost:3000") ||
+        (decodedText.startsWith("{") &&
+          (decodedText.includes("protocol") ||
+            decodedText.includes("pairingId") ||
+            decodedText.includes("sessionId") ||
+            decodedText.includes("session"))))
+    ) {
+      try {
+        const { sessionId } = parseQRLoginPayload(decodedText);
+        setIsProcessing(false);
+        router.push({
+          pathname: "/qr-login",
+          params: { session: sessionId },
+        } as any);
+        return;
+      } catch (e) {
+        // Fall through to regular profile scan if not valid pairing payload
+      }
+    }
 
     let friendUid = decodedText ? decodedText.trim() : "";
 

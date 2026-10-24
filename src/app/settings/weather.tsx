@@ -10,12 +10,14 @@ import {
   Pressable,
   ScrollView,
   Platform,
-  Switch,
-  Modal,
+    Modal,
   StatusBar,
   Animated,
 } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -26,6 +28,7 @@ import { auth, db } from "../../lib/firebase";
 import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useAppSettings } from "../../contexts/AppSettingsContext";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 type TempUnit = "°C" | "°F";
 type ForecastHorizon = "3 Days" | "5 Days" | "7 Days";
@@ -208,7 +211,7 @@ export default function WeatherSettings() {
       segmentActiveBg: isDark ? "#2C2C32" : "#FFFFFF",
       switchActive: activeAccent,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
-      activeText: activeAccent,
+      activeText: activeText,
       insetBg: isDark ? "#1F1F24" : "#F8FAFC",
       badgeBg: isDark ? "rgba(16, 185, 129, 0.14)" : "rgba(16, 185, 129, 0.1)",
       badgeText: "#10B981",
@@ -296,17 +299,27 @@ export default function WeatherSettings() {
     >
       <StatusBar
         barStyle={isDark ? "light-content" : "dark-content"}
-        backgroundColor={colors.bg}
       />
 
       {/* ── Top Header matching Settings page ── */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={8}
           accessibilityLabel="Go back"
@@ -330,7 +343,7 @@ export default function WeatherSettings() {
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Temperature & Wind Unit Row */}
           <Pressable
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.row, ]}
             onPress={() => setTempModalVisible(true)}
             accessibilityRole="button"
             accessibilityLabel="Temperature and wind units"
@@ -397,7 +410,12 @@ export default function WeatherSettings() {
         </Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Severe Weather Alerts */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleSevereAlerts(!severeAlerts)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: severeAlerts }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="thunderstorm-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -412,19 +430,23 @@ export default function WeatherSettings() {
                 )}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={severeAlerts}
               onValueChange={handleToggleSevereAlerts}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle Severe Weather Advisories"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Rain Notifications */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleRainNotifications(!rainNotifications)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: rainNotifications }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="rainy-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -439,19 +461,23 @@ export default function WeatherSettings() {
                 )}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={rainNotifications}
               onValueChange={handleToggleRainNotifications}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle Precipitation Alerts"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* High Pollution Alerts */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleHighPollutionAlerts(!highPollutionAlerts)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: highPollutionAlerts }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="alert-circle-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -466,14 +492,13 @@ export default function WeatherSettings() {
                 )}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={highPollutionAlerts}
               onValueChange={handleToggleHighPollutionAlerts}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle High Pollution Warnings"
             />
-          </View>
+          </Pressable>
         </View>
 
         {/* ── 3. HOME WEATHER WIDGET & AUTO-REFRESH ── */}
@@ -603,14 +628,13 @@ export default function WeatherSettings() {
       )}
 
       {/* ── 1. Temperature Units Modal ── */}
-      <Modal
+      <SwipeableDrawer
         visible={tempModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setTempModalVisible(false)}
+        onClose={() => setTempModalVisible(false)}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
+        <View style={styles.drawerInner}>
             <View
               style={[
                 styles.iconBox,
@@ -733,19 +757,17 @@ export default function WeatherSettings() {
                 {t("Close", "Close")}
               </Text>
             </Pressable>
-          </View>
         </View>
-      </Modal>
+      </SwipeableDrawer>
 
-      {/* ── 2. Widget Preferences Modal ── */}
-      <Modal
+      {/* ── 2. Widget Preferences Swipeable Drawer ── */}
+      <SwipeableDrawer
         visible={widgetModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setWidgetModalVisible(false)}
+        onClose={() => setWidgetModalVisible(false)}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card }]}>
+        <View style={styles.drawerInner}>
             <View
               style={[
                 styles.iconBox,
@@ -777,23 +799,20 @@ export default function WeatherSettings() {
               <Text style={[styles.widgetGroupLabel, { color: colors.textPrimary }]}>
                 {t("Card Layout", "Card Layout")}
               </Text>
-              <View
-                style={[
-                  styles.segmentContainer,
-                  { backgroundColor: colors.segmentBg, marginBottom: 14 },
-                ]}
-              >
+              <View style={styles.modalListColumn}>
                 {(["Detailed Card", "Compact Tile"] as WidgetLayout[]).map((layout) => {
                   const isSelected = widgetLayout === layout;
                   return (
                     <Pressable
                       key={layout}
-                      style={[
-                        styles.segmentItem,
-                        isSelected && [
-                          styles.segmentItemActive,
-                          { backgroundColor: colors.segmentActiveBg },
-                        ],
+                      style={({ pressed }) => [
+                        styles.modalOptionItem,
+                        {
+                          backgroundColor: isSelected ? colors.insetBg : colors.iconBoxBg,
+                          borderColor: isSelected ? colors.activeText : "transparent",
+                          borderWidth: 1,
+                        },
+                        pressed && styles.pressed,
                       ]}
                       onPress={() => {
                         triggerHaptic();
@@ -803,21 +822,35 @@ export default function WeatherSettings() {
                     >
                       <Text
                         style={[
-                          styles.segmentText,
-                          isSelected
-                            ? [styles.segmentTextActive, { color: colors.activeText }]
-                            : { color: colors.textSecondary },
+                          styles.modalOptionText,
+                          {
+                            color: isSelected ? colors.activeText : colors.textPrimary,
+                            fontWeight: isSelected ? "700" : "600",
+                          },
                         ]}
                       >
                         {t(layout)}
                       </Text>
+                      {isSelected && (
+                        <Feather name="check" size={18} color={colors.activeText} />
+                      )}
                     </Pressable>
                   );
                 })}
               </View>
 
               {/* Data Chip Toggles */}
-              <View style={styles.widgetToggleRow}>
+              <Pressable
+                style={({ pressed }) => [styles.widgetToggleRow, pressed && styles.pressed]}
+                onPress={() => {
+                  const v = !showFeelsLike;
+                  triggerHaptic();
+                  setShowFeelsLike(v);
+                  syncPreference("showFeelsLike", v);
+                }}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: showFeelsLike }}
+              >
                 <View style={{ flex: 1, paddingRight: 10 }}>
                   <Text style={[styles.widgetToggleLabel, { color: colors.textPrimary }]}>
                     {t("Feels-Like Temperature", "Feels-Like Temperature")}
@@ -826,19 +859,28 @@ export default function WeatherSettings() {
                     Show apparent temperature metric chip
                   </Text>
                 </View>
-                <Switch
+                <BunkmatesAnimatedSwitch
                   value={showFeelsLike}
                   onValueChange={(v) => {
                     triggerHaptic();
                     setShowFeelsLike(v);
                     syncPreference("showFeelsLike", v);
                   }}
-                  trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-                  thumbColor="#FFFFFF"
+                  pointerEvents="none"
                 />
-              </View>
+              </Pressable>
 
-              <View style={styles.widgetToggleRow}>
+              <Pressable
+                style={({ pressed }) => [styles.widgetToggleRow, pressed && styles.pressed]}
+                onPress={() => {
+                  const v = !showWindSpeed;
+                  triggerHaptic();
+                  setShowWindSpeed(v);
+                  syncPreference("showWindSpeed", v);
+                }}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: showWindSpeed }}
+              >
                 <View style={{ flex: 1, paddingRight: 10 }}>
                   <Text style={[styles.widgetToggleLabel, { color: colors.textPrimary }]}>
                     {t("Live Wind Speed", "Live Wind Speed")}
@@ -847,17 +889,16 @@ export default function WeatherSettings() {
                     Show wind speed in {tempUnit === "°C" ? "km/h" : "mph"}
                   </Text>
                 </View>
-                <Switch
+                <BunkmatesAnimatedSwitch
                   value={showWindSpeed}
                   onValueChange={(v) => {
                     triggerHaptic();
                     setShowWindSpeed(v);
                     syncPreference("showWindSpeed", v);
                   }}
-                  trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-                  thumbColor="#FFFFFF"
+                  pointerEvents="none"
                 />
-              </View>
+              </Pressable>
             </View>
 
             <Pressable
@@ -872,9 +913,8 @@ export default function WeatherSettings() {
                 {t("Done", "Done")}
               </Text>
             </Pressable>
-          </View>
         </View>
-      </Modal>
+      </SwipeableDrawer>
     </SafeAreaView>
   );
 }
@@ -1012,7 +1052,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: StyleSheet.hairlineWidth,
-    marginLeft: 68,
+    marginHorizontal: 16,
   },
 
   // AQI Badge
@@ -1138,5 +1178,15 @@ const styles = StyleSheet.create({
   modalCloseBtnText: {
     fontSize: 14,
     fontWeight: "600",
+  },
+  drawerSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 8,
+  },
+  drawerInner: {
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+    paddingTop: 8,
   },
 });

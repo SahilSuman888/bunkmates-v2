@@ -42,11 +42,16 @@ import { db } from "../../../lib/firebase";
 import { Ionicons, Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
+import * as Haptics from "expo-haptics";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
+import { saveImageToGallery, autoSaveIncomingMedia, shareOrExportImage } from "../../../lib/chatMediaService";
 import GroupInfoDrawer from "../../../components/group_chat/GroupInfoDrawer";
 import UserProfileModal from "../../../components/UserProfileModal";
 import { BlurView } from "expo-blur";
 import { sendGroupChatMessageNotification } from "../../../lib/sendAppNotification";
 import { DEFAULT_WALLPAPER_ASSET, getWallpaperSource, useChatSettings } from "../../../contexts/ChatSettingsContext";
+import LinkPreviewCard from "../../../components/chat/LinkPreviewCard";
 import WallpaperThemePreviewModal from "../../../components/chat/WallpaperThemePreviewModal";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
@@ -83,7 +88,7 @@ export default function GroupChatroom() {
   const insets = useSafeAreaInsets();
   const { groupId } = useLocalSearchParams();
   const router = useRouter();
-  const { user } = useUser();
+  const { user, userData } = useUser();
   const { startCall } = useCall();
   const { isDark, themeColors, accentColor, accent, scaleFont, fontScale } = useThemeToggle();
   const isBrightAccent =
@@ -105,6 +110,11 @@ export default function GroupChatroom() {
     enterIsSend,
     disappearingTimer,
     clearedAt,
+    deletedAt,
+    linkPreviews,
+    autoDownloadMedia,
+    saveToGallery,
+    typingIndicator,
     fontSize,
   } = useChatSettings();
 
@@ -120,6 +130,8 @@ export default function GroupChatroom() {
   const filteredMessages = useMemo(() => {
     if (!messages) return [];
     const clearedMs = clearedAt ? new Date(clearedAt).getTime() : 0;
+    const deletedMs = deletedAt ? new Date(deletedAt).getTime() : 0;
+    const cutoffMs = Math.max(clearedMs, deletedMs);
     const nowMs = Date.now();
     return messages.filter((msg: any) => {
       let msgMs = 0;
@@ -129,16 +141,105 @@ export default function GroupChatroom() {
         else if (msg.timestamp.seconds) msgMs = msg.timestamp.seconds * 1000;
         else if (typeof msg.timestamp === "string") msgMs = new Date(msg.timestamp).getTime() || 0;
       }
-      if (clearedMs > 0 && msgMs > 0 && msgMs < clearedMs) return false;
+      if (cutoffMs > 0 && msgMs > 0 && msgMs <= cutoffMs) return false;
       if (msg.expiresAt && typeof msg.expiresAt === "number" && msg.expiresAt < nowMs) return false;
       return true;
     });
-  }, [messages, clearedAt]);
+  }, [messages, clearedAt, deletedAt]);
 
   const [input, setInput] = useState("");
   const [uploading, setUploading] = useState(false);
   const [replyTo, setReplyTo] = useState<any>(null);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [manuallyLoadedImages, setManuallyLoadedImages] = useState<Record<string, boolean>>({});
+  const [typingUsers, setTypingUsers] = useState<{ id: string; name: string }[]>([]);
+  const typingTimeoutRef = useRef<any>(null);
+  const saveToGalleryRef = useRef(saveToGallery);
+
+  useEffect(() => {
+    saveToGalleryRef.current = saveToGallery;
+  }, [saveToGallery]);
+
+  // Auto-save incoming group photos to device gallery if saveToGallery is enabled
+  useEffect(() => {
+    if (!saveToGalleryRef.current || !messages || messages.length === 0) return;
+    messages.forEach((msg: any) => {
+      if (msg.senderId !== user?.uid && msg.imageUrl && !msg.deleted) {
+        autoSaveIncomingMedia(msg.imageUrl, msg.id, true).catch(() => {});
+      }
+    });
+  }, [messages, user?.uid]);
+
+  // Group typing listener
+  useEffect(() => {
+    if (!groupKey) return;
+    const typingCol = collection(db, "groupChat", groupKey, "typing");
+    const unsub = onSnapshot(
+      typingCol,
+      (snap) => {
+        const active: { id: string; name: string }[] = [];
+        const now = Date.now();
+        snap.forEach((d) => {
+          if (d.id === user?.uid) return;
+          const data = d.data();
+          if (data.isTyping && now - (data.updatedAt || 0) < 4000) {
+            active.push({ id: d.id, name: data.name || "A member" });
+          }
+        });
+        setTypingUsers(active);
+      },
+      () => setTypingUsers([])
+    );
+    return () => unsub();
+  }, [groupKey, user?.uid]);
+
+  // Clean typing on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (groupKey && user) {
+        setDoc(
+          doc(db, "groupChat", groupKey, "typing", user.uid),
+          { isTyping: false, updatedAt: Date.now() },
+          { merge: true }
+        ).catch(() => {});
+      }
+    };
+  }, [groupKey, user?.uid]);
+
+  const handleGroupInputChange = (text: string) => {
+    setInput(text);
+    if (!typingIndicator || !groupKey || !user) return;
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    if (!text.trim()) {
+      setDoc(
+        doc(db, "groupChat", groupKey, "typing", user.uid),
+        { isTyping: false, updatedAt: Date.now() },
+        { merge: true }
+      ).catch(() => {});
+      return;
+    }
+
+    setDoc(
+      doc(db, "groupChat", groupKey, "typing", user.uid),
+      {
+        isTyping: true,
+        name: userData?.displayName || userData?.name || user.displayName || "Member",
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    ).catch(() => {});
+
+    typingTimeoutRef.current = setTimeout(() => {
+      setDoc(
+        doc(db, "groupChat", groupKey, "typing", user.uid),
+        { isTyping: false, updatedAt: Date.now() },
+        { merge: true }
+      ).catch(() => {});
+    }, 2500);
+  };
 
   // Modals & Sheets
   const [showGroupInfo, setShowGroupInfo] = useState(false);
@@ -433,6 +534,16 @@ export default function GroupChatroom() {
 
       setPendingImage(null);
 
+      // Clear typing indicator on message sent
+      if (typingIndicator && groupKey && user) {
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        setDoc(
+          doc(db, "groupChat", groupKey, "typing", user.uid),
+          { isTyping: false, updatedAt: Date.now() },
+          { merge: true }
+        ).catch(() => {});
+      }
+
       // Single deterministic write to primary groupChats, mirroring to groupChat with identical docId
       const newMsgDoc = await addDoc(collection(db, "groupChats", groupKey, "messages"), msgObj);
       await setDoc(doc(db, "groupChat", groupKey, "messages", newMsgDoc.id), msgObj).catch(() => {});
@@ -495,6 +606,28 @@ export default function GroupChatroom() {
       } catch (e) {}
     } catch (err) {
       console.log("Error adding reaction:", err);
+    }
+  };
+
+  const handleDownloadGroupImage = async (url: string) => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const res = await saveImageToGallery(url, "bunkmates_group");
+      if (res.success) {
+        Alert.alert("Saved", "Photo saved to your device gallery!");
+      } else if (res.error === "permission_denied") {
+        const shared = await shareOrExportImage(url);
+        if (!shared) {
+          Alert.alert("Permission Required", "Please allow photo library access in device settings to save photos.");
+        }
+      } else {
+        const shared = await shareOrExportImage(url);
+        if (!shared) {
+          Alert.alert("Save Photo", "Could not save photo: " + (res.error || "Unknown error"));
+        }
+      }
+    } catch (e: any) {
+      Alert.alert("Save Photo", "Could not save photo: " + e.message);
     }
   };
 
@@ -957,27 +1090,53 @@ export default function GroupChatroom() {
 
           {/* Reply Preview */}
           {item.replyTo && (
-            <View style={[s.replyBox, { borderLeftColor: accentColor }]}>
-              <Text style={[s.replyBoxSender, { color: accentColor }]}>{item.replyTo.senderName}</Text>
+            <View style={[s.replyBox, { borderLeftColor: themeColors.accentText }]}>
+              <Text style={[s.replyBoxSender, { color: themeColors.accentText }]}>{item.replyTo.senderName}</Text>
               <Text style={s.replyBoxText} numberOfLines={1}>
                 {item.replyTo.text}
               </Text>
             </View>
           )}
 
-          {/* Attached Image */}
+          {/* Attached Image (respects autoDownloadMedia preference) */}
           {item.imageUrl && (
-            <Pressable
-              onPress={() => setFullScreenImage(item.imageUrl)}
-              style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }]}
-            >
-              <ExpoImage
-                source={{ uri: item.imageUrl }}
-                style={s.msgAttachedImage}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-              />
-            </Pressable>
+            (!autoDownloadMedia && !manuallyLoadedImages[item.id] && !isOwn) ? (
+              <Pressable
+                style={[
+                  s.msgAttachedImage,
+                  {
+                    backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  },
+                ]}
+                onPress={() => {
+                  try {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  } catch (e) {}
+                  setManuallyLoadedImages((prev) => ({ ...prev, [item.id]: true }));
+                }}
+              >
+                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0, 0, 0, 0.55)", alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="cloud-download-outline" size={24} color="#ffffff" />
+                </View>
+                <Text style={{ color: "#ffffff", fontSize: 12, marginTop: 8, fontWeight: "600" }}>
+                  Tap to load photo
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => setFullScreenImage(item.imageUrl)}
+                style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }]}
+              >
+                <ExpoImage
+                  source={{ uri: item.imageUrl }}
+                  style={s.msgAttachedImage}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                />
+              </Pressable>
+            )
           )}
 
           {/* Message Text */}
@@ -992,6 +1151,16 @@ export default function GroupChatroom() {
               {item.text}
             </Text>
           ) : null}
+
+          {/* Link Preview Card when linkPreviews setting is enabled */}
+          {linkPreviews && !item.deleted && !!item.text && (
+            <LinkPreviewCard
+              text={item.text}
+              isOwn={isOwn}
+              accentColor={accentColor}
+              isDark={isDark}
+            />
+          )}
 
           {/* Timestamp Row (High-contrast micro pill) */}
           <View style={s.msgMetaRow}>
@@ -1108,8 +1277,18 @@ export default function GroupChatroom() {
                   <Text style={s.userName} numberOfLines={1}>
                     {groupData?.name || "Bunk1"}
                   </Text>
-                  <Text style={s.userHandle} numberOfLines={1}>
-                    {memberNamesSubtitle}
+                  <Text
+                    style={[
+                      s.userHandle,
+                      typingUsers.length > 0 && { color: "#34D399", fontStyle: "italic" },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {typingUsers.length > 0
+                      ? typingUsers.length === 1
+                        ? `${typingUsers[0].name} is typing...`
+                        : `${typingUsers.map((u) => u.name).join(", ")} are typing...`
+                      : memberNamesSubtitle}
                   </Text>
                 </View>
               </Pressable>
@@ -1266,7 +1445,7 @@ export default function GroupChatroom() {
                       placeholder="Type your message..."
                       placeholderTextColor="#777777"
                       value={input}
-                      onChangeText={setInput}
+                      onChangeText={handleGroupInputChange}
                       style={s.textInput}
                       multiline={!enterIsSend}
                       returnKeyType={enterIsSend ? "send" : "default"}
@@ -1570,24 +1749,48 @@ export default function GroupChatroom() {
         >
           <View style={{ flex: 1, backgroundColor: "#000000", justifyContent: "center", alignItems: "center" }}>
             <StatusBar barStyle="light-content" backgroundColor="#000000" />
-            <Pressable
-              onPress={() => setFullScreenImage(null)}
+            <View
               style={{
                 position: "absolute",
                 top: Math.max(insets.top, 20) + 10,
                 right: 20,
                 zIndex: 50,
-                width: 44,
-                height: 44,
-                borderRadius: 22,
-                backgroundColor: "rgba(30, 30, 30, 0.8)",
+                flexDirection: "row",
                 alignItems: "center",
-                justifyContent: "center",
+                gap: 12,
               }}
-              hitSlop={12}
             >
-              <Ionicons name="close" size={26} color="#ffffff" />
-            </Pressable>
+              {fullScreenImage && (
+                <Pressable
+                  onPress={() => handleDownloadGroupImage(fullScreenImage)}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 22,
+                    backgroundColor: "rgba(30, 30, 30, 0.8)",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                  hitSlop={12}
+                >
+                  <Ionicons name="arrow-down-circle" size={24} color="#ffffff" />
+                </Pressable>
+              )}
+              <Pressable
+                onPress={() => setFullScreenImage(null)}
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: "rgba(30, 30, 30, 0.8)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                hitSlop={12}
+              >
+                <Ionicons name="close" size={26} color="#ffffff" />
+              </Pressable>
+            </View>
             {fullScreenImage && (
               <ExpoImage
                 source={{ uri: fullScreenImage }}

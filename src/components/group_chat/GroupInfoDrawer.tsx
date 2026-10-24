@@ -865,6 +865,9 @@ export default function GroupInfoDrawer({
                     <Text style={[s.permToggleText, editAccess === "admins" && s.permToggleTextActive]}>
                       Admins Only
                     </Text>
+                    {editAccess === "admins" && (
+                      <Feather name="check" size={18} color="#38bdf8" />
+                    )}
                   </Pressable>
 
                   <Pressable
@@ -877,6 +880,9 @@ export default function GroupInfoDrawer({
                     <Text style={[s.permToggleText, editAccess === "all" && s.permToggleTextActive]}>
                       All Members
                     </Text>
+                    {editAccess === "all" && (
+                      <Feather name="check" size={18} color="#38bdf8" />
+                    )}
                   </Pressable>
                 </View>
 
@@ -893,6 +899,9 @@ export default function GroupInfoDrawer({
                     <Text style={[s.permToggleText, addAccess === "admins" && s.permToggleTextActive]}>
                       Admins Only
                     </Text>
+                    {addAccess === "admins" && (
+                      <Feather name="check" size={18} color="#38bdf8" />
+                    )}
                   </Pressable>
 
                   <Pressable
@@ -905,6 +914,9 @@ export default function GroupInfoDrawer({
                     <Text style={[s.permToggleText, addAccess === "all" && s.permToggleTextActive]}>
                       All Members
                     </Text>
+                    {addAccess === "all" && (
+                      <Feather name="check" size={18} color="#38bdf8" />
+                    )}
                   </Pressable>
                 </View>
 
@@ -921,6 +933,9 @@ export default function GroupInfoDrawer({
                     <Text style={[s.permToggleText, sendAccess === "admins" && s.permToggleTextActive]}>
                       Admins Only
                     </Text>
+                    {sendAccess === "admins" && (
+                      <Feather name="check" size={18} color="#38bdf8" />
+                    )}
                   </Pressable>
 
                   <Pressable
@@ -933,6 +948,9 @@ export default function GroupInfoDrawer({
                     <Text style={[s.permToggleText, sendAccess === "all" && s.permToggleTextActive]}>
                       All Members
                     </Text>
+                    {sendAccess === "all" && (
+                      <Feather name="check" size={18} color="#38bdf8" />
+                    )}
                   </Pressable>
                 </View>
 
@@ -1526,30 +1544,35 @@ const s = StyleSheet.create({
     marginBottom: 10,
   },
   permissionToggleRow: {
-    flexDirection: "row",
-    gap: 10,
+    flexDirection: "column",
+    gap: 8,
     marginBottom: 20,
+    width: "100%",
   },
   permToggleBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-    backgroundColor: "transparent",
+    borderColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
   },
   permToggleBtnActive: {
-    backgroundColor: "#ffffff",
-    borderColor: "#ffffff",
+    backgroundColor: "rgba(56, 189, 248, 0.12)",
+    borderColor: "rgba(56, 189, 248, 0.4)",
   },
   permToggleText: {
-    color: "rgba(255, 255, 255, 0.8)",
-    fontSize: 13,
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 14.5,
     fontWeight: "600",
   },
   permToggleTextActive: {
-    color: "#000000",
-    fontWeight: "800",
+    color: "#ffffff",
+    fontWeight: "700",
   },
 
   membersAdminsHeaderRow: {

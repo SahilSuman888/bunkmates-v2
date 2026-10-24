@@ -28,7 +28,7 @@ interface UserProviderProps {
   children: ReactNode;
 }
 
-import { recordDeviceSessionInFirestore } from '../utils/sessionTracker';
+import { recordDeviceSessionInFirestore, getPersistentDeviceId } from '../utils/sessionTracker';
 
 export const UserProvider = ({ children }: UserProviderProps) => {
   const [user, setUser] = useState<any>(null);
@@ -83,25 +83,57 @@ export const UserProvider = ({ children }: UserProviderProps) => {
 
     // 2. Real-time Firestore sync
     const ref = doc(db, 'users', user.uid);
-    const unsub = onSnapshot(ref, (snap) => {
+    let sessionInitDone = false;
+
+    const unsub = onSnapshot(ref, async (snap) => {
       if (snap.exists()) {
         const data = snap.data();
         setUserData(data);
         AsyncStorage.setItem(`@bunkmates_cached_profile_${user.uid}`, JSON.stringify(data)).catch(() => {});
+
+        // 3. Remote Session Termination / Revocation Check
+        try {
+          const devId = await getPersistentDeviceId();
+          if (Array.isArray(data.security?.loginActivity) && data.security.loginActivity.length > 0) {
+            const hasMySession = data.security.loginActivity.some((s: any) => s.id === devId);
+            if (sessionInitDone && !hasMySession) {
+              console.log("[UserContext] Session terminated remotely, signing out.");
+              auth.signOut().catch(() => {});
+              return;
+            }
+            if (hasMySession) {
+              sessionInitDone = true;
+            }
+          }
+        } catch (e) {}
+
+        // 4. Privacy: Activity Status enforcement
+        const allowActivityStatus = data.privacy?.activityStatus ?? true;
+        if (!allowActivityStatus) {
+          updateDoc(ref, {
+            online: false,
+            isOnline: false,
+          }).catch(() => {});
+        }
       } else {
         setUserData(null);
       }
     });
 
-    // Mark current user online in Firestore
-    updateDoc(ref, {
-      online: true,
-      isOnline: true,
-      lastSeen: serverTimestamp(),
-    }).catch(() => {});
+    // Mark current user online in Firestore only if activity status is allowed
+    AsyncStorage.getItem("activity_status_enabled").then((savedAct) => {
+      if (savedAct === "false") return;
+      updateDoc(ref, {
+        online: true,
+        isOnline: true,
+        lastSeen: serverTimestamp(),
+      }).catch(() => {});
+    });
 
     // Listen to AppState (active vs background)
-    const appStateSub = AppState.addEventListener('change', (nextState) => {
+    const appStateSub = AppState.addEventListener('change', async (nextState) => {
+      const savedAct = await AsyncStorage.getItem("activity_status_enabled");
+      if (savedAct === "false") return;
       if (nextState === 'active') {
         updateDoc(ref, {
           online: true,

@@ -1,17 +1,8 @@
 // **@** Appearance Settings — Complete unified UI combining all image features (Theme Select, Accent Colors, Typography & Motion) and all General Settings features (Background Canvas & Atmosphere, Location Mode)
 // Solid dynamic surfaces (zero glassmorphism in settings), dynamic theme colors, real-time typography scaling, accent propagation, and live canvas preview.
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  ScrollView,
-  Switch,
-  StatusBar,
-  Appearance,
-  Animated,
-} from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, StatusBar, Appearance, Animated, Platform } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -24,7 +15,9 @@ import {
   LocationMode,
   FontSize,
 } from "../../contexts/ThemeContext";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 
 const SWATCH_PALETTE = [
   { key: "coral", color: "#FF5A5F", label: "Default (Sunset Coral)" },
@@ -41,6 +34,8 @@ const SWATCH_PALETTE = [
 
 
 export default function AppearanceScreen() {
+  const insets = useSafeAreaInsets();
+  const topInset = insets.top > 0 ? insets.top : Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 44;
   const router = useRouter();
   const { t } = useLanguage();
 
@@ -102,7 +97,8 @@ export default function AppearanceScreen() {
       segmentActiveBg: isDark ? "#2C2C32" : "#FFFFFF",
       switchActive: accentColor,
       switchInactive: isDark ? "#2A2D36" : "#E2E8F0",
-      activeText: accentColor,
+      divider: themeColors.divider ?? (isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)"),
+      activeText: themeColors.accentText,
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
     };
@@ -139,16 +135,27 @@ export default function AppearanceScreen() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       {/* ── Top Header: Circular button matching Settings page ── */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={8}
           accessibilityLabel="Go back"
@@ -184,8 +191,7 @@ export default function AppearanceScreen() {
                     : colors.cardInner,
                   borderWidth: 0,
                 },
-                pressed && styles.pressed,
-              ]}
+                ]}
               onPress={() => handleSelectTheme("light")}
             >
               {/* Mini Preview Mockup */}
@@ -338,13 +344,13 @@ export default function AppearanceScreen() {
               <Ionicons
                 name="sparkles"
                 size={14}
-                color={accentColor === "#FFFFFF" || accentColor === "#e5e7eb" ? "#000000" : "#FFFFFF"}
+                color={onAccentTextColor}
               />
               <Text
                 style={[
                   styles.accentPillText,
                   {
-                    color: accentColor === "#FFFFFF" || accentColor === "#e5e7eb" ? "#000000" : "#FFFFFF",
+                    color: onAccentTextColor,
                     fontSize: scaleFont(12),
                   },
                 ]}
@@ -437,8 +443,15 @@ export default function AppearanceScreen() {
             </View>
           </View>
 
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+
           {/* Reduce Animations */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleReduceAnimations(!reduceAnimations)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: reduceAnimations }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="pulse-outline" size={20} color={colors.textPrimary} />
             </View>
@@ -450,14 +463,13 @@ export default function AppearanceScreen() {
                 {reduceAnimations ? "Instant non-animated transitions" : "Fluid transitional animations enabled"}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={reduceAnimations}
               onValueChange={handleToggleReduceAnimations}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle Reduce Animations"
             />
-          </View>
+          </Pressable>
         </View>
 
         {/* ── 4. LOCATION PRIVACY MODE ── */}
@@ -722,6 +734,11 @@ const styles = StyleSheet.create({
   },
   liveTypeBody: {
     lineHeight: 17,
+  },
+
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
   },
 
   // Row inside card

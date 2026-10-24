@@ -1,12 +1,17 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Platform } from "react-native";
 import { router } from "expo-router";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { db, auth } from "../lib/firebase";
 import safeNotifications, { isExpoGo } from "../lib/safeNotifications";
+import { triggerInAppNotificationBanner } from "../lib/NotificationService";
 
 export default function NotificationsHandler() {
+  const processedDocIdsRef = useRef<Set<string>>(new Set());
+
+  // 1. Native Expo Notification listener (standalone build only)
   useEffect(() => {
-    // In Expo Go on Android (SDK 53+), expo-notifications native modules (ExpoTopicSubscriptionModule)
-    // are absent. Guard here so the module is never loaded or registered.
     if (isExpoGo) {
       return;
     }
@@ -14,7 +19,6 @@ export default function NotificationsHandler() {
     let responseSubscription: { remove: () => void } | null = null;
 
     try {
-      // Set foreground presentation options
       safeNotifications.setNotificationHandler({
         handleNotification: async () => ({
           shouldShowAlert: true,
@@ -25,7 +29,6 @@ export default function NotificationsHandler() {
         }),
       });
 
-      // Configure default Android notification channel
       if (Platform.OS === "android") {
         safeNotifications.setNotificationChannelAsync("default", {
           name: "BunkMates Notifications",
@@ -35,7 +38,6 @@ export default function NotificationsHandler() {
         });
       }
 
-      // Listen for notification taps
       responseSubscription = safeNotifications.addNotificationResponseReceivedListener(
         (response: any) => {
           try {
@@ -56,6 +58,81 @@ export default function NotificationsHandler() {
       if (responseSubscription) {
         responseSubscription.remove();
       }
+    };
+  }, []);
+
+  // 2. Real-time In-App Notification Banner listener for all incoming Firestore notifications
+  useEffect(() => {
+    let unsubSnapshot: (() => void) | null = null;
+    const sessionStartTime = Date.now() - 5000;
+
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      if (unsubSnapshot) {
+        unsubSnapshot();
+        unsubSnapshot = null;
+      }
+
+      if (!user) return;
+
+      const q = query(
+        collection(db, "notifications"),
+        where("uid", "==", user.uid),
+        where("seen", "==", false)
+      );
+
+      unsubSnapshot = onSnapshot(
+        q,
+        (snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === "added") {
+              const docId = change.doc.id;
+              if (processedDocIdsRef.current.has(docId)) return;
+              processedDocIdsRef.current.add(docId);
+
+              const data: any = change.doc.data();
+              const docTime = data.timestamp?.toMillis
+                ? data.timestamp.toMillis()
+                : data.timestamp
+                ? new Date(data.timestamp).getTime()
+                : Date.now();
+
+              // Only show banner for new notifications arriving during this app session
+              if (docTime >= sessionStartTime) {
+                // Determine destination route
+                let route = data.route;
+                if (!route) {
+                  if (data.type === "chat" && data.senderId) {
+                    route = `/chat/${data.senderId}`;
+                  } else if (data.type === "group_chat" && data.groupId) {
+                    route = `/(tabs)/group-chatroom/${data.groupId}`;
+                  } else {
+                    route = "/notifications";
+                  }
+                }
+
+                triggerInAppNotificationBanner({
+                  recipientUid: user.uid,
+                  category: data.type || "general",
+                  title: data.title || "New Notification",
+                  message: data.content || data.message || "",
+                  senderName: data.senderName,
+                  senderPic: data.pic,
+                  route,
+                  data: { ...data, id: docId },
+                });
+              }
+            }
+          });
+        },
+        (err) => {
+          console.warn("[NotificationsHandler] Realtime listener error:", err);
+        }
+      );
+    });
+
+    return () => {
+      unsubAuth();
+      if (unsubSnapshot) unsubSnapshot();
     };
   }, []);
 

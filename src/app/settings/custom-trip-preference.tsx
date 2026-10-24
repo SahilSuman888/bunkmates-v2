@@ -13,6 +13,8 @@ import {
   Animated,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -24,6 +26,7 @@ import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useAppSettings } from "../../contexts/AppSettingsContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../../theme/theme";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 type TravelStyle = "Budget" | "Mid-Range" | "Luxury";
 
@@ -310,16 +313,27 @@ export default function CustomTripPreferences() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       {/* ── Top Header ── */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={8}
           accessibilityLabel="Go back"
@@ -383,7 +397,7 @@ export default function CustomTripPreferences() {
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Default Trip Duration */}
           <Pressable
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.row, ]}
             onPress={() => setActiveModal("duration")}
             accessibilityRole="button"
             accessibilityLabel="Default Trip Duration"
@@ -558,81 +572,101 @@ export default function CustomTripPreferences() {
         </Animated.View>
       )}
 
-      {/* Duration Modal */}
-      <Modal
+      {/* Duration Swipeable Drawer */}
+      <SwipeableDrawer
         visible={activeModal === "duration"}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setActiveModal(null)}
+        onClose={() => setActiveModal(null)}
+        sheetStyle={[styles.drawerCard, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
       >
-        <Pressable style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]} onPress={() => setActiveModal(null)}>
-          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Select Trip Duration")}</Text>
-            {DURATION_OPTIONS.map((item, idx) => {
+        <View style={styles.drawerInner}>
+          <Text style={[styles.drawerTitle, { color: colors.textPrimary }]}>{t("Select Trip Duration")}</Text>
+          <Text style={[styles.drawerSubtitle, { color: colors.textSecondary }]}>
+            {t("Choose your typical or preferred trip length")}
+          </Text>
+
+          <View style={{ width: "100%", gap: 6, marginTop: 12 }}>
+            {DURATION_OPTIONS.map((item) => {
               const isSelected = tripDuration === item;
               return (
                 <Pressable
                   key={item}
                   style={[
-                    styles.modalItem,
-                    idx < DURATION_OPTIONS.length - 1 && [styles.modalItemDivider, { borderBottomColor: colors.divider }],
+                    styles.drawerItem,
+                    {
+                      backgroundColor: isSelected
+                        ? isDark
+                          ? "rgba(255,255,255,0.08)"
+                          : "rgba(0,0,0,0.04)"
+                        : "transparent",
+                    },
                   ]}
                   onPress={() => handleSelectDuration(item)}
                 >
                   <Text
                     style={[
-                      styles.modalItemText,
+                      styles.drawerItemText,
                       { color: isSelected ? colors.segmentActiveText : colors.textPrimary },
                       isSelected && { fontWeight: "700" },
                     ]}
                   >
                     {t(item)}
                   </Text>
-                  {isSelected && <Ionicons name="checkmark" size={20} color={colors.segmentActiveText} />}
+                  {isSelected && <Ionicons name="checkmark-circle" size={20} color={colors.segmentActiveText} />}
                 </Pressable>
               );
             })}
           </View>
-        </Pressable>
-      </Modal>
+        </View>
+      </SwipeableDrawer>
 
-      {/* Group Size Modal */}
-      <Modal
+      {/* Group Size Swipeable Drawer */}
+      <SwipeableDrawer
         visible={activeModal === "groupSize"}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setActiveModal(null)}
+        onClose={() => setActiveModal(null)}
+        sheetStyle={[styles.drawerCard, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
       >
-        <Pressable style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]} onPress={() => setActiveModal(null)}>
-          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Select Group Size")}</Text>
-            {GROUP_SIZE_OPTIONS.map((item, idx) => {
+        <View style={styles.drawerInner}>
+          <Text style={[styles.drawerTitle, { color: colors.textPrimary }]}>{t("Select Group Size")}</Text>
+          <Text style={[styles.drawerSubtitle, { color: colors.textSecondary }]}>
+            {t("Choose your typical travel party composition")}
+          </Text>
+
+          <View style={{ width: "100%", gap: 6, marginTop: 12 }}>
+            {GROUP_SIZE_OPTIONS.map((item) => {
               const isSelected = groupSize === item;
               return (
                 <Pressable
                   key={item}
                   style={[
-                    styles.modalItem,
-                    idx < GROUP_SIZE_OPTIONS.length - 1 && [styles.modalItemDivider, { borderBottomColor: colors.divider }],
+                    styles.drawerItem,
+                    {
+                      backgroundColor: isSelected
+                        ? isDark
+                          ? "rgba(255,255,255,0.08)"
+                          : "rgba(0,0,0,0.04)"
+                        : "transparent",
+                    },
                   ]}
                   onPress={() => handleSelectGroupSize(item)}
                 >
                   <Text
                     style={[
-                      styles.modalItemText,
+                      styles.drawerItemText,
                       { color: isSelected ? colors.segmentActiveText : colors.textPrimary },
                       isSelected && { fontWeight: "700" },
                     ]}
                   >
                     {t(item)}
                   </Text>
-                  {isSelected && <Ionicons name="checkmark" size={20} color={colors.segmentActiveText} />}
+                  {isSelected && <Ionicons name="checkmark-circle" size={20} color={colors.segmentActiveText} />}
                 </Pressable>
               );
             })}
           </View>
-        </Pressable>
-      </Modal>
+        </View>
+      </SwipeableDrawer>
     </SafeAreaView>
   );
 }
@@ -772,40 +806,40 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   divider: {
-    height: 1,
-    marginLeft: 66,
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
   },
 
-  // Modal
-  modalOverlay: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 28,
+  // Drawer styles
+  drawerCard: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 8,
   },
-  modalContent: {
-    width: "100%",
-    borderRadius: 24,
-    paddingVertical: 18,
-    paddingHorizontal: 16,
+  drawerInner: {
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+    paddingTop: 8,
   },
-  modalTitle: {
-    fontSize: 17,
+  drawerTitle: {
+    fontSize: 18,
     fontWeight: "700",
-    marginBottom: 14,
-    paddingHorizontal: 8,
+    letterSpacing: -0.2,
   },
-  modalItem: {
+  drawerSubtitle: {
+    fontSize: 13,
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  drawerItem: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: 14,
-    paddingHorizontal: 8,
+    paddingHorizontal: 14,
+    borderRadius: 14,
   },
-  modalItemDivider: {
-    borderBottomWidth: 1,
-  },
-  modalItemText: {
+  drawerItemText: {
     fontSize: 15,
   },
 

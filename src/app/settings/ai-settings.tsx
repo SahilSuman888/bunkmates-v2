@@ -16,25 +16,17 @@
  */
 
 import React, { useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert, Dimensions, Pressable, ScrollView, StyleSheet, Text, TextInput, View, Platform, StatusBar } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { db, auth } from "../../lib/firebase";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { useThemeToggle } from "../../contexts/ThemeContext";
 import { SettingsActionModal } from "./_components/SettingsActionModal";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const BASE_WIDTH = 375;
@@ -46,6 +38,8 @@ const GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models";
 type KeyStatus = "idle" | "valid" | "invalid";
 
 export default function AISettingsScreen() {
+  const insets = useSafeAreaInsets();
+  const topInset = insets.top > 0 ? insets.top : Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 44;
   const router = useRouter();
   const { t } = useLanguage();
   const { themeColors, isDark, accentColor, onAccentTextColor, scaleFont, background } = useThemeToggle();
@@ -98,7 +92,7 @@ export default function AISettingsScreen() {
       return;
     }
     if (!uid) {
-      Alert.alert("Error", "You must be signed in to save your API key.");
+      setError("You must be signed in to save your API key.");
       return;
     }
 
@@ -135,13 +129,10 @@ export default function AISettingsScreen() {
         groqApiKeyValidatedAt: validatedTime,
         groqModels: availableModels,
       });
-
-      Alert.alert("✅ Success", "Groq API Key validated and saved to your account!");
     } catch (err: any) {
       console.error("Groq key validation error:", err);
       setStatus("invalid");
       setError(err.message || "Failed to validate API key");
-      Alert.alert("❌ Validation Failed", err.message || "Failed to validate API key");
     } finally {
       setValidating(false);
     }
@@ -170,11 +161,27 @@ export default function AISettingsScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: isAtmosphere ? "transparent" : themeColors.background }]} edges={["top", "left", "right"]}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={themeColors.background}
+        
+        zIndex={15}
+      />
+
       {/* ── HEADER ── */}
-      <View style={styles.header}>
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
-          style={({ pressed }) => [styles.backButton, { backgroundColor: themeColors.card }, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.backButton,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
+          ]}
           hitSlop={8}
           accessibilityLabel="Go back"
         >

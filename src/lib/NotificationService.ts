@@ -87,7 +87,7 @@ export function isQuietHoursActiveNow(silenceFrom: string, silenceUntil: string)
  */
 export function shouldDeliverNotification(
   prefs: NotificationPreferences,
-  category: NotificationCategory,
+  category: NotificationCategory | string,
   isPriority = false
 ): { deliver: boolean; reason?: string } {
   // 1. Master toggle check
@@ -95,13 +95,38 @@ export function shouldDeliverNotification(
     return { deliver: false, reason: "All notifications are muted by master switch." };
   }
 
-  // 2. Category check
-  const categoryAllowed = Boolean(prefs[category]);
+  // 2. High priority categories always deliver
+  if (
+    isPriority ||
+    category === "call" ||
+    category === "incoming_call" ||
+    category === "missed_call" ||
+    category === "friend_request" ||
+    category === "friend_accepted"
+  ) {
+    return { deliver: true };
+  }
+
+  // 3. Map category to preference key
+  let categoryKey: keyof NotificationPreferences = "chatMessages";
+  if (category === "chat" || category === "chatMessages" || category === "group_chat") {
+    categoryKey = "chatMessages";
+  } else if (category === "trip" || category === "tripUpdates") {
+    categoryKey = "tripUpdates";
+  } else if (category === "reminders") {
+    categoryKey = "reminders";
+  } else if (category === "recommendations") {
+    categoryKey = "recommendations";
+  } else if (category === "promotions") {
+    categoryKey = "promotions";
+  }
+
+  const categoryAllowed = Boolean(prefs[categoryKey]);
   if (!categoryAllowed) {
     return { deliver: false, reason: `Category '${category}' alerts are disabled in settings.` };
   }
 
-  // 3. Quiet Hours check
+  // 4. Quiet Hours check
   if (prefs.doNotDisturb && !isPriority) {
     const isQuiet = isQuietHoursActiveNow(prefs.silenceFrom, prefs.silenceUntil);
     if (isQuiet) {
@@ -122,6 +147,9 @@ export function shouldDeliverNotification(
 type InAppListener = (payload: AppNotificationPayload) => void;
 const inAppListeners = new Set<InAppListener>();
 
+let lastBannerSignature = "";
+let lastBannerTime = 0;
+
 export function subscribeInAppNotification(listener: InAppListener): () => void {
   inAppListeners.add(listener);
   return () => {
@@ -130,6 +158,14 @@ export function subscribeInAppNotification(listener: InAppListener): () => void 
 }
 
 export function triggerInAppNotificationBanner(payload: AppNotificationPayload) {
+  const signature = `${payload.title}_${payload.message}_${payload.route || ""}`;
+  const now = Date.now();
+  if (signature === lastBannerSignature && now - lastBannerTime < 3000) {
+    return; // Deduplicate rapid identical triggers
+  }
+  lastBannerSignature = signature;
+  lastBannerTime = now;
+
   inAppListeners.forEach((fn) => {
     try {
       fn(payload);

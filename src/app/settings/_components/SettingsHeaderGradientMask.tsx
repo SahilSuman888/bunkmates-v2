@@ -1,12 +1,14 @@
-import React from "react";
-import { StyleSheet, View, Platform, StyleProp, ViewStyle } from "react-native";
+import React, { useMemo } from "react";
+import { StyleSheet, View, Platform, StatusBar, StyleProp, ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export interface SettingsHeaderGradientMaskProps {
   backgroundColor?: string;
   height?: number;
   style?: StyleProp<ViewStyle>;
   zIndex?: number;
+  position?: "top" | "bottom";
 }
 
 const hexToRgba = (hex: string, alpha: number): string => {
@@ -34,33 +36,72 @@ const hexToRgba = (hex: string, alpha: number): string => {
 
 /**
  * SettingsHeaderGradientMask — Matches the exact 6-stop dissolve mask
- * used in chat messages (`chat/[friendId].tsx`).
- * 
- * Portions & Transparencies:
- * - 0% to 38% (~0px - 45px): 2% to 10% transparency (98% -> 90% solid background) — hides content under top edge and status bar
- * - 38% to 62% (~45px - 72px): 10% to 35% transparency (90% -> 65% opacity) — active dissolve begins right below header buttons
- * - 62% to 80% (~72px - 95px): 35% to 70% transparency (65% -> 30% opacity) — visible feathering / softening
- * - 80% to 92% (~95px - 110px): 70% to 92% transparency (30% -> 8% opacity) — translucent fog transition
- * - 92% to 100% (~110px - 120px): 92% to 100% transparency (8% -> transparent) — smoothly exits into crystal clear list content
+ * used in chat messages (`chat/[friendId].tsx`). Supports both "top" (header)
+ * and "bottom" (footer) dissolving with exact inverted mirror stops.
  */
 export const SettingsHeaderGradientMask: React.FC<SettingsHeaderGradientMaskProps> = React.memo(
-  ({ backgroundColor = "#000000", height = 110, style, zIndex = 15 }) => {
+  ({ backgroundColor = "#000000", height, style, zIndex = 15, position = "top" }) => {
+    let insets = { top: 0, bottom: 0 };
+    try {
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      insets = useSafeAreaInsets();
+    } catch {
+      // safe fallback if outside provider
+    }
+
+    const computedHeight = useMemo(() => {
+      if (height !== undefined && height !== null) return height;
+      if (position === "bottom") {
+        const bottomInset = insets.bottom > 0 ? insets.bottom : Platform.OS === "android" ? 16 : 24;
+        return bottomInset + 64;
+      }
+      const topInset = insets.top > 0 ? insets.top : Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 44;
+      return topInset + 64;
+    }, [height, position, insets.top, insets.bottom]);
+
+    const isBottom = position === "bottom";
+
+    if (isBottom) {
+      return (
+        <LinearGradient
+          colors={[
+            "transparent",
+            hexToRgba(backgroundColor, 0.02),
+            hexToRgba(backgroundColor, 0.16),
+            hexToRgba(backgroundColor, 0.50),
+            hexToRgba(backgroundColor, 0.90),
+            hexToRgba(backgroundColor, 0.98),
+          ]}
+          locations={[0, 0.25, 0.45, 0.62, 0.78, 1.0]}
+          pointerEvents="none"
+          style={[
+            styles.bottomMask,
+            {
+              height: computedHeight,
+              zIndex,
+            },
+            style,
+          ]}
+        />
+      );
+    }
+
     return (
       <LinearGradient
         colors={[
           hexToRgba(backgroundColor, 0.98),
           hexToRgba(backgroundColor, 0.90),
-          hexToRgba(backgroundColor, 0.65),
-          hexToRgba(backgroundColor, 0.30),
-          hexToRgba(backgroundColor, 0.08),
+          hexToRgba(backgroundColor, 0.50),
+          hexToRgba(backgroundColor, 0.16),
+          hexToRgba(backgroundColor, 0.02),
           "transparent",
         ]}
-        locations={[0, 0.38, 0.62, 0.80, 0.92, 1.0]}
+        locations={[0, 0.22, 0.38, 0.55, 0.75, 1.0]}
         pointerEvents="none"
         style={[
-          styles.mask,
+          styles.topMask,
           {
-            height,
+            height: computedHeight,
             zIndex,
           },
           style,
@@ -72,9 +113,15 @@ export const SettingsHeaderGradientMask: React.FC<SettingsHeaderGradientMaskProp
 SettingsHeaderGradientMask.displayName = "SettingsHeaderGradientMask";
 
 const styles = StyleSheet.create({
-  mask: {
+  topMask: {
     position: "absolute",
     top: 0,
+    left: 0,
+    right: 0,
+  },
+  bottomMask: {
+    position: "absolute",
+    bottom: 0,
     left: 0,
     right: 0,
   },

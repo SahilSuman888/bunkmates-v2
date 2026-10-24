@@ -625,7 +625,7 @@ export default function CreateTripSheet({
 }) {
   const insets = useSafeAreaInsets();
   const user = auth.currentUser;
-  const { currency, tripPreferences } = useAppSettings();
+  const { currency, tripPreferences, splitMethod } = useAppSettings();
 
   /* ── Stepper State (Can be switched freely by clicking upper tabs) ── */
   const [activeStep, setActiveStep] = useState(0);
@@ -663,7 +663,9 @@ export default function CreateTripSheet({
 
   // Budget & Members
   const [totalBudget, setTotalBudget] = useState("");
-  const [splitMode, setSplitMode] = useState<"equal" | "manual" | "auto">("equal");
+  const [splitMode, setSplitMode] = useState<"equal" | "manual" | "auto">(
+    splitMethod === "Custom Exact" || splitMethod === "By Percentage" ? "manual" : "equal"
+  );
   const [friendSuggestions, setFriendSuggestions] = useState<FriendProfile[]>([]);
   const [activeMembers, setActiveMembers] = useState<FriendProfile[]>([]);
   const [isCreatingTrip, setIsCreatingTrip] = useState(false);
@@ -1085,6 +1087,9 @@ export default function CreateTripSheet({
         currency: currency?.code || "USD",
         currencySymbol: currency?.symbol || "$",
         visibility: tripPreferences?.defaultVisibility || "public",
+        travelStyle: tripPreferences?.travelStyle || "Budget",
+        accommodations: tripPreferences?.accommodations || [],
+        dietary: tripPreferences?.dietary || [],
         members,
         iconURL: iconURL || DEFAULT_NATURE_IMAGE,
         createdBy: user.uid,

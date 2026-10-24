@@ -6,10 +6,10 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
-  SafeAreaView,
   StatusBar,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { WifiOff } from 'lucide-react-native';
 import { useThemeToggle } from '../../contexts/ThemeContext';
 import { getDesignTokens } from '../../theme/designSystem';
@@ -29,7 +29,7 @@ export const NetworkErrorScreen: React.FC<NetworkErrorScreenProps> = ({
   onRetry,
   isRetrying: externalRetrying,
 }) => {
-  const { isDark, themeColors, accentColor, scaleFont, background } = useThemeToggle();
+  const { isDark, themeColors, accentColor, onAccentTextColor, scaleFont, background } = useThemeToggle();
   const isAtmosphere = background.mode !== 'solid';
 
   const [internalRetrying, setInternalRetrying] = useState(false);
@@ -68,7 +68,7 @@ export const NetworkErrorScreen: React.FC<NetworkErrorScreenProps> = ({
           >
             <WifiOff
               size={36}
-              color={accentColor}
+              color={themeColors.accentText || (isDark ? "#FFFFFF" : "#11141A")}
               strokeWidth={2.2}
             />
           </View>
@@ -94,16 +94,17 @@ export const NetworkErrorScreen: React.FC<NetworkErrorScreenProps> = ({
               {
                 backgroundColor: accentColor,
                 borderRadius: 26,
-                borderWidth: 0,
+                borderWidth: themeColors.accentButtonBorder !== 'transparent' ? 1.5 : 0,
+                borderColor: themeColors.accentButtonBorder,
                 opacity: pressed ? 0.9 : 1,
                 transform: [{ scale: pressed ? 0.985 : 1 }],
               },
             ]}
           >
             {loading ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
+              <ActivityIndicator color={onAccentTextColor} size="small" />
             ) : (
-              <Text style={[styles.retryButtonText, { fontSize: scaleFont(16) }]}>{buttonText}</Text>
+              <Text style={[styles.retryButtonText, { color: onAccentTextColor, fontSize: scaleFont(16) }]}>{buttonText}</Text>
             )}
           </Pressable>
         </View>
@@ -166,7 +167,7 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     ...Platform.select({
       ios: {
-        shadowColor: '#FF5A5F',
+        shadowColor: '#000000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.25,
         shadowRadius: 8,
@@ -175,7 +176,7 @@ const styles = StyleSheet.create({
         elevation: 2,
       },
       web: {
-        boxShadow: '0 2px 8px rgba(255, 90, 95, 0.25)',
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.10)',
       },
     }),
   },

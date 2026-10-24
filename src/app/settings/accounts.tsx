@@ -1,12 +1,12 @@
 // **@** Account & Security — Exact reference UI matching ProfileSettings & ProfileEdit design system, live multi-device Firestore sync, and 100% preserved functionality
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
   ScrollView,
-  Switch,
   ActivityIndicator,
   StatusBar,
   Modal,
@@ -15,6 +15,7 @@ import {
   Platform,
   Appearance,
 } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -25,9 +26,14 @@ import { useLanguage } from "../../contexts/LanguageContext";
 import { auth, db } from "../../lib/firebase";
 import { doc, updateDoc, onSnapshot } from "firebase/firestore";
 import { deleteUser, sendPasswordResetEmail } from "firebase/auth";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SettingsActionModal } from "./_components/SettingsActionModal";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 export default function AccountAndSecurity() {
+  const insets = useSafeAreaInsets();
+  const topInset = insets.top > 0 ? insets.top : Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 44;
   const router = useRouter();
   const { user, loading: authLoading } = useUser();
   const { t } = useLanguage();
@@ -54,11 +60,14 @@ export default function AccountAndSecurity() {
   const [showTripsModal, setShowTripsModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showBackupCodes, setShowBackupCodes] = useState(false);
+  const [copiedCodes, setCopiedCodes] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
 
   // Flow modals (Image 1 & Image 2 style confirmation & success screens)
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [accountActionError, setAccountActionError] = useState<string | null>(null);
 
   // Helper for dynamic alpha tints
   const hexToRgba = (hex: string, alpha: number) => {
@@ -73,12 +82,16 @@ export default function AccountAndSecurity() {
   // **@** Dynamic theme integration matching ProfileSettings
   let themeMode: "dark" | "light" | "system" = "system";
   let dynamicAccent = "#FF5A5F";
+  let onAccentTextColor = "#FFFFFF";
+  let isWhiteAccent = false;
   let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
+      if (themeContext.onAccentTextColor) onAccentTextColor = themeContext.onAccentTextColor;
+      isWhiteAccent = themeContext.isWhiteAccent ?? (dynamicAccent.toLowerCase() === "#ffffff" || themeContext.accent === "white");
       dynamicThemeColors = themeContext.themeColors;
     }
   } catch (e) {}
@@ -92,29 +105,35 @@ export default function AccountAndSecurity() {
       bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
       card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
       cardBorder: "transparent",
-      divider: "transparent",
+      divider: dynamicThemeColors?.divider ?? (isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)"),
       textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
       textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       coral: dynamicAccent,
       coralAccent: dynamicAccent,
+      onAccent: onAccentTextColor,
+      accentText: dynamicThemeColors?.accentText ?? (isWhiteAccent ? (isDark ? "#FFFFFF" : "#11141A") : dynamicAccent),
+      accentBorder: isWhiteAccent && !isDark ? "rgba(0, 0, 0, 0.20)" : "transparent",
       coralBg: isDark ? hexToRgba(dynamicAccent, 0.16) : hexToRgba(dynamicAccent, 0.09),
       coralSquareBg: isDark ? hexToRgba(dynamicAccent, 0.14) : hexToRgba(dynamicAccent, 0.07),
       greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
       iconBoxBg: isDark ? "#222226" : "#F3F4F6", // Solid neutral container
       chevron: isDark ? "#555860" : "#B4B9C2",
       activeGreen: "#10B981",
-      switchActive: dynamicAccent,
+      switchActive: isWhiteAccent && !isDark ? "#11141A" : dynamicAccent,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
-      dangerCardBg: isDark ? "rgba(255, 90, 95, 0.08)" : "#FFF1F2",
-      dangerCardBorder: "transparent",
-      dangerIconBg: isDark ? "rgba(255, 90, 95, 0.2)" : "#FFE4E6",
-      dangerText: "#FF5A5F",
-      dangerSubtext: isDark ? "rgba(255, 120, 125, 0.85)" : "#E11D48",
+      dangerCardBg: isDark ? "rgba(239, 68, 68, 0.08)" : "rgba(239, 68, 68, 0.05)",
+      dangerCardBorder: isDark ? "rgba(239, 68, 68, 0.22)" : "rgba(239, 68, 68, 0.18)",
+      dangerIconBg: isDark ? "rgba(239, 68, 68, 0.18)" : "rgba(239, 68, 68, 0.12)",
+      dangerIconBorder: isDark ? "rgba(239, 68, 68, 0.28)" : "rgba(239, 68, 68, 0.22)",
+      dangerText: "#EF4444",
+      dangerSubtext: isDark ? "rgba(248, 113, 113, 0.78)" : "#DC2626",
+      dangerDivider: isDark ? "rgba(239, 68, 68, 0.16)" : "rgba(239, 68, 68, 0.12)",
+      dangerChevron: isDark ? "rgba(239, 68, 68, 0.65)" : "rgba(239, 68, 68, 0.85)",
       modalOverlay: "rgba(0,0,0,0.72)",
       selectedPill: isDark ? "#2A2A30" : "#E5E7EB",
     }),
-    [isDark, dynamicAccent, dynamicThemeColors]
+    [isDark, dynamicAccent, onAccentTextColor, isWhiteAccent, dynamicThemeColors]
   );
 
   // **@** Live Firestore subscription for instant synchronization
@@ -181,13 +200,13 @@ export default function AccountAndSecurity() {
       updatedAt: new Date(),
     }).catch((e) => {
       setTwoFactorEnabled(!val);
-      Alert.alert("Error", "Could not update Two-Factor Authentication state.");
+      setAccountActionError("Could not update Two-Factor Authentication state.");
     });
   };
 
   const handleChangePassword = () => {
     if (!user?.email) {
-      Alert.alert("Error", "No email associated with this account.");
+      setAccountActionError("No email associated with this account.");
       return;
     }
     setShowPasswordModal(true);
@@ -200,32 +219,63 @@ export default function AccountAndSecurity() {
 
   const handleCopyBackupCodes = async () => {
     await Clipboard.setStringAsync(backupCodes.join("\n"));
-    Alert.alert("Copied", "Backup codes copied to clipboard. Store them safely.");
+    setCopiedCodes(true);
+    setTimeout(() => setCopiedCodes(false), 2500);
+  };
+
+  const isActionDebounceRef = useRef(false);
+
+  const handleOpenLogout = () => {
+    if (isActionDebounceRef.current || showLogoutConfirm || showDeleteConfirm) return;
+    isActionDebounceRef.current = true;
+    setShowLogoutConfirm(true);
+    setTimeout(() => {
+      isActionDebounceRef.current = false;
+    }, 450);
+  };
+
+  const handleOpenDelete = () => {
+    if (isActionDebounceRef.current || showLogoutConfirm || showDeleteConfirm) return;
+    isActionDebounceRef.current = true;
+    setShowDeleteConfirm(true);
+    setTimeout(() => {
+      isActionDebounceRef.current = false;
+    }, 450);
   };
 
   const handleDeleteAccount = async () => {
-    setIsDeleting(true);
+    if (!auth.currentUser) {
+      throw new Error("No active session found. Please log in again.");
+    }
     try {
-      if (auth.currentUser) {
-        await deleteUser(auth.currentUser);
-        setShowDeleteConfirm(false);
-        router.replace("/(auth)/login" as any);
+      if (user?.uid) {
+        await AsyncStorage.removeItem(`@bunkmates_cached_profile_${user.uid}`).catch(() => {});
       }
+      await deleteUser(auth.currentUser);
+      return true;
     } catch (e: any) {
-      setIsDeleting(false);
-      Alert.alert(
-        "Re-authentication Required",
-        e?.message || "Please sign out, log back in, and try again."
-      );
+      const code = e?.code;
+      if (code === "auth/requires-recent-login") {
+        throw new Error(
+          "For security reasons, deleting your account requires recent authentication. Please sign out, log back in, and try deleting your account again."
+        );
+      }
+      throw new Error(e?.message || "Failed to delete account. Please try again later.");
     }
   };
 
   const handleLogout = async () => {
     try {
+      if (user?.uid) {
+        await AsyncStorage.removeItem(`@bunkmates_cached_profile_${user.uid}`).catch(() => {});
+      }
       await auth.signOut();
+      setShowLogoutConfirm(false);
       router.replace("/(auth)/login" as any);
-    } catch (error) {
+      return true;
+    } catch (error: any) {
       console.log("Logout error:", error);
+      throw new Error(error?.message || "Failed to log out. Please check your network connection.");
     }
   };
 
@@ -239,16 +289,27 @@ export default function AccountAndSecurity() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
 
       {/* ── Top Bar (Exact circular button matching ProfileEdit & ProfileSettings) ── */}
-      <View style={styles.header}>
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={6}
           accessibilityLabel="Go back"
@@ -266,7 +327,7 @@ export default function AccountAndSecurity() {
         <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("PASSWORD SETTINGS")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Pressable
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.row, ]}
             onPress={handleChangePassword}
           >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
@@ -285,7 +346,12 @@ export default function AccountAndSecurity() {
         {/* ── 2. TWO-FACTOR AUTHENTICATION ── */}
         <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("TWO-FACTOR AUTHENTICATION")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggle2FA(!twoFactorEnabled)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: twoFactorEnabled }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="lock-closed-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -295,23 +361,30 @@ export default function AccountAndSecurity() {
                 {t("Secure your travel plans with SMS or Authenticator")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={twoFactorEnabled}
               onValueChange={handleToggle2FA}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           <Pressable
-            style={({ pressed }) => [styles.backupCodeRow, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
             onPress={() => setShowBackupCodes(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t("Backup Security Codes")}
           >
-            <Text style={[styles.backupCodeTitle, { color: colors.textPrimary }]}>
-              {t("Backup Security Codes")}
-            </Text>
+            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+              <Ionicons name="key-outline" size={20} color={colors.greyishWhite} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Backup Security Codes")}</Text>
+              <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
+                {t("Generate 8-digit one-time emergency codes")}
+              </Text>
+            </View>
             <Feather name="chevron-right" size={20} color={colors.chevron} />
           </Pressable>
         </View>
@@ -342,7 +415,12 @@ export default function AccountAndSecurity() {
         <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("PRIVACY & PERMISSIONS")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Private Profile */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => updatePrivacy("profileVisibility", privacy.profileVisibility === "private" ? "public" : "private")}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: privacy.profileVisibility === "private" }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Feather name="lock" size={19} color={colors.greyishWhite} />
             </View>
@@ -352,13 +430,12 @@ export default function AccountAndSecurity() {
                 {privacy.profileVisibility === "private" ? t("Only friends can see your profile", "Only friends can see your profile") : t("Profile visible to everyone", "Profile visible to everyone")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={privacy.profileVisibility === "private"}
               onValueChange={(val) => updatePrivacy("profileVisibility", val ? "private" : "public")}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
@@ -399,188 +476,199 @@ export default function AccountAndSecurity() {
           </Pressable>
         </View>
 
-        {/* ── 6. ACCOUNT ACTIONS & DANGER ZONE ── */}
+        {/* ── 6. ACCOUNT ACTIONS (CONSISTENT WITH ALL SETTINGS CARDS) ── */}
         <Text style={[styles.sectionLabel, { color: colors.sectionHeader }]}>{t("ACCOUNT ACTIONS")}</Text>
+        <View style={[styles.card, { backgroundColor: colors.dangerCardBg }]}>
+          {/* Log Out */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.row,
+              pressed && {
+                backgroundColor: isDark
+                  ? "rgba(239, 68, 68, 0.14)"
+                  : "rgba(239, 68, 68, 0.08)",
+              },
+            ]}
+            onPress={handleOpenLogout}
+            accessibilityRole="button"
+            accessibilityLabel={t("Log Out")}
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.dangerIconBg }]}>
+              <Ionicons name="log-out-outline" size={20} color={colors.dangerText} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.dangerText }]}>
+                {t("Log Out", "Log Out")}
+              </Text>
+              <Text style={[styles.rowSub, { color: colors.dangerSubtext }]}>
+                {t("Sign out of active session", "Sign out of your active session on this device")}
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={colors.dangerChevron} />
+          </Pressable>
 
-        {/* Log Out */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.dangerCard,
-            { backgroundColor: isDark ? "rgba(255, 90, 95, 0.10)" : "rgba(255, 90, 95, 0.06)", borderColor: "transparent", marginBottom: 12 },
-            pressed && styles.pressed,
-          ]}
-          onPress={() => {
-            Alert.alert(
-              t("Log Out", "Log Out"),
-              t("Are you sure you want to log out of BunkMates?"),
-              [
-                { text: t("Cancel", "Cancel"), style: "cancel" },
-                {
-                  text: t("Log Out", "Log Out"),
-                  style: "destructive",
-                  onPress: handleLogout,
-                },
-              ]
-            );
-          }}
-          accessibilityRole="button"
-          accessibilityLabel={t("Log Out")}
-        >
-          <View style={[styles.dangerCircleIcon, { backgroundColor: isDark ? "rgba(255, 90, 95, 0.20)" : "rgba(255, 90, 95, 0.12)" }]}>
-            <Ionicons name="log-out-outline" size={20} color="#FF5A5F" />
-          </View>
-          <View style={styles.rowMid}>
-            <Text style={[styles.rowTitle, { color: "#FF5A5F", fontWeight: "700" }]}>
-              {t("Log Out", "Log Out")}
-            </Text>
-            <Text style={[styles.rowSub, { color: colors.textSecondary }]}>
-              {t("Sign out of your active session on this device")}
-            </Text>
-          </View>
-          <Feather name="chevron-right" size={20} color="#FF5A5F" />
-        </Pressable>
+          <View style={[styles.divider, { backgroundColor: colors.dangerDivider }]} />
 
-        <Pressable
-          style={({ pressed }) => [
-            styles.dangerCard,
-            { backgroundColor: colors.dangerCardBg, borderColor: colors.dangerCardBorder },
-            pressed && styles.pressed,
-          ]}
-          onPress={() => setShowDeleteConfirm(true)}
-        >
-          <View style={[styles.dangerCircleIcon, { backgroundColor: colors.dangerIconBg }]}>
-            <Ionicons name="trash-outline" size={20} color={colors.dangerText} />
-          </View>
-          <View style={styles.rowMid}>
-            <Text style={[styles.rowTitle, { color: colors.dangerText, fontWeight: "700" }]}>
-              {t("Delete Account", "Delete BunkMates Account")}
-            </Text>
-            <Text style={[styles.rowSub, { color: colors.dangerSubtext }]}>
-              {t("Permanently remove your account and data", "Permanently wipe all past trip logs and data")}
-            </Text>
-          </View>
-          <Feather name="chevron-right" size={20} color={colors.dangerText} />
-        </Pressable>
+          {/* Delete Account */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.row,
+              pressed && {
+                backgroundColor: isDark
+                  ? "rgba(239, 68, 68, 0.14)"
+                  : "rgba(239, 68, 68, 0.08)",
+              },
+            ]}
+            onPress={handleOpenDelete}
+            accessibilityRole="button"
+            accessibilityLabel={t("Delete Account")}
+          >
+            <View style={[styles.iconBox, { backgroundColor: colors.dangerIconBg }]}>
+              <Ionicons name="trash-outline" size={20} color={colors.dangerText} />
+            </View>
+            <View style={styles.rowMid}>
+              <Text style={[styles.rowTitle, { color: colors.dangerText }]}>
+                {t("Delete Account", "Delete BunkMates Account")}
+              </Text>
+              <Text style={[styles.rowSub, { color: colors.dangerSubtext }]}>
+                {t("Permanently remove your account and data", "Permanently wipe all past trip logs and data")}
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={20} color={colors.dangerChevron} />
+          </Pressable>
+        </View>
 
         <View style={{ height: 24 }} />
       </ScrollView>
 
-      {/* ── PRIVACY SELECTOR MODAL ── */}
-      <Modal
-        transparent
+      {/* ── PRIVACY SELECTOR SWIPEABLE DRAWER ── */}
+      <SwipeableDrawer
         visible={showGroupsModal || showTripsModal}
-        animationType="fade"
-        onRequestClose={() => { setShowGroupsModal(false); setShowTripsModal(false); }}
+        onClose={() => {
+          setShowGroupsModal(false);
+          setShowTripsModal(false);
+        }}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
       >
-        <View style={[styles.overlay, { backgroundColor: colors.modalOverlay }]}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
-              {showGroupsModal ? t("Who can add you to groups") : t("Who can add you to trips")}
-            </Text>
-            <Text style={[styles.modalMsg, { color: colors.textSecondary }]}>
-              {t("Choose who can invite you:")}
-            </Text>
+        <View style={styles.drawerInner}>
+          <Text style={[styles.drawerTitle, { color: colors.textPrimary }]}>
+            {showGroupsModal ? t("Who can add you to groups") : t("Who can add you to trips")}
+          </Text>
+          <Text style={[styles.drawerSubtitle, { color: colors.textSecondary }]}>
+            {t("Choose who can invite you:")}
+          </Text>
 
-            <View style={{ width: "100%", gap: 10, marginBottom: 20 }}>
-              {(["everyone", "friends", "nobody"] as const).map((opt) => {
-                const field = showGroupsModal ? "canBeAddedToGroups" : "canBeAddedToTrips";
-                const isSelected = privacy[field] === opt;
-                const optLabel = opt === "everyone" ? t("Everyone") : opt === "friends" ? t("Friends") : t("Nobody");
-                return (
-                  <Pressable
-                    key={opt}
-                    style={[
-                      styles.selectorItem,
-                      {
-                        backgroundColor: isSelected ? colors.selectedPill : colors.iconBoxBg,
-                        borderColor: isSelected ? colors.switchActive : colors.cardBorder,
-                      },
-                    ]}
-                    onPress={() => {
-                      updatePrivacy(field, opt);
-                      setShowGroupsModal(false);
-                      setShowTripsModal(false);
-                    }}
-                  >
-                    <Text style={[styles.selectorText, { color: colors.textPrimary }]}>
-                      {optLabel}
-                    </Text>
-                    {isSelected && <Feather name="check" size={18} color={colors.switchActive} />}
-                  </Pressable>
-                );
-              })}
-            </View>
+          <View style={{ width: "100%", gap: 8, marginTop: 14, marginBottom: 16 }}>
+            {(["everyone", "friends", "nobody"] as const).map((opt) => {
+              const field = showGroupsModal ? "canBeAddedToGroups" : "canBeAddedToTrips";
+              const isSelected = privacy[field] === opt;
+              const optLabel = opt === "everyone" ? t("Everyone") : opt === "friends" ? t("Friends") : t("Nobody");
+              return (
+                <Pressable
+                  key={opt}
+                  style={[
+                    styles.selectorItem,
+                    {
+                      backgroundColor: isSelected ? colors.selectedPill : colors.iconBoxBg,
+                      borderColor: isSelected ? colors.switchActive : "transparent",
+                    },
+                  ]}
+                  onPress={() => {
+                    updatePrivacy(field, opt);
+                    setShowGroupsModal(false);
+                    setShowTripsModal(false);
+                  }}
+                >
+                  <Text style={[styles.selectorText, { color: colors.textPrimary }]}>
+                    {optLabel}
+                  </Text>
+                  {isSelected && <Feather name="check" size={18} color={colors.switchActive} />}
+                </Pressable>
+              );
+            })}
+          </View>
 
+          <Pressable
+            style={[styles.modalSecBtn, { borderColor: colors.cardBorder, width: "100%", height: 46 }]}
+            onPress={() => {
+              setShowGroupsModal(false);
+              setShowTripsModal(false);
+            }}
+          >
+            <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Done")}</Text>
+          </Pressable>
+        </View>
+      </SwipeableDrawer>
+
+      {/* ── BACKUP CODES SWIPEABLE DRAWER ── */}
+      <SwipeableDrawer
+        visible={showBackupCodes}
+        onClose={() => setShowBackupCodes(false)}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
+      >
+        <View style={styles.drawerInner}>
+          <View style={[styles.modalIcon, { backgroundColor: colors.iconBoxBg, alignSelf: "center", marginBottom: 10 }]}>
+            <Ionicons name="key-outline" size={28} color={colors.greyishWhite} />
+          </View>
+          <Text style={[styles.drawerTitle, { color: colors.textPrimary, textAlign: "center" }]}>{t("Backup Codes")}</Text>
+          <Text style={[styles.drawerSubtitle, { color: colors.textSecondary, textAlign: "center", marginBottom: 14 }]}>
+            {t("Store these single-use recovery codes in a safe place. Each code can only be used once.")}
+          </Text>
+
+          <View style={[styles.codesGrid, { backgroundColor: colors.iconBoxBg, borderColor: colors.cardBorder }]}>
+            {backupCodes.map((code, idx) => (
+              <Text key={idx} style={[styles.codeItem, { color: colors.textPrimary, borderColor: colors.cardBorder }]}>
+                {code}
+              </Text>
+            ))}
+          </View>
+
+          <View style={[styles.modalBtnRow, { marginTop: 16 }]}>
+            <Pressable style={[styles.modalSecBtn, { borderColor: colors.cardBorder }]} onPress={() => setShowBackupCodes(false)}>
+              <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
+            </Pressable>
             <Pressable
-              style={[styles.modalSecBtn, { borderColor: colors.cardBorder, flex: 0, width: "100%", height: 46 }]}
-              onPress={() => { setShowGroupsModal(false); setShowTripsModal(false); }}
+              style={[
+                styles.modalPrimBtn,
+                {
+                  backgroundColor: copiedCodes ? "#10B981" : colors.coral,
+                  borderWidth: !copiedCodes && colors.accentBorder !== "transparent" ? 1 : 0,
+                  borderColor: colors.accentBorder,
+                },
+              ]}
+              onPress={handleCopyBackupCodes}
             >
-              <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Done")}</Text>
+              {copiedCodes ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+                  <Text style={[styles.modalPrimBtnText, { color: "#FFFFFF" }]}>{t("Copied!")}</Text>
+                </View>
+              ) : (
+                <Text style={[styles.modalPrimBtnText, { color: colors.onAccent }]}>{t("Copy All")}</Text>
+              )}
             </Pressable>
           </View>
         </View>
-      </Modal>
-
-      {/* ── BACKUP CODES MODAL ── */}
-      <Modal transparent visible={showBackupCodes} animationType="fade" onRequestClose={() => setShowBackupCodes(false)}>
-        <View style={[styles.overlay, { backgroundColor: colors.modalOverlay }]}>
-          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={[styles.modalIcon, { backgroundColor: colors.iconBoxBg }]}>
-              <Ionicons name="key-outline" size={28} color={colors.greyishWhite} />
-            </View>
-            <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Backup Codes")}</Text>
-            <Text style={[styles.modalMsg, { color: colors.textSecondary }]}>
-              {t("Store these single-use recovery codes in a safe place. Each code can only be used once.")}
-            </Text>
-
-            <View style={[styles.codesGrid, { backgroundColor: colors.iconBoxBg, borderColor: colors.cardBorder }]}>
-              {backupCodes.map((code, idx) => (
-                <Text key={idx} style={[styles.codeItem, { color: colors.textPrimary, borderColor: colors.cardBorder }]}>
-                  {code}
-                </Text>
-              ))}
-            </View>
-
-            <View style={styles.modalBtnRow}>
-              <Pressable style={[styles.modalSecBtn, { borderColor: colors.cardBorder }]} onPress={() => setShowBackupCodes(false)}>
-                <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>{t("Close")}</Text>
-              </Pressable>
-              <Pressable style={[styles.modalPrimBtn, { backgroundColor: colors.coral }]} onPress={handleCopyBackupCodes}>
-                <Text style={styles.modalPrimBtnText}>{t("Copy All")}</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      </SwipeableDrawer>
 
       {/* ── 1. DELETE ACCOUNT CONFIRMATION & SUCCESS FLOW (Matching Image 1 & 2) ── */}
       <SettingsActionModal
         visible={showDeleteConfirm}
         onClose={() => setShowDeleteConfirm(false)}
-        iconType="warning"
-        title={t("Delete Account")}
+        iconType="trash"
+        title={t("Delete account?", "Delete account?")}
         message={t(
-          "Are you sure? This action is permanent. All your trip history, saved bunks, and peer ratings will be lost forever."
+          "Are you sure? This action is permanent and cannot be undone. All your trip history, profile details, saved bunks, and chats will be permanently deleted."
         )}
-        confirmLabel={t("Delete Account")}
-        cancelLabel={t("Cancel")}
-        confirmColor={colors.coral}
-        onConfirm={async () => {
-          if (!auth.currentUser) return false;
-          try {
-            await deleteUser(auth.currentUser);
-            return true;
-          } catch (e: any) {
-            Alert.alert(
-              "Re-authentication Required",
-              e?.message || "Please sign out, log back in, and try again."
-            );
-            return false;
-          }
-        }}
+        confirmLabel={t("Delete account", "Delete account")}
+        cancelLabel={t("Cancel", "Cancel")}
+        confirmColor="#EF4444"
+        onConfirm={handleDeleteAccount}
         successTitle={t("Account Deleted")}
         successMessage={t(
-          "We are sad to see you go! Your BunkMates profile and all associated data have been permanently erased. Safe travels on your future journeys."
+          "Your BunkMates profile and all associated data have been permanently erased. Safe travels on your future journeys."
         )}
         successButtonLabel={t("Done")}
         onDone={() => {
@@ -603,7 +691,10 @@ export default function AccountAndSecurity() {
         confirmColor={colors.coral}
         onConfirm={async () => {
           if (!user?.email) {
-            Alert.alert("Error", "No email associated with this account.");
+            setShowPasswordModal(false);
+            setTimeout(() => {
+              setAccountActionError("No email associated with this account.");
+            }, 250);
             return false;
           }
           try {
@@ -618,7 +709,11 @@ export default function AccountAndSecurity() {
             }
             return true;
           } catch (err: any) {
-            Alert.alert("Error", err.message || "Failed to send reset email.");
+            setShowPasswordModal(false);
+            const errMsg = err.message || "Failed to send reset email.";
+            setTimeout(() => {
+              setAccountActionError(errMsg);
+            }, 250);
             return false;
           }
         }}
@@ -631,6 +726,64 @@ export default function AccountAndSecurity() {
           setShowPasswordModal(false);
         }}
       />
+
+      {/* ── 3. LOGOUT CONFIRMATION MODAL (SWIPEABLE DRAWER) ── */}
+      <SettingsActionModal
+        visible={showLogoutConfirm}
+        onClose={() => setShowLogoutConfirm(false)}
+        iconType="logout"
+        title={t("Log out?", "Log out?")}
+        message={t("Are you sure you want to log out of BunkMates? You will need to sign back in to access your trips and messages.")}
+        confirmLabel={t("Log out", "Log out")}
+        cancelLabel={t("Cancel", "Cancel")}
+        confirmColor="#EF4444"
+        showSuccessStep={false}
+        onConfirm={handleLogout}
+      />
+
+      {/* ── 4. ERROR FEEDBACK DRAWER ── */}
+      <SwipeableDrawer
+        visible={accountActionError !== null}
+        onClose={() => setAccountActionError(null)}
+        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
+      >
+        <View
+          style={[
+            styles.dangerCircleIcon,
+            {
+              backgroundColor: isDark ? "rgba(239, 68, 68, 0.16)" : "#FEECEC",
+              width: 50,
+              height: 50,
+              borderRadius: 25,
+              marginBottom: 12,
+              alignItems: "center",
+              justifyContent: "center",
+            },
+          ]}
+        >
+          <Ionicons name="alert-circle-outline" size={26} color="#FF5A4F" />
+        </View>
+
+        <Text style={[styles.drawerTitle, { color: colors.textPrimary, textAlign: "center" }]}>
+          Notice
+        </Text>
+        <Text style={[styles.drawerSubtitle, { color: colors.textSecondary, textAlign: "center", marginBottom: 16 }]}>
+          {accountActionError}
+        </Text>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.modalSecBtn,
+            { backgroundColor: colors.selectedPill, width: "100%", height: 46, borderRadius: 24 },
+            pressed && styles.pressed,
+          ]}
+          onPress={() => setAccountActionError(null)}
+        >
+          <Text style={[styles.modalSecBtnText, { color: colors.textPrimary, fontWeight: "700" }]}>
+            Understood
+          </Text>
+        </Pressable>
+      </SwipeableDrawer>
 
     </SafeAreaView>
   );
@@ -712,27 +865,31 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 14,
     paddingHorizontal: 16,
+    minHeight: 64,
   },
   coralSquareIconBox: {
     width: 44,
     height: 44,
-    borderRadius: 14,
+    borderRadius: 22,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 14,
   },
   iconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 14,
   },
-  rowMid: { flex: 1, marginRight: 10 },
+  rowMid: { flex: 1, marginRight: 10, justifyContent: "center" },
   rowTitle: { fontSize: 15, fontWeight: "600", letterSpacing: -0.2 },
   rowSub: { fontSize: 12.5, marginTop: 2, lineHeight: 17 },
-  divider: { height: 0, marginHorizontal: 16 },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
+  },
 
   // Backup codes row inside 2FA card
   backupCodeRow: {
@@ -841,17 +998,9 @@ const styles = StyleSheet.create({
 
   // DANGER ZONE card
   dangerCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: 28,
-    borderWidth: 0,
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 5,
-    elevation: 0,
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: "hidden",
   },
   dangerCircleIcon: {
     width: 44,
@@ -996,5 +1145,25 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 0,
     letterSpacing: 0.5,
+  },
+  drawerSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 8,
+  },
+  drawerInner: {
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+    paddingTop: 8,
+  },
+  drawerTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+  },
+  drawerSubtitle: {
+    fontSize: 13,
+    marginTop: 4,
+    lineHeight: 18,
   },
 });

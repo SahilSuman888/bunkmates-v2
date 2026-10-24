@@ -7,8 +7,7 @@ import {
   Pressable,
   ScrollView,
   Platform,
-  Switch,
-  Modal,
+    Modal,
   StatusBar,
   Appearance,
   Animated,
@@ -16,7 +15,10 @@ import {
   FlatList,
   Alert,
 } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
@@ -28,6 +30,7 @@ import { useLanguage } from "../../contexts/LanguageContext";
 import { useAppSettings } from "../../contexts/AppSettingsContext";
 import { ACCENT_COLORS } from "../../theme/theme";
 import { SwipeableDrawer } from "./_components/SwipeableDrawer";
+import { SettingsActionModal } from "./_components/SettingsActionModal";
 import { INDIAN_LANGUAGES, IndianLanguageOption } from "../../contexts/indianLanguagesData";
 
 export type LanguageOption = IndianLanguageOption;
@@ -157,6 +160,7 @@ export default function LanguageRegionSettings() {
   // Modals state
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
   const [regionModalVisible, setRegionModalVisible] = useState(false);
+  const [regionToApply, setRegionToApply] = useState<RegionOption | null>(null);
   const [dateFormatModalVisible, setDateFormatModalVisible] = useState(false);
   const [firstDayModalVisible, setFirstDayModalVisible] = useState(false);
 
@@ -229,7 +233,7 @@ export default function LanguageRegionSettings() {
       bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
       card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
       cardBorder: "transparent",
-      divider: "transparent",
+      divider: dynamicThemeColors?.divider ?? (isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)"),
       textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
       textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
@@ -353,42 +357,8 @@ export default function LanguageRegionSettings() {
   const handleSelectRegion = (reg: RegionOption) => {
     setRegion(reg.name);
     setRegionCode(reg.code);
-
-    // Dynamic Regional auto-preset suggestion:
-    // When changing region, offer to also match typical date format and week start
-    Alert.alert(
-      `Set Regional Formats for ${reg.name}?`,
-      `Would you like to automatically update your date format (${reg.defaultDateFormat}), 24-hour time (${reg.default24Hour ? "On" : "Off"}), and first day of week (${reg.defaultFirstDay}) to match ${reg.name}?`,
-      [
-        {
-          text: "Keep Current Formats",
-          style: "cancel",
-          onPress: () => {
-            savePreferences({ region: reg.name, regionCode: reg.code });
-            triggerToast(`Region set to ${reg.name}`);
-          },
-        },
-        {
-          text: "Apply Regional Defaults",
-          style: "default",
-          onPress: () => {
-            setDateFormat(reg.defaultDateFormat);
-            setTimeFormat24(reg.default24Hour);
-            setFirstDayOfWeek(reg.defaultFirstDay);
-            savePreferences({
-              region: reg.name,
-              regionCode: reg.code,
-              dateFormat: reg.defaultDateFormat,
-              timeFormat24: reg.default24Hour,
-              firstDayOfWeek: reg.defaultFirstDay,
-            });
-            triggerToast(`Region & formats updated for ${reg.name}`);
-          },
-        },
-      ]
-    );
-
     setRegionModalVisible(false);
+    setRegionToApply(reg);
   };
 
   const handleSelectDateFormat = (df: DateFormatOption) => {
@@ -482,7 +452,13 @@ export default function LanguageRegionSettings() {
       )}
 
       {/* Header with Circular Back Button */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
@@ -597,6 +573,8 @@ export default function LanguageRegionSettings() {
             </View>
           </Pressable>
 
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+
           {/* Region (Fixed to India Default - Right arrow removed) */}
           <View style={styles.rowItem}>
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
@@ -639,8 +617,15 @@ export default function LanguageRegionSettings() {
             </View>
           </Pressable>
 
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+
           {/* Time Format (24-Hour) */}
-          <View style={styles.rowItem}>
+          <Pressable
+            style={({ pressed }) => [styles.rowItem, pressed && { opacity: 0.7 }]}
+            onPress={() => handleTimeFormatToggle(!timeFormat24)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: timeFormat24 }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="time-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -653,14 +638,15 @@ export default function LanguageRegionSettings() {
                   {t("time_format_desc", "Use 24-hour clock instead of 12-hour")}
                 </Text>
               </View>
-              <Switch
+              <BunkmatesAnimatedSwitch
                 value={timeFormat24}
                 onValueChange={handleTimeFormatToggle}
-                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-                thumbColor="#FFFFFF"
+                pointerEvents="none"
               />
             </View>
-          </View>
+          </Pressable>
+
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* First Day of Week */}
           <Pressable
@@ -694,7 +680,8 @@ export default function LanguageRegionSettings() {
         visible={languageModalVisible}
         onClose={() => setLanguageModalVisible(false)}
         showHandle={true}
-        enableSheetDrag={false}
+        enableSheetDrag={true}
+        avoidKeyboard
         sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
         <View style={styles.sheetHeader}>
@@ -732,6 +719,7 @@ export default function LanguageRegionSettings() {
           keyExtractor={(item) => item.code}
           showsVerticalScrollIndicator={false}
           style={{ maxHeight: 380 }}
+          contentContainerStyle={{ paddingBottom: 24 }}
           renderItem={({ item }) => {
             const isSelected = languageCode === item.code || language === item.name;
             return (
@@ -768,7 +756,8 @@ export default function LanguageRegionSettings() {
         visible={regionModalVisible}
         onClose={() => setRegionModalVisible(false)}
         showHandle={true}
-        enableSheetDrag={false}
+        enableSheetDrag={true}
+        avoidKeyboard
         sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
         <View style={styles.sheetHeader}>
@@ -806,6 +795,7 @@ export default function LanguageRegionSettings() {
           keyExtractor={(item) => item.code}
           showsVerticalScrollIndicator={false}
           style={{ maxHeight: 380 }}
+          contentContainerStyle={{ paddingBottom: 24 }}
           renderItem={({ item }) => {
             const isSelected = region === item.name;
             return (
@@ -842,7 +832,7 @@ export default function LanguageRegionSettings() {
         visible={dateFormatModalVisible}
         onClose={() => setDateFormatModalVisible(false)}
         showHandle={true}
-        enableSheetDrag={false}
+        enableSheetDrag={true}
         sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
         <View style={styles.sheetHeader}>
@@ -857,7 +847,7 @@ export default function LanguageRegionSettings() {
           </Pressable>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
           {DATE_FORMATS.map((item) => {
             const isSelected = dateFormat === item.format;
             const liveSample = formatDynamicDate(item.format, currentClock);
@@ -898,7 +888,7 @@ export default function LanguageRegionSettings() {
         visible={firstDayModalVisible}
         onClose={() => setFirstDayModalVisible(false)}
         showHandle={true}
-        enableSheetDrag={false}
+        enableSheetDrag={true}
         sheetStyle={[styles.bottomSheet, { backgroundColor: colors.card }]}
       >
         <View style={styles.sheetHeader}>
@@ -913,7 +903,7 @@ export default function LanguageRegionSettings() {
           </Pressable>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
           {FIRST_DAY_OPTIONS.map((item) => {
             const isSelected = firstDayOfWeek === item.day;
             return (
@@ -971,6 +961,40 @@ export default function LanguageRegionSettings() {
           })}
         </ScrollView>
       </SwipeableDrawer>
+
+      {/* ── Regional Formats Suggestion Drawer ── */}
+      <SettingsActionModal
+        visible={!!regionToApply}
+        onClose={() => {
+          if (regionToApply) {
+            savePreferences({ region: regionToApply.name, regionCode: regionToApply.code });
+            triggerToast(`Region set to ${regionToApply.name}`);
+          }
+          setRegionToApply(null);
+        }}
+        iconType="warning"
+        title={`Set Formats for ${regionToApply?.name}?`}
+        message={`Would you like to automatically update your date format (${regionToApply?.defaultDateFormat}), 24-hour time (${regionToApply?.default24Hour ? "On" : "Off"}), and first day of week (${regionToApply?.defaultFirstDay}) to match ${regionToApply?.name}?`}
+        confirmLabel="Apply Regional Defaults"
+        cancelLabel="Keep Current Formats"
+        confirmColor={colors.switchActive}
+        showSuccessStep={false}
+        onConfirm={() => {
+          if (!regionToApply) return;
+          setDateFormat(regionToApply.defaultDateFormat);
+          setTimeFormat24(regionToApply.default24Hour);
+          setFirstDayOfWeek(regionToApply.defaultFirstDay);
+          savePreferences({
+            region: regionToApply.name,
+            regionCode: regionToApply.code,
+            dateFormat: regionToApply.defaultDateFormat,
+            timeFormat24: regionToApply.default24Hour,
+            firstDayOfWeek: regionToApply.defaultFirstDay,
+          });
+          triggerToast(`Region & formats updated for ${regionToApply.name}`);
+          setRegionToApply(null);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -1084,6 +1108,10 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     overflow: "hidden",
     marginBottom: 24,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
   },
   rowItem: {
     flexDirection: "row",

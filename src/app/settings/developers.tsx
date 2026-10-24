@@ -13,6 +13,8 @@ import {
   Appearance,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { Ionicons, MaterialCommunityIcons, Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -21,8 +23,11 @@ import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { db } from "../../lib/firebase";
 import { collection, getDocs, doc, getDoc } from "firebase/firestore";
+import { SettingsActionModal } from "./_components/SettingsActionModal";
 
 export default function DeveloperToolsScreen() {
+  const insets = useSafeAreaInsets();
+  const topInset = insets.top > 0 ? insets.top : Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 44;
   const router = useRouter();
   const { t: tr } = useLanguage();
 
@@ -48,6 +53,7 @@ export default function DeveloperToolsScreen() {
       accent: "#00e6b0",
       accentBg: "rgba(0, 230, 176, 0.12)",
       headerBtnBg: isDark ? "#1E1E24" : "#E5E7EB",
+      divider: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
     }),
     [isDark]
   );
@@ -56,6 +62,8 @@ export default function DeveloperToolsScreen() {
   const [isDevActive, setIsDevActive] = useState<boolean | null>(null);
   const [enteredPasskey, setEnteredPasskey] = useState("");
   const [verifyingPasskey, setVerifyingPasskey] = useState(false);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  const [showDisableConfirm, setShowDisableConfirm] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -69,12 +77,13 @@ export default function DeveloperToolsScreen() {
 
   const handleVerifyPasskey = async () => {
     if (!enteredPasskey.trim()) {
-      Alert.alert("Required", "Please enter the developer passkey.");
+      setPasskeyError("Please enter the developer passkey.");
       return;
     }
 
     try {
       setVerifyingPasskey(true);
+      setPasskeyError(null);
       const keyDoc = await getDoc(doc(db, "secret", "devkey"));
       const validKey = keyDoc.exists() ? keyDoc.data().key : null;
 
@@ -85,40 +94,19 @@ export default function DeveloperToolsScreen() {
         try {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (e) {}
-        Alert.alert("Developer Mode", "🧑‍💻 Developer Mode Unlocked!");
       } else {
-        Alert.alert("Invalid Developer Key", "The developer key is incorrect.");
+        setPasskeyError("The developer key is incorrect.");
       }
     } catch (error) {
       console.error("Error verifying developer key:", error);
-      Alert.alert("Error", "Could not verify the developer key. Try again later.");
+      setPasskeyError("Could not verify the developer key. Try again later.");
     } finally {
       setVerifyingPasskey(false);
     }
   };
 
-  const handleDisableDevMode = async () => {
-    Alert.alert(
-      "Disable Developer Mode",
-      "Are you sure you want to turn off Developer Mode? You can reactivate it anytime by tapping Version in About BunkMates or Settings.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Turn Off",
-          style: "destructive",
-          onPress: async () => {
-            await AsyncStorage.removeItem("isDeveloper");
-            setIsDevActive(false);
-            try {
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            } catch (e) {}
-            Alert.alert("Developer Mode Disabled", "Developer options have been hidden.");
-            if (router.canGoBack()) router.back();
-            else router.replace("/settings" as any);
-          },
-        },
-      ]
-    );
+  const handleDisableDevMode = () => {
+    setShowDisableConfirm(true);
   };
 
   const developerFeatures = [
@@ -260,8 +248,13 @@ export default function DeveloperToolsScreen() {
               }}
               style={({ pressed }) => [
                 styles.modernHeaderBtn,
-                { backgroundColor: colors.card, borderColor: colors.cardBorder },
-                pressed && styles.pressed,
+                {
+                  backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+                },
               ]}
               hitSlop={6}
             >
@@ -306,10 +299,16 @@ export default function DeveloperToolsScreen() {
                 {
                   backgroundColor: isDark ? "#090909" : "#F1F5F9",
                   color: colors.textPrimary,
-                  borderColor: colors.cardBorder,
+                  borderColor: passkeyError ? "#EF4444" : colors.cardBorder,
                 },
               ]}
             />
+
+            {passkeyError ? (
+              <Text style={{ color: "#EF4444", fontSize: 13, textAlign: "center", marginBottom: 12, fontWeight: "500" }}>
+                {passkeyError}
+              </Text>
+            ) : null}
 
             <Pressable
               onPress={handleVerifyPasskey}
@@ -360,10 +359,15 @@ export default function DeveloperToolsScreen() {
               else router.replace("/settings" as any);
             }}
             style={({ pressed }) => [
-              styles.modernHeaderBtn,
-              { backgroundColor: colors.card, borderColor: colors.cardBorder },
-              pressed && styles.pressed,
-            ]}
+                styles.modernHeaderBtn,
+                {
+                  backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+                },
+              ]}
             accessibilityLabel="Go back"
             hitSlop={6}
           >
@@ -403,26 +407,30 @@ export default function DeveloperToolsScreen() {
         <View style={[styles.developerFeatureCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Text style={styles.developerSectionTitle}>Testing Features</Text>
 
-          {developerFeatures.map((feature) => (
-            <Pressable
-              key={feature.id}
-              onPress={() => handleDeveloperFeature(feature.id, feature.route)}
-              style={({ pressed }) => [
-                styles.developerFeatureItem,
-                pressed && styles.developerFeaturePressed,
-              ]}
-            >
-              <View style={styles.developerFeatureText}>
-                <Text style={[styles.developerFeatureTitle, { color: colors.textPrimary }]}>
-                  {feature.label}
-                </Text>
-                <Text style={[styles.developerFeatureDescription, { color: colors.textSecondary }]}>
-                  {feature.description}
-                </Text>
-              </View>
+          {developerFeatures.map((feature, idx) => (
+            <React.Fragment key={feature.id}>
+              <Pressable
+                onPress={() => handleDeveloperFeature(feature.id, feature.route)}
+                style={({ pressed }) => [
+                  styles.developerFeatureItem,
+                  pressed && styles.developerFeaturePressed,
+                ]}
+              >
+                <View style={styles.developerFeatureText}>
+                  <Text style={[styles.developerFeatureTitle, { color: colors.textPrimary }]}>
+                    {feature.label}
+                  </Text>
+                  <Text style={[styles.developerFeatureDescription, { color: colors.textSecondary }]}>
+                    {feature.description}
+                  </Text>
+                </View>
 
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </Pressable>
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </Pressable>
+              {idx < developerFeatures.length - 1 && (
+                <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+              )}
+            </React.Fragment>
           ))}
         </View>
 
@@ -430,26 +438,30 @@ export default function DeveloperToolsScreen() {
         <View style={[styles.developerFeatureCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <Text style={styles.developerSectionTitle}>Other Developer Routes</Text>
 
-          {otherDeveloperRoutes.map((route) => (
-            <Pressable
-              key={route.id}
-              onPress={() => handleDeveloperFeature(route.id, route.route)}
-              style={({ pressed }) => [
-                styles.developerFeatureItem,
-                pressed && styles.developerFeaturePressed,
-              ]}
-            >
-              <View style={styles.developerFeatureText}>
-                <Text style={[styles.developerFeatureTitle, { color: colors.textPrimary }]}>
-                  {route.label}
-                </Text>
-                <Text style={[styles.developerFeatureDescription, { color: colors.textSecondary }]}>
-                  {route.description}
-                </Text>
-              </View>
+          {otherDeveloperRoutes.map((route, idx) => (
+            <React.Fragment key={route.id}>
+              <Pressable
+                onPress={() => handleDeveloperFeature(route.id, route.route)}
+                style={({ pressed }) => [
+                  styles.developerFeatureItem,
+                  pressed && styles.developerFeaturePressed,
+                ]}
+              >
+                <View style={styles.developerFeatureText}>
+                  <Text style={[styles.developerFeatureTitle, { color: colors.textPrimary }]}>
+                    {route.label}
+                  </Text>
+                  <Text style={[styles.developerFeatureDescription, { color: colors.textSecondary }]}>
+                    {route.description}
+                  </Text>
+                </View>
 
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </Pressable>
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </Pressable>
+              {idx < otherDeveloperRoutes.length - 1 && (
+                <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+              )}
+            </React.Fragment>
           ))}
         </View>
 
@@ -458,6 +470,29 @@ export default function DeveloperToolsScreen() {
           Developer Utilities © {new Date().getFullYear()} BunkMates Labs
         </Text>
       </ScrollView>
+
+      {/* Disable Developer Mode Confirmation Drawer */}
+      <SettingsActionModal
+        visible={showDisableConfirm}
+        onClose={() => setShowDisableConfirm(false)}
+        iconType="warning"
+        title="Disable Developer Mode"
+        message="Are you sure you want to turn off Developer Mode? You can reactivate it anytime by tapping Version in About BunkMates or Settings."
+        confirmLabel="Turn Off"
+        cancelLabel="Cancel"
+        confirmColor="#EF4444"
+        showSuccessStep={false}
+        onConfirm={async () => {
+          await AsyncStorage.removeItem("isDeveloper");
+          setIsDevActive(false);
+          setShowDisableConfirm(false);
+          try {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          } catch (e) {}
+          if (router.canGoBack()) router.back();
+          else router.replace("/settings" as any);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -536,7 +571,7 @@ function DevToolSandboxView({
 
   const handleAddNote = () => {
     if (!newNoteTitle.trim()) {
-      Alert.alert("Required", "Please enter a note title.");
+      showToast("Please enter a note title.");
       return;
     }
     const item = {
@@ -566,7 +601,7 @@ function DevToolSandboxView({
       showToast(`Fetched ${list.length} docs from "${selectedCol}"`);
     } catch (e: any) {
       console.log("Firestore query error:", e);
-      Alert.alert("Query Error", e.message || "Failed to query Firestore");
+      showToast(e.message || "Failed to query Firestore");
     } finally {
       setFetchingCol(false);
     }
@@ -607,8 +642,13 @@ function DevToolSandboxView({
           onPress={onBack}
           style={({ pressed }) => [
             styles.developerBackButton,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={6}
         >
@@ -857,7 +897,7 @@ function DevToolSandboxView({
 
               <Pressable
                 onPress={() => {
-                  Alert.alert("OTP Verified", "✅ Successfully authenticated via Phone OTP!");
+                  showToast("✅ Successfully authenticated via Phone OTP!");
                   try {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                   } catch (e) {}
@@ -1209,7 +1249,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 6,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 10,
   },
   developerFeaturePressed: {
     backgroundColor: "rgba(0,230,176,0.06)",

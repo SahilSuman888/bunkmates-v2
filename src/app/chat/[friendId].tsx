@@ -20,6 +20,7 @@ import {
   PanResponder,
   useWindowDimensions,
   ScrollView,
+  Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -28,6 +29,7 @@ import { Image as ExpoImage } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useChatSettings, wallpaperList, DEFAULT_WALLPAPER_ASSET, getWallpaperSource } from "../../contexts/ChatSettingsContext";
+import LinkPreviewCard from "../../components/chat/LinkPreviewCard";
 import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useCall } from "../../contexts/CallContext";
 import { compressAndResizeImage } from "../../lib/imageCompressor";
@@ -36,6 +38,7 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
+import { saveImageToGallery, autoSaveIncomingMedia, shareOrExportImage } from "../../lib/chatMediaService";
 import {
   collection,
   addDoc,
@@ -260,6 +263,7 @@ export default function ChatRoom() {
     linkPreviews,
     disappearingTimer,
     clearedAt,
+    deletedAt,
   } = useChatSettings();
 
   const chatBaseFontSize = typeof fontSize === "number" && fontSize > 0 ? fontSize : 14.5;
@@ -280,12 +284,18 @@ export default function ChatRoom() {
   );
   const [replyTo, setReplyTo] = useState<any>(null);
   const [uploading, setUploading] = useState(false);
+  const [manuallyLoadedImages, setManuallyLoadedImages] = useState<Record<string, boolean>>({});
   const typingTimeoutRef = useRef<any>(null);
 
   const readReceiptsRef = useRef(readReceipts);
   useEffect(() => {
     readReceiptsRef.current = readReceipts;
   }, [readReceipts]);
+
+  const saveToGalleryRef = useRef(saveToGallery);
+  useEffect(() => {
+    saveToGalleryRef.current = saveToGallery;
+  }, [saveToGallery]);
 
   const getDisappearingExpiresAt = () => {
     const nowMs = Date.now();
@@ -310,10 +320,12 @@ export default function ChatRoom() {
 
   const filteredMessages = React.useMemo(() => {
     const clearedMs = clearedAt ? new Date(clearedAt).getTime() : 0;
+    const deletedMs = deletedAt ? new Date(deletedAt).getTime() : 0;
+    const cutoffMs = Math.max(clearedMs, deletedMs);
     const nowMs = Date.now();
     return messages.filter((msg) => {
       const msgMs = getMsgTimeMs(msg.timestamp);
-      if (clearedMs > 0 && msgMs > 0 && msgMs < clearedMs) {
+      if (cutoffMs > 0 && msgMs > 0 && msgMs <= cutoffMs) {
         return false;
       }
       if (msg.expiresAt && typeof msg.expiresAt === "number" && msg.expiresAt < nowMs) {
@@ -321,7 +333,7 @@ export default function ChatRoom() {
       }
       return true;
     });
-  }, [messages, clearedAt]);
+  }, [messages, clearedAt, deletedAt]);
 
   // Real-time friend typing listener
   const [isFriendTyping, setIsFriendTyping] = useState(false);
@@ -346,12 +358,35 @@ export default function ChatRoom() {
     return () => unsub();
   }, [chatId, friendId]);
 
-  // Real-time typing broadcaster with auto-reset debounce
+  // Guaranteed cleanup of typing status on unmount / screen exit
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (chatId && user) {
+        setDoc(
+          doc(db, "chats", chatId, "typing", user.uid),
+          { isTyping: false, updatedAt: Date.now() },
+          { merge: true }
+        ).catch(() => {});
+      }
+    };
+  }, [chatId, user?.uid]);
+
+  // Real-time typing broadcaster with auto-reset debounce and clear detection
   const handleInputChange = (text: string) => {
     setInput(text);
     if (!typingIndicator || !chatId || !user) return;
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    if (!text.trim()) {
+      setDoc(
+        doc(db, "chats", chatId, "typing", user.uid),
+        { isTyping: false, updatedAt: Date.now() },
+        { merge: true }
+      ).catch(() => {});
+      return;
+    }
 
     setDoc(
       doc(db, "chats", chatId, "typing", user.uid),
@@ -597,6 +632,15 @@ export default function ChatRoom() {
             }
           });
         }
+
+        // Auto-save incoming photos to device gallery if saveToGallery is enabled
+        if (saveToGalleryRef.current) {
+          msgs.forEach((msg) => {
+            if (msg.senderId !== user?.uid && msg.imageUrl && !msg.deleted) {
+              autoSaveIncomingMedia(msg.imageUrl, msg.id, true).catch(() => {});
+            }
+          });
+        }
       },
       (err) => {
         console.log("[Chat] Messages offline fallback:", err.message);
@@ -825,29 +869,26 @@ export default function ChatRoom() {
     }
   };
 
-  // WhatsApp-style Image Download (Handles both HTTP URLs & Base64 Data URIs)
+  // Image Save & Export (Saves directly to public gallery if permitted; otherwise opens share sheet)
   const handleDownloadImage = async (url: string) => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      const filename = `bunkmates_${Date.now()}.jpg`;
-      const localUri = `${FileSystem.documentDirectory}${filename}`;
-
-      if (url.startsWith("data:image/")) {
-        const base64Data = url.replace(/^data:image\/\w+;base64,/, "");
-        await FileSystem.writeAsStringAsync(localUri, base64Data, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+      const res = await saveImageToGallery(url, "bunkmates_chat");
+      if (res.success) {
+        Alert.alert("Saved", "Photo saved to your device gallery!");
+      } else if (res.error === "permission_denied") {
+        const shared = await shareOrExportImage(url);
+        if (!shared) {
+          Alert.alert("Permission Required", "Please allow photo library access in device settings to save photos.");
+        }
       } else {
-        await FileSystem.downloadAsync(url, localUri);
-      }
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(localUri);
-      } else {
-        Alert.alert("Saved", "Image downloaded successfully!");
+        const shared = await shareOrExportImage(url);
+        if (!shared) {
+          Alert.alert("Save Photo", "Could not save photo: " + (res.error || "Unknown error"));
+        }
       }
     } catch (e: any) {
-      Alert.alert("Download", "Could not save photo: " + e.message);
+      Alert.alert("Save Photo", "Could not save photo: " + e.message);
     }
   };
 
@@ -1104,8 +1145,8 @@ export default function ChatRoom() {
               >
                 {/* Replied Content Preview inside Bubble */}
                 {item.replyTo && (
-                  <View style={[styles.replyBox, { borderLeftColor: accentColor }]}>
-                    <Text style={[styles.replySenderName, { color: accentColor }]}>
+                  <View style={[styles.replyBox, { borderLeftColor: themeColors.accentText }]}>
+                    <Text style={[styles.replySenderName, { color: themeColors.accentText }]}>
                       {item.replyTo.senderName || (item.replyTo.senderId === user?.uid ? "You" : friendData?.name || "BunkMate")}
                     </Text>
                     {item.replyTo.imageUrl && (
@@ -1128,30 +1169,59 @@ export default function ChatRoom() {
 
                 {/* Full Photo in Bubble (Persisted on Disk for 0ms Offline Display) */}
                 {item.imageUrl && !item.deleted && (
-                  <Pressable
-                    onPress={() => {
-                      try {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      } catch (e) {}
-                      setSelectedImageItem(item);
-                      setImageReplyText("");
-                    }}
-                  >
-                    <ExpoImage
-                      source={{ uri: item.imageUrl }}
+                  (!autoDownloadMedia && !manuallyLoadedImages[item.id] && !isOwn) ? (
+                    <Pressable
                       style={[
                         styles.chatImage,
                         {
                           width: Math.min(windowWidth * 0.7, 280),
-                          height: Math.min(windowWidth * 0.7, 280) * 1.15,
+                          height: 180,
+                          backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderRadius: 12,
                         },
-                        item.rotation ? { transform: [{ rotate: `${item.rotation}deg` }] } : null,
                       ]}
-                      contentFit="cover"
-                      cachePolicy="memory-disk"
-                      transition={120}
-                    />
-                  </Pressable>
+                      onPress={() => {
+                        try {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        } catch (e) {}
+                        setManuallyLoadedImages((prev) => ({ ...prev, [item.id]: true }));
+                      }}
+                    >
+                      <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0, 0, 0, 0.55)", alignItems: "center", justifyContent: "center" }}>
+                        <Ionicons name="cloud-download-outline" size={24} color="#ffffff" />
+                      </View>
+                      <Text style={{ color: "#ffffff", fontSize: 12, marginTop: 8, fontWeight: "600" }}>
+                        Tap to load photo
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      onPress={() => {
+                        try {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        } catch (e) {}
+                        setSelectedImageItem(item);
+                        setImageReplyText("");
+                      }}
+                    >
+                      <ExpoImage
+                        source={{ uri: item.imageUrl }}
+                        style={[
+                          styles.chatImage,
+                          {
+                            width: Math.min(windowWidth * 0.7, 280),
+                            height: Math.min(windowWidth * 0.7, 280) * 1.15,
+                          },
+                          item.rotation ? { transform: [{ rotate: `${item.rotation}deg` }] } : null,
+                        ]}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        transition={120}
+                      />
+                    </Pressable>
+                  )
                 )}
 
                 {/* Message Text or Photo Caption */}
@@ -1167,6 +1237,16 @@ export default function ChatRoom() {
                     {item.deleted ? "🚫 This message was deleted" : item.text}
                   </Text>
                 ) : null}
+
+                {/* Link Preview Card when linkPreviews setting is enabled */}
+                {linkPreviews && !item.deleted && !!item.text && (
+                  <LinkPreviewCard
+                    text={item.text}
+                    isOwn={isOwn}
+                    accentColor={accentColor}
+                    isDark={isDark}
+                  />
+                )}
 
                 {/* Reaction Badge on Bubble */}
                 {latestReaction && (
@@ -1407,14 +1487,14 @@ export default function ChatRoom() {
                   style={[
                     styles.replyPreviewBar,
                     {
-                      borderLeftColor: accentColor,
+                      borderLeftColor: themeColors.accentText,
                       backgroundColor: isDark ? "rgba(18, 22, 28, 0.95)" : "rgba(240, 240, 240, 0.95)",
                       borderColor: themeColors.border,
                     },
                   ]}
                 >
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.replyPreviewTitle, { color: accentColor }]}>
+                    <Text style={[styles.replyPreviewTitle, { color: themeColors.accentText }]}>
                       Replying to {replyTo.senderId === user?.uid ? "yourself" : friendData?.name || "BunkMate"}
                     </Text>
                     <Text style={styles.replyPreviewSubtitle} numberOfLines={1}>

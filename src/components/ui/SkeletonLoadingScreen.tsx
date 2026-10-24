@@ -5,11 +5,11 @@ import {
   Text,
   StyleSheet,
   Animated,
-  SafeAreaView,
   StatusBar,
   Platform,
   ViewStyle,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useThemeToggle } from '../../contexts/ThemeContext';
 import { getDesignTokens } from '../../theme/designSystem';
 

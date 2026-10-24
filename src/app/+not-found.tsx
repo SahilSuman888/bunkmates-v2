@@ -3,6 +3,7 @@ import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter, usePathname, useGlobalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { parseAuthParams, extractResetCode } from '../lib/authUrlHelper';
+import { parseQRLoginPayload } from '../lib/qrLoginService';
 
 export default function NotFoundScreen() {
   const router = useRouter();
@@ -13,7 +14,36 @@ export default function NotFoundScreen() {
     let resolved = false;
 
     const resolveDeepLink = async () => {
-      // 1. Try parsing global search parameters
+      // 1. Try checking for QR Login or device pairing deep links
+      const qrSession =
+        searchParams?.session ||
+        searchParams?.sessionId ||
+        searchParams?.pairingId ||
+        searchParams?.id;
+
+      if (
+        (pathname &&
+          (pathname.includes("qr-login") ||
+            pathname.includes("pair") ||
+            pathname.includes("app.bunkmates.xyz") ||
+            pathname.includes("localhost:3000"))) ||
+        qrSession
+      ) {
+        resolved = true;
+        let resolvedSession = qrSession;
+        if (qrSession) {
+          try {
+            resolvedSession = parseQRLoginPayload(qrSession).sessionId;
+          } catch {}
+        }
+        router.replace({
+          pathname: "/qr-login",
+          params: resolvedSession ? { session: resolvedSession } : {},
+        } as any);
+        return;
+      }
+
+      // 2. Try parsing global search parameters
       const parsed = parseAuthParams(searchParams);
       if (parsed.isReset && parsed.oobCode) {
         resolved = true;
@@ -24,7 +54,7 @@ export default function NotFoundScreen() {
         return;
       }
 
-      // 2. Try parsing current pathname
+      // 3. Try parsing current pathname
       const codeFromPath = extractResetCode(pathname);
       if (codeFromPath) {
         resolved = true;
@@ -35,10 +65,28 @@ export default function NotFoundScreen() {
         return;
       }
 
-      // 3. Try reading initial/incoming deep link URL
+      // 4. Try reading initial/incoming deep link URL
       try {
         const initialUrl = await Linking.getInitialURL();
         if (initialUrl) {
+          if (
+            initialUrl.includes("qr-login") ||
+            initialUrl.includes("pair") ||
+            initialUrl.includes("sessionId=") ||
+            initialUrl.includes("app.bunkmates.xyz") ||
+            initialUrl.includes("localhost:3000")
+          ) {
+            resolved = true;
+            let resolvedId = initialUrl;
+            try {
+              resolvedId = parseQRLoginPayload(initialUrl).sessionId;
+            } catch {}
+            router.replace({
+              pathname: "/qr-login",
+              params: { session: resolvedId },
+            } as any);
+            return;
+          }
           const parsedUrl = parseAuthParams(initialUrl);
           if (parsedUrl.isReset && parsedUrl.oobCode) {
             resolved = true;

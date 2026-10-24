@@ -1,50 +1,41 @@
-
+// **@** SettingsActionModal — Ultra-smooth single-modal Swipeable Drawer for actions, confirmations, and alerts
+// Eliminates native window deadlocks by maintaining a single SwipeableDrawer instance without premature unmounting.
 import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  Modal,
   Pressable,
   ActivityIndicator,
   Platform,
-  Dimensions,
   Appearance,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useThemeToggle } from "../../../contexts/ThemeContext";
 import { useAppSettings } from "../../../contexts/AppSettingsContext";
 import { SwipeableDrawer } from "./SwipeableDrawer";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-
 export interface SettingsActionModalProps {
   visible: boolean;
   onClose: () => void;
-  // Step control: start at confirm or success
   initialStep?: "confirm" | "success";
-  
-  // Icon configuration
   iconType?: "warning" | "danger" | "success" | "logout" | "key" | "trash" | "device";
   customIcon?: React.ReactNode;
-  
-  // Confirmation step details (Image 2 style)
   title: string;
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  confirmColor?: string; // defaults to #FF5A4F
+  confirmColor?: string;
   onConfirm?: () => Promise<boolean | void> | boolean | void;
-  
-  // Success step details (Image 1 style)
   successTitle?: string;
   successMessage?: string;
   successButtonLabel?: string;
   onDone?: () => void;
-  
-  // Option to skip success screen if false
   showSuccessStep?: boolean;
+  errorMessage?: string | null;
+  errorTitle?: string;
+  onErrorDismiss?: () => void;
 }
 
 export function SettingsActionModal({
@@ -57,43 +48,48 @@ export function SettingsActionModal({
   message,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
-  confirmColor = "#FF5A4F",
+  confirmColor = "#EF4444",
   onConfirm,
   successTitle,
   successMessage,
   successButtonLabel = "Done",
   onDone,
   showSuccessStep = true,
+  errorMessage,
+  errorTitle,
+  onErrorDismiss,
 }: SettingsActionModalProps) {
   const [step, setStep] = useState<"confirm" | "success">(initialStep);
   const [loading, setLoading] = useState(false);
-  const [prevVisible, setPrevVisible] = useState(visible);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
 
-  // Sync step when modal opens
-  if (visible !== prevVisible) {
-    setPrevVisible(visible);
+  // Clean, consistent bottom spacing; SwipeableDrawer provides the safe area padding
+  const bottomSafePadding = 8;
+
+  // Reset step whenever modal becomes visible
+  useEffect(() => {
     if (visible) {
       setStep(initialStep);
       setLoading(false);
+      setActionError(null);
     }
-  }
+  }, [visible, initialStep]);
 
   // Dynamic Theme
   const themeContext = useThemeToggle();
   const themeMode = themeContext?.mode ?? "system";
   const themeColorsSuccess = themeContext?.themeColors?.success ?? "#22C55E";
-  const themeColorsError = themeContext?.themeColors?.error ?? "#FF5A4F";
+  const themeColorsError = themeContext?.themeColors?.error ?? "#EF4444";
 
   // App Accessibility Context
   let appHighContrast = false;
-  let appReduceMotion = false;
   let appLargeTouch = true;
   let appTriggerHaptic = (t?: any) => {};
   try {
     const appSettings = useAppSettings();
     if (appSettings) {
       appHighContrast = appSettings.highContrastMode;
-      appReduceMotion = appSettings.reduceMotion;
       appLargeTouch = appSettings.largeTouchTargets;
       appTriggerHaptic = appSettings.triggerHaptic;
     }
@@ -104,28 +100,28 @@ export function SettingsActionModal({
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
   const colors = {
-    modalOverlay: "rgba(0, 0, 0, 0.6)",
-    cardBg: isDark ? "#18181B" : "#FFFFFF",
-    screenBg: isDark ? "#000000" : "#FFFFFF",
+    cardBg: isDark ? "#17171A" : "#FFFFFF",
     textPrimary: isDark ? "#FFFFFF" : "#11141A",
-    textSecondary: isDark ? "#9E9E9E" : "#666666",
-    cancelBtnBg: isDark ? "rgba(255, 255, 255, 0.08)" : "#F5F5F7",
-    cancelBtnText: isDark ? "#E2E8F0" : "#4B5563",
+    textSecondary: isDark ? "#9CA3AF" : "#52525B",
+    cancelBtnBg: isDark ? "rgba(255, 255, 255, 0.08)" : "#F3F4F6",
+    cancelBtnBorder: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)",
+    cancelBtnText: isDark ? "#E4E4E7" : "#374151",
     primaryCoral: confirmColor === "#FF5A4F" ? themeColorsError : confirmColor,
-    warningIconCircle: isDark ? "rgba(255, 90, 79, 0.16)" : "#FEECEC",
-    warningIconColor: themeColorsError,
-    successIconCircle: isDark ? "rgba(34, 197, 94, 0.15)" : "#E8F8EE",
+    warningIconCircle: isDark ? "rgba(239, 68, 68, 0.18)" : "#FEE2E2",
+    warningIconAura: isDark ? "rgba(239, 68, 68, 0.08)" : "rgba(239, 68, 68, 0.06)",
+    warningIconBorder: isDark ? "rgba(239, 68, 68, 0.25)" : "rgba(239, 68, 68, 0.20)",
+    warningIconColor: "#EF4444",
+    successIconCircle: isDark ? "rgba(34, 197, 94, 0.18)" : "#DCFCE7",
+    successIconAura: isDark ? "rgba(34, 197, 94, 0.08)" : "rgba(34, 197, 94, 0.06)",
+    successIconBorder: isDark ? "rgba(34, 197, 94, 0.25)" : "rgba(34, 197, 94, 0.20)",
     successIconColor: themeColorsSuccess,
-    cardBorder: appHighContrast ? (isDark ? "#38383E" : "#D1D5DB") : "transparent",
+    cardBorder: appHighContrast ? (isDark ? "#38383E" : "#D1D5DB") : (isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)"),
   };
 
   const isBrightPrimary =
     colors.primaryCoral === "#FFFFFF" ||
-    colors.primaryCoral === "#ffffff" ||
     colors.primaryCoral?.toLowerCase() === "#ffffff" ||
-    colors.primaryCoral === "#ffd700" ||
-    colors.primaryCoral === "#fbc02d" ||
-    colors.primaryCoral === "#f59e0b";
+    colors.primaryCoral === "#ffd700";
   const primaryTextColor = isBrightPrimary ? "#000000" : "#FFFFFF";
 
   const handleConfirmPress = async () => {
@@ -139,10 +135,10 @@ export function SettingsActionModal({
     }
 
     setLoading(true);
+    setActionError(null);
     appTriggerHaptic("medium");
     try {
       const res = await onConfirm();
-      // If returned false explicitly, do not proceed to success
       if (res === false) {
         setLoading(false);
         return;
@@ -155,8 +151,11 @@ export function SettingsActionModal({
         onClose();
         if (onDone) onDone();
       }
-    } catch (e) {
+    } catch (e: any) {
       console.log("Action error:", e);
+      const msg = e?.message || "An unexpected error occurred. Please try again.";
+      setActionError(msg);
+      appTriggerHaptic("error" as any);
     } finally {
       setLoading(false);
     }
@@ -175,45 +174,130 @@ export function SettingsActionModal({
 
     switch (iconType) {
       case "logout":
-        return <Ionicons name="log-out-outline" size={32} color={colors.warningIconColor} />;
+        return <Ionicons name="log-out-outline" size={28} color="#EF4444" style={{ marginLeft: 2 }} />;
       case "key":
-        return <Ionicons name="key-outline" size={30} color={colors.warningIconColor} />;
+        return <Ionicons name="key-outline" size={26} color={colors.warningIconColor} />;
       case "trash":
-        return <Ionicons name="trash-outline" size={30} color={colors.warningIconColor} />;
+        return <Ionicons name="trash-outline" size={26} color="#EF4444" />;
       case "device":
-        return <Ionicons name="phone-portrait-outline" size={30} color={colors.warningIconColor} />;
+        return <Ionicons name="phone-portrait-outline" size={26} color={colors.warningIconColor} />;
       case "danger":
       case "warning":
       default:
-        // Triangle warning outline matching Image 2 exactly
-        return <Feather name="alert-triangle" size={30} color={colors.warningIconColor} />;
+        return <Feather name="alert-triangle" size={26} color={colors.warningIconColor} />;
     }
   };
 
-  if (!visible) return null;
+  const handleClose = () => {
+    if (loading) return;
+    onClose();
+  };
 
-  // ─────────────────────────────────────────────────────────────
-  // 1. SUCCESS / AFTER-SCREEN (Swipeable Drawer Style)
-  // ─────────────────────────────────────────────────────────────
-  if (step === "success") {
-    return (
-      <SwipeableDrawer
-        visible={visible}
-        onClose={handleDonePress}
-        handleColor={isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.15)"}
-        sheetStyle={[
-          styles.card,
-          {
-            backgroundColor: colors.cardBg,
-            borderWidth: appHighContrast ? 1.5 : 0,
-            borderColor: colors.cardBorder,
-          },
-        ]}
-      >
-        <View style={styles.sheetInner}>
-          {/* Soft Green Checkmark Badge */}
-          <View style={[styles.successBadge, { backgroundColor: colors.successIconCircle }]}>
-            <Feather name="check" size={38} color={colors.successIconColor} />
+  const activeError = errorMessage || actionError;
+
+  return (
+    <SwipeableDrawer
+      visible={visible}
+      onClose={activeError ? () => { setActionError(null); if (onErrorDismiss) onErrorDismiss(); else onClose(); } : (step === "success" ? handleDonePress : handleClose)}
+      handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
+      sheetStyle={[
+        styles.card,
+        {
+          backgroundColor: colors.cardBg,
+          borderWidth: appHighContrast ? 1.5 : 1,
+          borderColor: colors.cardBorder,
+        },
+      ]}
+    >
+      {activeError ? (
+        <View
+          accessible={true}
+          accessibilityRole="alert"
+          accessibilityLabel={`${errorTitle || "Notice"}. ${activeError}`}
+          style={[styles.sheetInner, { paddingBottom: bottomSafePadding }]}
+        >
+          {/* Luminous Red Warning Badge */}
+          <View
+            style={[
+              styles.badgeGlowRing,
+              {
+                backgroundColor: colors.warningIconAura,
+                borderColor: colors.warningIconBorder,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.badgeCore,
+                { backgroundColor: colors.warningIconCircle },
+              ]}
+            >
+              <Ionicons name="alert-circle-outline" size={30} color={colors.warningIconColor} />
+            </View>
+          </View>
+
+          {/* Title */}
+          <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+            {errorTitle || "Notice"}
+          </Text>
+
+          {/* Message */}
+          <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>
+            {activeError}
+          </Text>
+
+          {/* Dismiss CTA */}
+          <View style={styles.buttonStack}>
+            <Pressable
+              hitSlop={appLargeTouch ? { top: 10, bottom: 10, left: 10, right: 10 } : undefined}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Understood"
+              style={({ pressed }) => [
+                styles.cancelBtn,
+                {
+                  backgroundColor: colors.cancelBtnBg,
+                  borderColor: colors.cancelBtnBorder,
+                  borderWidth: 1,
+                  minHeight: appLargeTouch ? 52 : 48,
+                },
+                pressed && styles.pressed,
+              ]}
+              onPress={() => {
+                setActionError(null);
+                if (onErrorDismiss) {
+                  onErrorDismiss();
+                } else {
+                  onClose();
+                }
+              }}
+            >
+              <Text style={[styles.cancelBtnText, { color: colors.textPrimary, fontWeight: "700" }]}>
+                Understood
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : step === "success" ? (
+        <View style={[styles.sheetInner, { paddingBottom: bottomSafePadding }]}>
+          {/* Luminous Green Checkmark Aura */}
+          <View
+            style={[
+              styles.badgeGlowRing,
+              {
+                backgroundColor: colors.successIconAura,
+                borderColor: colors.successIconBorder,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.badgeCore,
+                { backgroundColor: colors.successIconCircle },
+              ]}
+            >
+              <Feather name="check" size={30} color={colors.successIconColor} />
+            </View>
           </View>
 
           {/* Success Title */}
@@ -229,7 +313,7 @@ export function SettingsActionModal({
           {/* Bottom Pinned Primary CTA Button */}
           <View style={styles.buttonStack}>
             <Pressable
-              hitSlop={appLargeTouch ? { top: 12, bottom: 12, left: 12, right: 12 } : undefined}
+              hitSlop={appLargeTouch ? { top: 10, bottom: 10, left: 10, right: 10 } : undefined}
               accessible={true}
               accessibilityRole="button"
               accessibilityLabel={successButtonLabel}
@@ -237,7 +321,7 @@ export function SettingsActionModal({
                 styles.primaryBtn,
                 {
                   backgroundColor: colors.primaryCoral,
-                  minHeight: appLargeTouch ? 56 : 50,
+                  minHeight: appLargeTouch ? 54 : 50,
                   borderWidth: appHighContrast || (!isDark && isBrightPrimary) ? 1.5 : 0,
                   borderColor: !isDark && isBrightPrimary ? "#111827" : (isDark ? "#FFFFFF" : "#000000"),
                 },
@@ -249,100 +333,116 @@ export function SettingsActionModal({
             </Pressable>
           </View>
         </View>
-      </SwipeableDrawer>
-    );
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  // 2. CONFIRMATION SWIPEABLE DRAWER
-  // ─────────────────────────────────────────────────────────────
-  return (
-    <SwipeableDrawer
-      visible={visible}
-      onClose={loading ? () => {} : onClose}
-      handleColor={isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.15)"}
-      sheetStyle={[
-        styles.card,
-        {
-          backgroundColor: colors.cardBg,
-          borderWidth: appHighContrast ? 1.5 : 0,
-          borderColor: colors.cardBorder,
-        },
-      ]}
-    >
-      <View
-        accessible={true}
-        accessibilityRole="alert"
-        accessibilityLabel={`${title}. ${message}`}
-        style={styles.sheetInner}
-      >
-        {/* Circular Badge with Soft Red/Coral Background & Warning Triangle */}
-        <View style={[styles.warningBadge, { backgroundColor: colors.warningIconCircle }]}>
-          {renderBadgeIcon()}
-        </View>
-
-        {/* Title */}
-        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{title}</Text>
-
-        {/* Message */}
-        <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>{message}</Text>
-
-        {/* Stacked Full-Width Buttons */}
-        <View style={styles.buttonStack}>
-          {/* Primary Action Button (Coral Red) */}
-          <Pressable
-            hitSlop={appLargeTouch ? { top: 12, bottom: 12, left: 12, right: 12 } : undefined}
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel={confirmLabel}
-            style={({ pressed }) => [
-              styles.primaryBtn,
+      ) : (
+        <View
+          accessible={true}
+          accessibilityRole="alert"
+          accessibilityLabel={`${title}. ${message}`}
+          style={[styles.sheetInner, { paddingBottom: bottomSafePadding }]}
+        >
+          {/* Luminous Concentric Danger Aura */}
+          <View
+            style={[
+              styles.badgeGlowRing,
               {
-                backgroundColor: colors.primaryCoral,
-                minHeight: appLargeTouch ? 56 : 50,
-                borderWidth: appHighContrast || (!isDark && isBrightPrimary) ? 1.5 : 0,
-                borderColor: !isDark && isBrightPrimary ? "#111827" : (isDark ? "#FFFFFF" : "#000000"),
+                backgroundColor: colors.warningIconAura,
+                borderColor: colors.warningIconBorder,
               },
-              pressed && styles.pressed,
             ]}
-            onPress={handleConfirmPress}
-            disabled={loading}
           >
-            {loading ? (
-              <ActivityIndicator size="small" color={primaryTextColor} />
-            ) : (
-              <Text style={[styles.primaryBtnText, { color: primaryTextColor }]}>{confirmLabel}</Text>
-            )}
-          </Pressable>
+            <View
+              style={[
+                styles.badgeCore,
+                { backgroundColor: colors.warningIconCircle },
+              ]}
+            >
+              {renderBadgeIcon()}
+            </View>
+          </View>
 
-          {/* Secondary Cancel Button (Soft Neutral Pill) */}
-          <Pressable
-            hitSlop={appLargeTouch ? { top: 12, bottom: 12, left: 12, right: 12 } : undefined}
-            accessible={true}
-            accessibilityRole="button"
-            accessibilityLabel={cancelLabel}
-            style={({ pressed }) => [
-              styles.cancelBtn,
-              {
-                backgroundColor: colors.cancelBtnBg,
-                minHeight: appLargeTouch ? 56 : 50,
-                borderWidth: appHighContrast ? 1.5 : 0,
-                borderColor: isDark ? "#38383E" : "#D1D5DB",
-              },
-              pressed && styles.pressed,
-            ]}
-            onPress={() => {
-              appTriggerHaptic("light");
-              onClose();
-            }}
-            disabled={loading}
-          >
-            <Text style={[styles.cancelBtnText, { color: colors.cancelBtnText }]}>
-              {cancelLabel}
-            </Text>
-          </Pressable>
+          {/* Contextual Security Micro-Badge */}
+          {iconType === "trash" ? (
+            <View style={styles.contextPill}>
+              <Ionicons name="warning-outline" size={13} color="#EF4444" style={{ marginRight: 5 }} />
+              <Text style={styles.contextPillText}>PERMANENT & IRREVERSIBLE</Text>
+            </View>
+          ) : iconType === "logout" ? (
+            <View style={[styles.contextPill, { backgroundColor: "rgba(239, 68, 68, 0.10)", borderColor: "rgba(239, 68, 68, 0.22)" }]}>
+              <Ionicons name="shield-outline" size={13} color="#EF4444" style={{ marginRight: 5 }} />
+              <Text style={styles.contextPillText}>SESSION SIGN-OUT</Text>
+            </View>
+          ) : null}
+
+          {/* Title */}
+          <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{title}</Text>
+
+          {/* Message */}
+          <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>{message}</Text>
+
+          {/* Stacked Full-Width Buttons with Dedicated Bottom Space */}
+          <View style={styles.buttonStack}>
+            {/* Primary Action Button (Red) */}
+            <Pressable
+              hitSlop={appLargeTouch ? { top: 10, bottom: 10, left: 10, right: 10 } : undefined}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel={confirmLabel}
+              style={({ pressed }) => [
+                styles.primaryBtn,
+                {
+                  backgroundColor: colors.primaryCoral,
+                  minHeight: appLargeTouch ? 54 : 50,
+                  borderWidth: appHighContrast || (!isDark && isBrightPrimary) ? 1.5 : 0,
+                  borderColor: !isDark && isBrightPrimary ? "#111827" : (isDark ? "#FFFFFF" : "#000000"),
+                },
+                pressed && styles.pressed,
+              ]}
+              onPress={handleConfirmPress}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color={primaryTextColor} />
+              ) : (
+                <View style={styles.btnContentRow}>
+                  {iconType === "trash" ? (
+                    <Ionicons name="trash-outline" size={18} color={primaryTextColor} style={{ marginRight: 8 }} />
+                  ) : iconType === "logout" ? (
+                    <Ionicons name="log-out-outline" size={18} color={primaryTextColor} style={{ marginRight: 8 }} />
+                  ) : null}
+                  <Text style={[styles.primaryBtnText, { color: primaryTextColor }]}>{confirmLabel}</Text>
+                </View>
+              )}
+            </Pressable>
+
+            {/* Secondary Cancel Button */}
+            <Pressable
+              hitSlop={appLargeTouch ? { top: 10, bottom: 10, left: 10, right: 10 } : undefined}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel={cancelLabel}
+              style={({ pressed }) => [
+                styles.cancelBtn,
+                {
+                  backgroundColor: colors.cancelBtnBg,
+                  borderColor: colors.cancelBtnBorder,
+                  borderWidth: 1,
+                  minHeight: appLargeTouch ? 52 : 48,
+                },
+                pressed && styles.pressed,
+              ]}
+              onPress={() => {
+                appTriggerHaptic("light");
+                handleClose();
+              }}
+              disabled={loading}
+            >
+              <Text style={[styles.cancelBtnText, { color: colors.cancelBtnText }]}>
+                {cancelLabel}
+              </Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
+      )}
     </SwipeableDrawer>
   );
 }
@@ -350,123 +450,100 @@ export function SettingsActionModal({
 export default SettingsActionModal;
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 24,
-  },
-  sheetInner: {
-    width: "100%",
-    alignItems: "center",
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
   card: {
-    width: "100%",
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    borderWidth: 0,
-    paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 16,
-    alignItems: "center",
+    overflow: "hidden",
   },
-  warningBadge: {
-    width: 66,
-    height: 66,
-    borderRadius: 33,
-    justifyContent: "center",
+  sheetInner: {
     alignItems: "center",
-    marginBottom: 20,
+    paddingHorizontal: 24,
+    paddingTop: 8,
+  },
+  badgeGlowRing: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    marginBottom: 12,
+  },
+  badgeCore: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  contextPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4.5,
+    borderRadius: 12,
+    borderWidth: 1,
+    backgroundColor: "rgba(239, 68, 68, 0.12)",
+    borderColor: "rgba(239, 68, 68, 0.25)",
+    marginBottom: 12,
+  },
+  contextPillText: {
+    fontSize: 10.5,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    color: "#EF4444",
   },
   modalTitle: {
     fontSize: 22,
-    fontWeight: "700",
-    letterSpacing: -0.3,
+    fontWeight: "800",
+    letterSpacing: -0.4,
+    marginBottom: 8,
     textAlign: "center",
-    marginBottom: 10,
   },
   modalMessage: {
-    fontSize: 14.5,
-    lineHeight: 21,
+    fontSize: 14,
+    lineHeight: 22,
     textAlign: "center",
-    paddingHorizontal: 4,
-    marginBottom: 26,
+    marginBottom: 24,
+    paddingHorizontal: 8,
   },
   buttonStack: {
     width: "100%",
-    gap: 10,
+    gap: 11,
+  },
+  btnContentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
   },
   primaryBtn: {
     width: "100%",
-    height: 50,
-    borderRadius: 25, // 24-28px radius for standard buttons as defined in BunkMates design system
-    borderWidth: 0,
-    justifyContent: "center",
+    borderRadius: 16,
     alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#EF4444",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    elevation: 4,
   },
   primaryBtnText: {
-    color: "#FFFFFF",
-    fontSize: 16,
+    fontSize: 15.5,
     fontWeight: "700",
-    letterSpacing: -0.2,
+    letterSpacing: 0.2,
   },
   cancelBtn: {
     width: "100%",
-    height: 50,
-    borderRadius: 25,
-    borderWidth: 0, // NO BORDERS
-    justifyContent: "center",
+    borderRadius: 16,
     alignItems: "center",
+    justifyContent: "center",
   },
   cancelBtnText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "600",
-    letterSpacing: -0.2,
   },
   pressed: {
-    opacity: 0.8,
-    transform: [{ scale: 0.99 }],
-  },
-
-  // Success Screen Styles (Image 1 Style)
-  successContainer: {
-    flex: 1,
-    justifyContent: "space-between",
-  },
-  successCenterContent: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 32,
-  },
-  successBadge: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 26,
-  },
-  successTitle: {
-    fontSize: 24,
-    fontWeight: "700",
-    letterSpacing: -0.4,
-    textAlign: "center",
-    marginBottom: 12,
-  },
-  successMessage: {
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: "center",
-    maxWidth: 320,
-  },
-  bottomBar: {
-    width: "100%",
-    paddingHorizontal: 20,
-    paddingBottom: Platform.OS === "android" ? 24 : 12,
+    transform: [{ scale: 0.985 }],
+    opacity: 0.88,
   },
 });

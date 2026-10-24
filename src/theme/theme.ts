@@ -2,6 +2,47 @@
 // Solid dynamic design system implementation matching BUNKMATES_DESIGN_SYSTEM.md
 import { Appearance } from 'react-native';
 
+/**
+ * Calculates WCAG 2.1 relative luminance of a hex color.
+ */
+export function getRelativeLuminance(hex: string): number {
+  if (!hex || typeof hex !== 'string') return 0;
+  const clean = hex.replace('#', '').trim();
+  const full =
+    clean.length === 3
+      ? clean.split('').map((c) => c + c).join('')
+      : clean.length >= 6
+      ? clean.substring(0, 6)
+      : '000000';
+  const r = parseInt(full.substring(0, 2), 16) / 255;
+  const g = parseInt(full.substring(2, 4), 16) / 255;
+  const b = parseInt(full.substring(4, 6), 16) / 255;
+
+  const aR = r <= 0.03928 ? r / 12.92 : Math.pow((r + 0.055) / 1.055, 2.4);
+  const aG = g <= 0.03928 ? g / 12.92 : Math.pow((g + 0.055) / 1.055, 2.4);
+  const aB = b <= 0.03928 ? b / 12.92 : Math.pow((b + 0.055) / 1.055, 2.4);
+
+  return 0.2126 * aR + 0.7152 * aG + 0.0722 * aB;
+}
+
+/**
+ * Returns true if the color has high relative luminance (> 0.45), e.g. white, yellow, light pastel.
+ */
+export function isBrightColor(hex: string): boolean {
+  return getRelativeLuminance(hex) > 0.45;
+}
+
+/**
+ * Returns a high-contrast foreground color (dark or light) for a given background color.
+ */
+export function getContrastingTextColor(
+  bgHex: string,
+  darkColor: string = '#000000',
+  lightColor: string = '#FFFFFF'
+): string {
+  return isBrightColor(bgHex) ? darkColor : lightColor;
+}
+
 export interface ThemeColors {
   primary: string;
   secondary: string;
@@ -21,8 +62,24 @@ export interface ThemeColors {
   info: string;
   accent: string;
   accentBg: string;
+  onAccent: string;
+  accentText: string;
+  accentButtonBg: string;
+  onAccentButton: string;
+  accentButtonBorder: string;
+  accentBorder: string;
   actionPrimary: string;
   onActionPrimary: string;
+  placeholder: string;
+  disabled: string;
+  disabledText: string;
+  selectedBg: string;
+  selectedText: string;
+  active: string;
+  pressed: string;
+  switchActive: string;
+  switchKnobActive: string;
+  switchInactive: string;
   isHighContrast: boolean;
   colorBlindMode: string;
   boldText?: boolean;
@@ -47,7 +104,7 @@ export const ACCENT_COLORS = {
   lime: '#afb42b',
 };
 
-const hexToRgba = (hex: string, alpha: number) => {
+export const hexToRgba = (hex: string, alpha: number) => {
   const clean = hex.replace('#', '');
   const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean;
   const r = parseInt(full.substring(0, 2), 16) || 255;
@@ -89,7 +146,7 @@ const getCvdSemanticColors = (isDark: boolean, colorBlindMode: string = 'Off') =
     default:
       return {
         success: '#10b981',
-        error: '#FF5A5F',
+        error: '#EF4444',
         warning: '#f59e0b',
         info: '#3b82f6',
       };
@@ -145,19 +202,60 @@ export const getTheme = (
   const base = isDark ? darkThemeBase : lightThemeBase;
   const semantic = getCvdSemanticColors(isDark, colorBlindMode);
 
-  const isWhite =
-    accentKey === 'white' ||
-    accentKey === 'navWhite' ||
-    accentKey === '#FFFFFF' ||
-    accentKey === '#ffffff' ||
-    accentKey?.toLowerCase() === '#ffffff';
-
-  let resolvedAccent =
+  // Preserve the actual accent color chosen by the user (never replace white with black)
+  const resolvedAccent =
     (ACCENT_COLORS as Record<string, string>)[accentKey] ||
     (accentKey.startsWith('#') ? accentKey : ACCENT_COLORS.coral);
-  if (isWhite) {
-    resolvedAccent = isDark ? '#FFFFFF' : '#111827';
-  }
+
+  const isBrightAccent = isBrightColor(resolvedAccent);
+
+  // High-contrast foreground for text/icons placed directly on an accent background
+  const onAccent = getContrastingTextColor(
+    resolvedAccent,
+    isDark ? '#000000' : '#11141A',
+    '#FFFFFF'
+  );
+
+  // When accent is applied to text or icons on standard surfaces:
+  // - On dark surfaces (#161618): white/bright accent is crisp and legible (15:1 contrast).
+  // - On light surfaces (#FFFFFF): white accent would be invisible, so fallback to #11141A.
+  const accentText = isDark
+    ? resolvedAccent
+    : isBrightAccent
+    ? '#11141A'
+    : resolvedAccent;
+
+  const accentButtonBg = resolvedAccent;
+  const onAccentButton = onAccent;
+  const accentButtonBorder =
+    isBrightAccent && !isDark ? 'rgba(0, 0, 0, 0.20)' : 'transparent';
+
+  const accentBg = isDark
+    ? hexToRgba(resolvedAccent, 0.16)
+    : isBrightAccent
+    ? 'rgba(0, 0, 0, 0.08)'
+    : hexToRgba(resolvedAccent, 0.10);
+
+  const accentBorder =
+    isBrightAccent && !isDark ? 'rgba(0, 0, 0, 0.15)' : 'transparent';
+
+  const switchActive = resolvedAccent;
+  const switchKnobActive = isBrightAccent ? (isDark ? '#161618' : '#11141A') : '#FFFFFF';
+  const switchInactive = isDark ? '#2A2D36' : '#E5E7EB';
+
+  const placeholder = isDark ? '#707070' : '#9CA3AF';
+  const disabled = isDark ? '#2A2A30' : '#E5E7EB';
+  const disabledText = isDark ? '#555860' : '#9CA3AF';
+  const selectedBg = isDark
+    ? isBrightAccent
+      ? 'rgba(255, 255, 255, 0.14)'
+      : hexToRgba(resolvedAccent, 0.20)
+    : isBrightAccent
+    ? 'rgba(0, 0, 0, 0.08)'
+    : hexToRgba(resolvedAccent, 0.12);
+  const selectedText = accentText;
+  const active = resolvedAccent;
+  const pressed = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)';
 
   if (isHighContrast) {
     return {
@@ -175,6 +273,22 @@ export const getTheme = (
       primary: resolvedAccent,
       accent: resolvedAccent,
       accentBg: hexToRgba(resolvedAccent, isDark ? 0.22 : 0.14),
+      onAccent,
+      accentText,
+      accentButtonBg,
+      onAccentButton,
+      accentButtonBorder,
+      accentBorder,
+      placeholder,
+      disabled,
+      disabledText,
+      selectedBg,
+      selectedText,
+      active,
+      pressed,
+      switchActive,
+      switchKnobActive,
+      switchInactive,
       isHighContrast: true,
       colorBlindMode,
       boldText,
@@ -186,7 +300,23 @@ export const getTheme = (
     ...semantic,
     primary: resolvedAccent,
     accent: resolvedAccent,
-    accentBg: hexToRgba(resolvedAccent, isDark ? 0.16 : 0.10),
+    accentBg,
+    onAccent,
+    accentText,
+    accentButtonBg,
+    onAccentButton,
+    accentButtonBorder,
+    accentBorder,
+    placeholder,
+    disabled,
+    disabledText,
+    selectedBg,
+    selectedText,
+    active,
+    pressed,
+    switchActive,
+    switchKnobActive,
+    switchInactive,
     isHighContrast: false,
     colorBlindMode,
     boldText,

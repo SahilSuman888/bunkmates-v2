@@ -6,15 +6,18 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
-  Switch,
   Platform,
   Alert,
   Modal,
   StatusBar,
   Appearance,
+  ActivityIndicator,
 } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
+import { Ionicons, Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../../lib/firebase";
@@ -22,6 +25,7 @@ import { registerForPushNotifications, disablePushNotifications } from "../../li
 import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { useAppSettings } from "../../contexts/AppSettingsContext";
+import useUnreadNotifications from "../../hooks/useUnreadNotifications";
 import {
   NotificationCategory,
   NotificationPreferences,
@@ -50,8 +54,11 @@ const TIME_OPTIONS = [
 ];
 
 export default function NotificationSettings() {
+  const insets = useSafeAreaInsets();
+  const topInset = insets.top > 0 ? insets.top : Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 44;
   const router = useRouter();
   const { t } = useLanguage();
+  const unreadCount = useUnreadNotifications();
   const {
     notificationPreferences,
     updateNotificationPreferences,
@@ -65,6 +72,7 @@ export default function NotificationSettings() {
   // Time picker modal state
   const [showTimeModal, setShowTimeModal] = useState<"from" | "until" | null>(null);
   const [testingCategory, setTestingCategory] = useState<NotificationCategory | null>(null);
+  const [suppressedReason, setSuppressedReason] = useState<string | null>(null);
 
   // Active preferences from centralized context
   const {
@@ -102,6 +110,8 @@ export default function NotificationSettings() {
 
   const colors = useMemo(() => {
     const accent = accentColor || "#FF5A5F";
+    const isWhiteAccent = accentColor?.toLowerCase() === "#ffffff" || accent === "white";
+    const accentTextColor = themeColors?.accentText ?? (isWhiteAccent ? (isDark ? "#FFFFFF" : "#11141A") : accent);
     return {
       bg: themeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
       card: themeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"),
@@ -113,9 +123,11 @@ export default function NotificationSettings() {
       sectionHeader:
         themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       accent: accent,
+      onAccent: onAccentTextColor || (isDark ? "#000000" : "#11141A"),
       accentBg: isDark ? hexToRgba(accent, 0.12) : hexToRgba(accent, 0.07),
-      accentBorder: "transparent",
-      switchActive: accent,
+      switchActive: isWhiteAccent && !isDark ? "#11141A" : accent,
+      accentText: accentTextColor,
+      accentBorder: isWhiteAccent && !isDark ? "rgba(0, 0, 0, 0.20)" : "transparent",
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
       greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
       iconBoxBg: isDark ? "#222226" : "#F3F4F6",
@@ -170,16 +182,14 @@ export default function NotificationSettings() {
       if (res.delivered) {
         // Notification banner will slide in automatically at root level!
       } else {
-        // Suppressed by gatekeeper: explain reason to user
-        Alert.alert(
-          "Alert Suppressed by Rules",
+        // Suppressed by gatekeeper: explain reason to user in swipeable drawer
+        setSuppressedReason(
           res.reason ||
-            "This notification was not delivered because your notification rules or quiet hours filtered it out.",
-          [{ text: "OK" }]
+            "This notification was not delivered because your notification rules or quiet hours filtered it out."
         );
       }
     } catch (e: any) {
-      Alert.alert("Test Notification Error", e?.message || "Failed to trigger test.");
+      setSuppressedReason(e?.message || "Failed to trigger test notification.");
     } finally {
       setTimeout(() => setTestingCategory(null), 500);
     }
@@ -192,17 +202,27 @@ export default function NotificationSettings() {
     >
       <StatusBar
         barStyle={isDark ? "light-content" : "dark-content"}
-        backgroundColor={colors.bg}
       />
 
       {/* ── Top Header: Exact circular button matching Settings page ── */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={6}
           accessibilityLabel="Go back"
@@ -210,23 +230,43 @@ export default function NotificationSettings() {
           <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
         </Pressable>
         <Text
-          style={[styles.headerTitle, { color: colors.textPrimary }]}
+          style={[styles.headerTitle, { color: colors.textPrimary, fontSize: scaleFont(20) }]}
           numberOfLines={1}
         >
           {t("Notifications")}
         </Text>
 
         <Pressable
-          onPress={() => router.push("/(tabs)/notifications" as any)}
+          onPress={() => router.push("/notifications")}
           style={({ pressed }) => [
             styles.inboxBtn,
-            { backgroundColor: colors.card },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={6}
-          accessibilityLabel="View inbox"
+          accessibilityLabel={`Open notification inbox, ${unreadCount} unread`}
         >
-          <Ionicons name="mail-outline" size={19} color={colors.textPrimary} />
+          <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
+          {unreadCount > 0 && (
+            <View
+              style={[
+                styles.headerBadge,
+                {
+                  backgroundColor: colors.accent,
+                  borderColor: colors.bg,
+                },
+              ]}
+            >
+              <Text style={[styles.headerBadgeText, { color: colors.onAccent }]}>
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </Text>
+            </View>
+          )}
         </Pressable>
       </View>
 
@@ -245,23 +285,43 @@ export default function NotificationSettings() {
           ]}
         >
           <View style={styles.heroTextWrap}>
-            <Text style={[styles.heroTitle, { color: colors.greyishWhite }]}>
+            <Text style={[styles.heroTitle, { color: colors.greyishWhite, fontSize: scaleFont(16) }]}>
               {t("All Push Notifications")}
             </Text>
-            <Text style={[styles.heroSub, { color: colors.textSecondary }]}>
+            <Text style={[styles.heroSub, { color: colors.textSecondary, fontSize: scaleFont(12.5) }]}>
               {t("Quickly silence or enable all mobile alerts")}
             </Text>
           </View>
-          <Switch
+          <BunkmatesAnimatedSwitch
             value={allPushEnabled}
             onValueChange={(val) => handleTogglePreference("allPushEnabled", val)}
-            trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-            thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
           />
         </View>
 
+        {!allPushEnabled && (
+          <View
+            style={[
+              styles.disabledNoticeBanner,
+              {
+                backgroundColor: isDark ? "rgba(245, 158, 11, 0.12)" : "#FEF3C7",
+                borderColor: isDark ? "rgba(245, 158, 11, 0.25)" : "#FDE68A",
+              },
+            ]}
+          >
+            <Ionicons name="information-circle-outline" size={17} color="#F59E0B" />
+            <Text
+              style={[
+                styles.disabledNoticeText,
+                { color: isDark ? "#FCD34D" : "#92400E", fontSize: scaleFont(12) },
+              ]}
+            >
+              {t("All alerts are paused. Turn on push notifications above to customize individual categories.")}
+            </Text>
+          </View>
+        )}
+
         {/* ── 1. NOTIFICATION CATEGORIES ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader, fontSize: scaleFont(12) }]}>
           {t("NOTIFICATION CATEGORIES")}
         </Text>
         <View
@@ -273,7 +333,12 @@ export default function NotificationSettings() {
           pointerEvents={allPushEnabled ? "auto" : "none"}
         >
           {/* Trip Updates */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => allPushEnabled && handleTogglePreference("tripUpdates", !tripUpdates)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: tripUpdates && allPushEnabled }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="airplane-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -285,19 +350,23 @@ export default function NotificationSettings() {
                 {t("Flight delays, gate changes, booking syncs")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={tripUpdates && allPushEnabled}
               onValueChange={(val) => handleTogglePreference("tripUpdates", val)}
               disabled={!allPushEnabled}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Messages & Chat */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => allPushEnabled && handleTogglePreference("chatMessages", !chatMessages)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: chatMessages && allPushEnabled }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons
                 name="chatbubble-ellipses-outline"
@@ -313,19 +382,23 @@ export default function NotificationSettings() {
                 {t("Instant pings from your travel group chat")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={chatMessages && allPushEnabled}
               onValueChange={(val) => handleTogglePreference("chatMessages", val)}
               disabled={!allPushEnabled}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Reminders */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => allPushEnabled && handleTogglePreference("reminders", !reminders)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: reminders && allPushEnabled }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="time-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -337,19 +410,23 @@ export default function NotificationSettings() {
                 {t("Pack list alerts, check-in prompts")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={reminders && allPushEnabled}
               onValueChange={(val) => handleTogglePreference("reminders", val)}
               disabled={!allPushEnabled}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Recommendations */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => allPushEnabled && handleTogglePreference("recommendations", !recommendations)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: recommendations && allPushEnabled }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="sparkles-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -361,19 +438,23 @@ export default function NotificationSettings() {
                 {t("Curated cafes & local events nearby")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={recommendations && allPushEnabled}
               onValueChange={(val) => handleTogglePreference("recommendations", val)}
               disabled={!allPushEnabled}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Promotions & Deals */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => allPushEnabled && handleTogglePreference("promotions", !promotions)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: promotions && allPushEnabled }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="pricetag-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -385,14 +466,13 @@ export default function NotificationSettings() {
                 {t("Discounts on hostels, budget flights & events")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={promotions && allPushEnabled}
               onValueChange={(val) => handleTogglePreference("promotions", val)}
               disabled={!allPushEnabled}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
         </View>
 
         {/* ── 2. QUIET HOURS ── */}
@@ -416,13 +496,13 @@ export default function NotificationSettings() {
               <Ionicons
                 name={quietHoursNow ? "moon" : "sunny-outline"}
                 size={11}
-                color={quietHoursNow ? colors.accent : colors.textSecondary}
+                color={quietHoursNow ? colors.accentText : colors.textSecondary}
               />
               <Text
                 style={[
                   styles.dndStatusText,
                   {
-                    color: quietHoursNow ? colors.accent : colors.textSecondary,
+                    color: quietHoursNow ? colors.accentText : colors.textSecondary,
                   },
                 ]}
               >
@@ -434,7 +514,12 @@ export default function NotificationSettings() {
 
         <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
           {/* Do Not Disturb Toggle */}
-          <View style={styles.dndRow}>
+          <Pressable
+            style={({ pressed }) => [styles.dndRow, pressed && styles.pressed]}
+            onPress={() => handleTogglePreference("doNotDisturb", !doNotDisturb)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: doNotDisturb }}
+          >
             <View style={styles.dndTextWrap}>
               <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
                 {t("Do Not Disturb")}
@@ -443,13 +528,12 @@ export default function NotificationSettings() {
                 {t("Auto-silence non-critical trip pings during sleep")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={doNotDisturb}
               onValueChange={(val) => handleTogglePreference("doNotDisturb", val)}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
           {/* Time Range Selector */}
           <View
@@ -495,13 +579,12 @@ export default function NotificationSettings() {
         </View>
 
         {/* ── 3. TEST NOTIFICATION DISPATCHER (LIVE SIMULATOR) ── */}
-        <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>
-          TEST NOTIFICATIONS (LIVE SIMULATOR)
+        <Text style={[styles.sectionHeading, { color: colors.sectionHeader, fontSize: scaleFont(12) }]}>
+          {t("TEST NOTIFICATIONS (LIVE SIMULATOR)")}
         </Text>
         <View style={[styles.card, { backgroundColor: colors.card, padding: 14 }]}>
-          <Text style={[styles.testIntroText, { color: colors.textSecondary }]}>
-            Tap any category below to simulate real-time notification dispatching. Rules,
-            DND hours, and category filters are evaluated live.
+          <Text style={[styles.testIntroText, { color: colors.textSecondary, fontSize: scaleFont(12.5) }]}>
+            {t("Tap any category below to simulate real-time notification dispatching. Rules, DND hours, and category filters are evaluated live.")}
           </Text>
 
           <View style={styles.testGrid}>
@@ -510,13 +593,22 @@ export default function NotificationSettings() {
               disabled={testingCategory !== null}
               style={({ pressed }) => [
                 styles.testPill,
-                { backgroundColor: colors.timeBoxBg },
+                {
+                  backgroundColor:
+                    testingCategory === "tripUpdates"
+                      ? colors.accentBg
+                      : colors.timeBoxBg,
+                },
                 pressed && styles.pressed,
               ]}
             >
-              <Ionicons name="airplane-outline" size={16} color={colors.accent} />
-              <Text style={[styles.testPillText, { color: colors.textPrimary }]}>
-                Flight Alert
+              {testingCategory === "tripUpdates" ? (
+                <ActivityIndicator size="small" color={colors.accentText} />
+              ) : (
+                <Ionicons name="airplane-outline" size={16} color={colors.accentText} />
+              )}
+              <Text style={[styles.testPillText, { color: colors.textPrimary, fontSize: scaleFont(12.5) }]}>
+                {t("Flight Alert")}
               </Text>
             </Pressable>
 
@@ -525,17 +617,26 @@ export default function NotificationSettings() {
               disabled={testingCategory !== null}
               style={({ pressed }) => [
                 styles.testPill,
-                { backgroundColor: colors.timeBoxBg },
+                {
+                  backgroundColor:
+                    testingCategory === "chatMessages"
+                      ? colors.accentBg
+                      : colors.timeBoxBg,
+                },
                 pressed && styles.pressed,
               ]}
             >
-              <Ionicons
-                name="chatbubble-ellipses-outline"
-                size={16}
-                color={colors.accent}
-              />
-              <Text style={[styles.testPillText, { color: colors.textPrimary }]}>
-                Chat Message
+              {testingCategory === "chatMessages" ? (
+                <ActivityIndicator size="small" color={colors.accentText} />
+              ) : (
+                <Ionicons
+                  name="chatbubble-ellipses-outline"
+                  size={16}
+                  color={colors.accentText}
+                />
+              )}
+              <Text style={[styles.testPillText, { color: colors.textPrimary, fontSize: scaleFont(12.5) }]}>
+                {t("Chat Message")}
               </Text>
             </Pressable>
 
@@ -544,13 +645,22 @@ export default function NotificationSettings() {
               disabled={testingCategory !== null}
               style={({ pressed }) => [
                 styles.testPill,
-                { backgroundColor: colors.timeBoxBg },
+                {
+                  backgroundColor:
+                    testingCategory === "reminders"
+                      ? colors.accentBg
+                      : colors.timeBoxBg,
+                },
                 pressed && styles.pressed,
               ]}
             >
-              <Ionicons name="time-outline" size={16} color={colors.accent} />
-              <Text style={[styles.testPillText, { color: colors.textPrimary }]}>
-                Packing List
+              {testingCategory === "reminders" ? (
+                <ActivityIndicator size="small" color={colors.accentText} />
+              ) : (
+                <Ionicons name="time-outline" size={16} color={colors.accentText} />
+              )}
+              <Text style={[styles.testPillText, { color: colors.textPrimary, fontSize: scaleFont(12.5) }]}>
+                {t("Packing List")}
               </Text>
             </Pressable>
 
@@ -559,13 +669,22 @@ export default function NotificationSettings() {
               disabled={testingCategory !== null}
               style={({ pressed }) => [
                 styles.testPill,
-                { backgroundColor: colors.timeBoxBg },
+                {
+                  backgroundColor:
+                    testingCategory === "recommendations"
+                      ? colors.accentBg
+                      : colors.timeBoxBg,
+                },
                 pressed && styles.pressed,
               ]}
             >
-              <Ionicons name="sparkles-outline" size={16} color={colors.accent} />
-              <Text style={[styles.testPillText, { color: colors.textPrimary }]}>
-                Local Cafe
+              {testingCategory === "recommendations" ? (
+                <ActivityIndicator size="small" color={colors.accentText} />
+              ) : (
+                <Ionicons name="sparkles-outline" size={16} color={colors.accentText} />
+              )}
+              <Text style={[styles.testPillText, { color: colors.textPrimary, fontSize: scaleFont(12.5) }]}>
+                {t("Local Cafe")}
               </Text>
             </Pressable>
 
@@ -574,13 +693,22 @@ export default function NotificationSettings() {
               disabled={testingCategory !== null}
               style={({ pressed }) => [
                 styles.testPill,
-                { backgroundColor: colors.timeBoxBg },
+                {
+                  backgroundColor:
+                    testingCategory === "promotions"
+                      ? colors.accentBg
+                      : colors.timeBoxBg,
+                },
                 pressed && styles.pressed,
               ]}
             >
-              <Ionicons name="pricetag-outline" size={16} color={colors.accent} />
-              <Text style={[styles.testPillText, { color: colors.textPrimary }]}>
-                Hostel Deal
+              {testingCategory === "promotions" ? (
+                <ActivityIndicator size="small" color={colors.accentText} />
+              ) : (
+                <Ionicons name="pricetag-outline" size={16} color={colors.accentText} />
+              )}
+              <Text style={[styles.testPillText, { color: colors.textPrimary, fontSize: scaleFont(12.5) }]}>
+                {t("Hostel Deal")}
               </Text>
             </Pressable>
           </View>
@@ -619,6 +747,7 @@ export default function NotificationSettings() {
         <ScrollView
           style={styles.timeListScroll}
           contentContainerStyle={styles.timeListGrid}
+          showsVerticalScrollIndicator={false}
         >
           {TIME_OPTIONS.map((timeOption) => {
             const isSelected =
@@ -631,7 +760,12 @@ export default function NotificationSettings() {
                 style={({ pressed }) => [
                   styles.timeOptionPill,
                   {
-                    backgroundColor: isSelected ? colors.accent : colors.timeBoxBg,
+                    backgroundColor: isSelected
+                      ? isDark
+                        ? "rgba(255, 255, 255, 0.12)"
+                        : "rgba(0, 0, 0, 0.06)"
+                      : colors.timeBoxBg,
+                    borderColor: isSelected ? colors.accent : "transparent",
                   },
                   pressed && styles.pressed,
                 ]}
@@ -640,11 +774,15 @@ export default function NotificationSettings() {
                 <Text
                   style={[
                     styles.timeOptionText,
-                    { color: isSelected ? "#FFFFFF" : colors.textPrimary },
+                    { color: colors.textPrimary },
+                    isSelected && { fontWeight: "700" },
                   ]}
                 >
                   {timeOption}
                 </Text>
+                {isSelected && (
+                  <Feather name="check" size={18} color={colors.accent} />
+                )}
               </Pressable>
             );
           })}
@@ -660,6 +798,49 @@ export default function NotificationSettings() {
         >
           <Text style={[styles.modalCloseBtnText, { color: colors.textSecondary }]}>
             Close
+          </Text>
+        </Pressable>
+      </SwipeableDrawer>
+
+      {/* ── SUPPRESSED ALERT DRAWER ── */}
+      <SwipeableDrawer
+        visible={suppressedReason !== null}
+        onClose={() => setSuppressedReason(null)}
+        sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
+      >
+        <View
+          style={[
+            styles.iconBox,
+            {
+              backgroundColor: isDark ? "rgba(245, 158, 11, 0.15)" : "#FEF3C7",
+              width: 50,
+              height: 50,
+              borderRadius: 25,
+              marginBottom: 12,
+              marginRight: 0,
+            },
+          ]}
+        >
+          <Ionicons name="notifications-off-outline" size={24} color="#F59E0B" />
+        </View>
+
+        <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
+          Alert Filtered by Rules
+        </Text>
+        <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
+          {suppressedReason}
+        </Text>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.modalCloseBtn,
+            { backgroundColor: colors.accent, height: 46, borderRadius: 23, width: "100%", marginTop: 8 },
+            pressed && styles.pressed,
+          ]}
+          onPress={() => setSuppressedReason(null)}
+        >
+          <Text style={[styles.modalCloseBtnText, { color: colors.onAccent, fontWeight: "700" }]}>
+            Understood
           </Text>
         </Pressable>
       </SwipeableDrawer>
@@ -705,6 +886,40 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
+    position: "relative",
+  },
+  headerBadge: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 3,
+  },
+  headerBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  disabledNoticeBanner: {
+    marginHorizontal: 20,
+    marginTop: 4,
+    marginBottom: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  disabledNoticeText: {
+    flex: 1,
+    lineHeight: 16,
+    fontWeight: "500",
   },
   headerTitle: {
     fontSize: 20,
@@ -927,18 +1142,19 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   timeListGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: "column",
     gap: 8,
-    justifyContent: "center",
+    width: "100%",
   },
   timeOptionPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderRadius: 18,
-    borderWidth: 0,
-    minWidth: "46%",
+    borderWidth: 1,
+    width: "100%",
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
   },
   timeOptionText: {
     fontSize: 13.5,

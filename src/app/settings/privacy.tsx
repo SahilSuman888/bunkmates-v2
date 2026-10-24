@@ -6,15 +6,17 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
-  Switch,
-  Platform,
+    Platform,
   Alert,
   Modal,
   ActivityIndicator,
   StatusBar,
   Appearance,
 } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -82,12 +84,16 @@ export default function PrivacyAndData() {
   // Dynamic Theme matching ProfileSettings and ProfileEdit exactly
   let themeMode: "dark" | "light" | "system" = "system";
   let dynamicAccent = "#FF5A5F";
+  let onAccentTextColor = "#FFFFFF";
+  let isWhiteAccent = false;
   let dynamicThemeColors: any = null;
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
+      if (themeContext.onAccentTextColor) onAccentTextColor = themeContext.onAccentTextColor;
+      isWhiteAccent = themeContext.isWhiteAccent ?? (dynamicAccent.toLowerCase() === "#ffffff" || themeContext.accent === "white");
       dynamicThemeColors = themeContext.themeColors;
     }
   } catch {
@@ -104,15 +110,18 @@ export default function PrivacyAndData() {
       bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
       card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
       cardBorder: "transparent",
-      divider: "transparent",
+      divider: dynamicThemeColors?.divider ?? (isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)"),
       textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
       textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       accent: accent,
       coral: accent,
       accentBg: isDark ? hexToRgba(accent, 0.16) : hexToRgba(accent, 0.09),
-      switchActive: accent,
+      switchActive: isWhiteAccent && !isDark ? "#11141A" : accent,
       switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
+      onAccent: onAccentTextColor,
+      accentText: dynamicThemeColors?.accentText ?? (isWhiteAccent ? (isDark ? "#FFFFFF" : "#11141A") : accent),
+      accentBorder: isWhiteAccent && !isDark ? "rgba(0, 0, 0, 0.20)" : "transparent",
       greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
       iconBoxBg: isDark ? "#222226" : "#F3F4F6",
       chevron: isDark ? "#555860" : "#B4B9C2",
@@ -124,7 +133,7 @@ export default function PrivacyAndData() {
       pledgeTitle: isDark ? "#34D399" : "#059669",
       pledgeText: isDark ? "#A7F3D0" : "#4B5563",
       logoutBorder: "transparent",
-      logoutBg: isDark ? "rgba(255, 90, 95, 0.10)" : "rgba(255, 90, 95, 0.06)",
+      logoutBg: isDark ? "rgba(239, 68, 68, 0.10)" : "rgba(239, 68, 68, 0.06)",
     };
   }, [isDark, dynamicAccent, dynamicThemeColors]);
 
@@ -325,12 +334,9 @@ export default function PrivacyAndData() {
           dialogTitle: "Download My BunkMates Data",
           UTI: "public.json",
         });
-      } else {
-        Alert.alert("Data Exported", `File saved successfully to:\n${filePath}`);
       }
     } catch (e: any) {
       console.log("File save error:", e);
-      Alert.alert("Export Error", e?.message || "Could not save file to device.");
     }
   };
 
@@ -342,48 +348,29 @@ export default function PrivacyAndData() {
     setTimeout(() => setCopiedToClipboard(false), 2500);
   };
 
-  // 7. Clear Search History (100% Functional AsyncStorage & Firestore wipe)
-  const handleConfirmClearHistory = async () => {
-    setIsClearingHistory(true);
-    try {
-      await AsyncStorage.multiRemove([
-        "@bunkmates_search_history",
-        "@search_history",
-        "searchHistory",
-        "recent_searches",
-        "@destination_searches",
-      ]);
-
-      if (user) {
-        await updateDoc(doc(db, "users", user.uid), {
-          searchHistory: [],
-          updatedAt: new Date(),
-        }).catch(() => {});
-      }
-    } catch (e) {
-      console.log("Error wiping search history:", e);
-    } finally {
-      setIsClearingHistory(false);
-      setShowClearHistoryModal(false);
-      Alert.alert(
-        "Search History Cleared",
-        "All recent destination, places, and trip searches have been removed from this device."
-      );
-    }
-  };
-
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       {/* ── Top Header: Standard circular button matching Settings page ── */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={8}
           accessibilityLabel="Go back"
@@ -443,8 +430,7 @@ export default function PrivacyAndData() {
                         : "#FFFFFF",
                     },
                   ],
-                  pressed && styles.pressed,
-                ]}
+                  ]}
                 onPress={() => {
                   if (visibility !== "public") {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -537,7 +523,12 @@ export default function PrivacyAndData() {
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("LOCATION SERVICES", "SHARING PREFERENCES")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Location Sharing */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleLocationSharing(!locationSharing)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: locationSharing }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="location-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -547,18 +538,22 @@ export default function PrivacyAndData() {
                 {t("Allow group members to see your real-time location", "Share live GPS trail with active trip bunkmates")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={locationSharing}
               onValueChange={handleToggleLocationSharing}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Activity Status */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleActivityStatus(!activityStatus)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: activityStatus }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="time-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -568,18 +563,22 @@ export default function PrivacyAndData() {
                 {t("Show when you are active or currently traveling", "Show when you are active or currently traveling")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={activityStatus}
               onValueChange={handleToggleActivityStatus}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Hide Past Trips */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleHidePastTrips(!hidePastTrips)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: hidePastTrips }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="eye-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -589,20 +588,24 @@ export default function PrivacyAndData() {
                 {t("Keep completed trips hidden from profile", "Prevent friends from browsing your complete map archive")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={hidePastTrips}
               onValueChange={handleToggleHidePastTrips}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
         </View>
 
         {/* ── 3. DATA PRIVACY ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("DATA PRIVACY")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           {/* Analytics Collection */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleAnalytics(!analyticsCollection)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: analyticsCollection }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="options-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -612,13 +615,12 @@ export default function PrivacyAndData() {
                 {t("Help BunkMates improve with anonymous telemetry", "Help BunkMates improve with anonymous telemetry")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={analyticsCollection}
               onValueChange={handleToggleAnalytics}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
@@ -731,13 +733,17 @@ export default function PrivacyAndData() {
                 <Pressable
                   style={({ pressed }) => [
                     styles.modalActionBtn,
-                    { backgroundColor: colors.coral },
+                    {
+                      backgroundColor: colors.coral,
+                      borderWidth: colors.accentBorder !== "transparent" ? 1 : 0,
+                      borderColor: colors.accentBorder,
+                    },
                     pressed && styles.pressed,
                   ]}
                   onPress={handleSaveExportFile}
                 >
-                  <Ionicons name="share-outline" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
-                  <Text style={styles.modalPrimBtnText}>{t("Save / Share File")}</Text>
+                  <Ionicons name="share-outline" size={18} color={colors.onAccent} style={{ marginRight: 8 }} />
+                  <Text style={[styles.modalPrimBtnText, { color: colors.onAccent }]}>{t("Save / Share File")}</Text>
                 </Pressable>
 
                 <Pressable
@@ -832,7 +838,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   modernLogoutText: {
-    color: "#FF5A5F",
+    color: "#EF4444",
     fontWeight: "700",
     fontSize: 15,
     marginLeft: 8,
@@ -953,7 +959,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   divider: {
-    height: 0,
+    height: StyleSheet.hairlineWidth,
     marginHorizontal: 16,
   },
 

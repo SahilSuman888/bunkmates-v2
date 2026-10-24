@@ -1376,7 +1376,7 @@ export default function NotesScreen() {
                   <Text style={s.autoSaveLabel}>Saving...</Text>
                 )}
                 {autoSaveStatus === "saved" && (
-                  <Text style={[s.autoSaveLabel, { color: accentColor }]}>Saved ✓</Text>
+                  <Text style={[s.autoSaveLabel, { color: themeColors.accentText }]}>Saved ✓</Text>
                 )}
               </View>
             </View>
