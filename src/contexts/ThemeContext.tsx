@@ -8,7 +8,7 @@ import React, {
   ReactNode,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Appearance } from 'react-native';
+import { Appearance, AppState, useColorScheme } from 'react-native';
 import {
   getTheme,
   ACCENT_COLORS,
@@ -35,6 +35,7 @@ export interface BackgroundSettings {
 export interface ThemeContextType {
   mode: 'dark' | 'light' | 'system';
   isDark: boolean;
+  systemColorScheme: 'light' | 'dark';
   setMode: (mode: 'dark' | 'light' | 'system') => void;
   accent: string;
   setAccent: (accent: string) => void;
@@ -86,30 +87,61 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
   const [fontSize, setFontSizeState] = useState<FontSize>('Medium');
   const [reduceAnimations, setReduceAnimationsState] = useState<boolean>(false);
 
-  // Track system appearance changes
-  const [systemColorScheme, setSystemColorScheme] = useState<'light' | 'dark'>(
-    Appearance.getColorScheme() === 'light' ? 'light' : 'dark'
-  );
+  // Reactive device color scheme via React Native's useColorScheme hook
+  const deviceColorScheme = useColorScheme();
 
+  // Track system appearance state with fallback to imperative Appearance.getColorScheme()
+  const [systemColorScheme, setSystemColorScheme] = useState<'light' | 'dark'>(() => {
+    const initial = Appearance.getColorScheme();
+    return initial === 'dark' ? 'dark' : 'light';
+  });
+
+  // Synchronize immediately whenever deviceColorScheme hook changes
   useEffect(() => {
-    const sub = Appearance.addChangeListener(({ colorScheme }) => {
-      setSystemColorScheme(colorScheme === 'light' ? 'light' : 'dark');
+    if (deviceColorScheme === 'dark' || deviceColorScheme === 'light') {
+      setSystemColorScheme(deviceColorScheme);
+    }
+  }, [deviceColorScheme]);
+
+  // Keep listeners for Appearance changes and AppState resume (e.g. toggling quick settings)
+  useEffect(() => {
+    const appearanceSub = Appearance.addChangeListener(({ colorScheme }) => {
+      if (colorScheme === 'dark' || colorScheme === 'light') {
+        setSystemColorScheme(colorScheme);
+      }
     });
-    return () => sub.remove();
+
+    const appStateSub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        const current = Appearance.getColorScheme();
+        if (current === 'dark' || current === 'light') {
+          setSystemColorScheme(current);
+        }
+      }
+    });
+
+    return () => {
+      appearanceSub.remove();
+      appStateSub.remove();
+    };
   }, []);
 
-  // Compute effective dark mode state
+  // Actively resolved device system color scheme
+  const activeSystemColorScheme: 'light' | 'dark' =
+    deviceColorScheme === 'dark' || deviceColorScheme === 'light'
+      ? deviceColorScheme
+      : systemColorScheme;
+
+  // Compute effective dark mode state:
+  // - 'dark': always dark
+  // - 'light': always light
+  // - 'system': strictly and reactively follows the active device OS color scheme
   const isDark = useMemo(() => {
     if (mode === 'system') {
-      if (locationMode === 'auto') {
-        const curHour = new Date().getHours();
-        const isNightTime = curHour >= 19 || curHour < 6;
-        return isNightTime || systemColorScheme === 'dark';
-      }
-      return systemColorScheme === 'dark';
+      return activeSystemColorScheme === 'dark';
     }
     return mode === 'dark';
-  }, [mode, systemColorScheme, locationMode]);
+  }, [mode, activeSystemColorScheme]);
 
   // Load from AsyncStorage on startup
   useEffect(() => {
@@ -272,14 +304,18 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
   const toggleTheme = React.useCallback(() => {
     setModeState((prev) => {
       let next: 'dark' | 'light' | 'system';
-      if (prev === 'dark') next = 'light';
-      else if (prev === 'light') next = 'dark';
-      else next = 'system';
+      if (prev === 'system') {
+        next = isDark ? 'light' : 'dark';
+      } else if (prev === 'dark') {
+        next = 'light';
+      } else {
+        next = 'dark';
+      }
       AsyncStorage.setItem('theme', next).catch(() => {});
       saveToFirestore('theme', next);
       return next;
     });
-  }, [saveToFirestore]);
+  }, [isDark, saveToFirestore]);
 
   // Font scale helper: Small = 0.85x, Medium = 1.0x, Large = 1.18x
   const fontScale = useMemo(() => {
@@ -356,6 +392,7 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
   const contextValue = useMemo<ThemeContextType>(() => ({
     mode,
     isDark,
+    systemColorScheme: activeSystemColorScheme,
     setMode,
     accent,
     setAccent,
@@ -390,6 +427,7 @@ export const ThemeToggleProvider = ({ children }: ThemeToggleProviderProps) => {
   }), [
     mode,
     isDark,
+    activeSystemColorScheme,
     setMode,
     accent,
     setAccent,

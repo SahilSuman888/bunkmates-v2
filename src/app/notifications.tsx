@@ -6,14 +6,23 @@ import { onAuthStateChanged } from "firebase/auth";
 import {
   arrayUnion,
   collection,
+  deleteDoc,
   doc,
+  limit,
   onSnapshot,
   query,
   setDoc,
   updateDoc,
   where,
 } from "firebase/firestore";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -32,17 +41,27 @@ import {
   UIManager,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useThemeToggle } from "../contexts/ThemeContext";
-import { auth, db } from "../lib/firebase";
-import { sendFriendAcceptedNotification } from "../lib/sendAppNotification";
 import { useUserChats } from "../hooks/useUserChats";
 import { useUserGroups } from "../hooks/useUserGroups";
+import { auth, db } from "../lib/firebase";
+import { sendFriendAcceptedNotification } from "../lib/sendAppNotification";
+import SettingsHeaderGradientMask from "./settings/_components/SettingsHeaderGradientMask";
+import { LinearGradient } from "expo-linear-gradient";
 
 // Enable experimental layout animations on Android (only on legacy architecture; Fabric natively supports it)
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-  const isFabric = Boolean((globalThis as any).nativeFabricUIManager || (globalThis as any)._IS_FABRIC);
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  const isFabric = Boolean(
+    (globalThis as any).nativeFabricUIManager || (globalThis as any)._IS_FABRIC,
+  );
   if (!isFabric) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
   }
@@ -95,6 +114,9 @@ export interface AppNotification {
   metadata?: Record<string, any>;
   [key: string]: any;
 }
+
+// Module-level in-memory cache for instant 0ms mount render
+let memoryNotificationsCache: AppNotification[] = [];
 
 export type FilterCategory =
   | "all"
@@ -149,7 +171,11 @@ function formatStackedTime(timestamp: any): string {
   if (!date) return "";
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const itemDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const itemDate = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  );
   const diffTime = today.getTime() - itemDate.getTime();
   const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
@@ -165,7 +191,11 @@ function formatStackedTime(timestamp: any): string {
   return `${weekday} • ${time}`;
 }
 
-function getDateSectionInfo(timestamp: any): { key: string; title: string; sortTimestamp: number } {
+function getDateSectionInfo(timestamp: any): {
+  key: string;
+  title: string;
+  sortTimestamp: number;
+} {
   const date = toDate(timestamp);
   if (!date) {
     return { key: "earlier", title: "EARLIER", sortTimestamp: 0 };
@@ -173,7 +203,11 @@ function getDateSectionInfo(timestamp: any): { key: string; title: string; sortT
 
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const itemDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const itemDate = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  );
   const diffTime = today.getTime() - itemDate.getTime();
   const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
@@ -181,11 +215,21 @@ function getDateSectionInfo(timestamp: any): { key: string; title: string; sortT
     return { key: "today", title: "TODAY", sortTimestamp: itemDate.getTime() };
   }
   if (diffDays === 1) {
-    return { key: "yesterday", title: "YESTERDAY", sortTimestamp: itemDate.getTime() };
+    return {
+      key: "yesterday",
+      title: "YESTERDAY",
+      sortTimestamp: itemDate.getTime(),
+    };
   }
   if (diffDays >= 2 && diffDays < 7) {
-    const dayName = date.toLocaleDateString("en-US", { weekday: "long" }).toUpperCase();
-    return { key: `day_${itemDate.getTime()}`, title: dayName, sortTimestamp: itemDate.getTime() };
+    const dayName = date
+      .toLocaleDateString("en-US", { weekday: "long" })
+      .toUpperCase();
+    return {
+      key: `day_${itemDate.getTime()}`,
+      title: dayName,
+      sortTimestamp: itemDate.getTime(),
+    };
   }
 
   const formatted = date
@@ -195,7 +239,11 @@ function getDateSectionInfo(timestamp: any): { key: string; title: string; sortT
       year: "numeric",
     })
     .toUpperCase();
-  return { key: `date_${itemDate.getTime()}`, title: formatted, sortTimestamp: itemDate.getTime() };
+  return {
+    key: `date_${itemDate.getTime()}`,
+    title: formatted,
+    sortTimestamp: itemDate.getTime(),
+  };
 }
 
 function stripHtml(value?: string): string {
@@ -229,9 +277,20 @@ function getAvatarInitialBg(name: string): string {
 
 function extractGroupId(item: AppNotification): string | null {
   if (!item) return null;
-  if (item.groupId && typeof item.groupId === "string" && item.groupId.trim()) return item.groupId.trim();
-  if (item.metadata?.groupId && typeof item.metadata.groupId === "string" && item.metadata.groupId.trim()) return item.metadata.groupId.trim();
-  if (item.data?.groupId && typeof item.data.groupId === "string" && item.data.groupId.trim()) return item.data.groupId.trim();
+  if (item.groupId && typeof item.groupId === "string" && item.groupId.trim())
+    return item.groupId.trim();
+  if (
+    item.metadata?.groupId &&
+    typeof item.metadata.groupId === "string" &&
+    item.metadata.groupId.trim()
+  )
+    return item.metadata.groupId.trim();
+  if (
+    item.data?.groupId &&
+    typeof item.data.groupId === "string" &&
+    item.data.groupId.trim()
+  )
+    return item.data.groupId.trim();
 
   // From route string, e.g. "/group-chatroom/xyz" or "/(tabs)/group-chatroom/xyz"
   const routeStr = typeof item.route === "string" ? item.route : "";
@@ -244,8 +303,17 @@ function extractGroupId(item: AppNotification): string | null {
   }
 
   // If item.type is group_chat or group, chatId is often the groupId
-  if (item.type === "group_chat" || item.type === "group" || item.category === "group_chat") {
-    if (item.chatId && typeof item.chatId === "string" && item.chatId.trim() && !item.chatId.includes("_")) {
+  if (
+    item.type === "group_chat" ||
+    item.type === "group" ||
+    item.category === "group_chat"
+  ) {
+    if (
+      item.chatId &&
+      typeof item.chatId === "string" &&
+      item.chatId.trim() &&
+      !item.chatId.includes("_")
+    ) {
       return item.chatId.trim();
     }
     if ((item as any).groupId && typeof (item as any).groupId === "string") {
@@ -258,19 +326,32 @@ function extractGroupId(item: AppNotification): string | null {
 
 function isGroupNotification(item: AppNotification): boolean {
   if (!item) return false;
-  if (item.type === "group_chat" || item.type === "group" || item.category === "group_chat") return true;
+  if (
+    item.type === "group_chat" ||
+    item.type === "group" ||
+    item.category === "group_chat"
+  )
+    return true;
   if (Boolean(extractGroupId(item))) return true;
-  if (typeof item.route === "string" && item.route.includes("group-chatroom")) return true;
+  if (typeof item.route === "string" && item.route.includes("group-chatroom"))
+    return true;
   if (Boolean(item.groupName)) return true;
   return false;
 }
 
-function getTargetFriendId(item: AppNotification, myUid?: string): string | null {
+function getTargetFriendId(
+  item: AppNotification,
+  myUid?: string,
+): string | null {
   if (!item) return null;
 
   // 1. Check item.route e.g. "/chat/friendId" or "/chat/uidA_uidB"
   if (typeof item.route === "string" && item.route.includes("/chat/")) {
-    const rawTarget = item.route.split("/chat/")[1]?.split("?")[0]?.replace(/^\//, "").trim();
+    const rawTarget = item.route
+      .split("/chat/")[1]
+      ?.split("?")[0]
+      ?.replace(/^\//, "")
+      .trim();
     if (rawTarget) {
       if (rawTarget.includes("_") && myUid) {
         const other = rawTarget.split("_").find((p) => p !== myUid);
@@ -299,7 +380,11 @@ function getTargetFriendId(item: AppNotification, myUid?: string): string | null
   }
 
   // 5. Check metadata & data
-  const metaSender = item.metadata?.senderId || item.data?.senderId || item.metadata?.friendId || item.data?.friendId;
+  const metaSender =
+    item.metadata?.senderId ||
+    item.data?.senderId ||
+    item.metadata?.friendId ||
+    item.data?.friendId;
   if (metaSender && metaSender !== myUid) {
     return metaSender;
   }
@@ -321,15 +406,15 @@ function resolveNotificationDestination(
   item: AppNotification,
   currentUid: string | undefined,
   chats: any[] = [],
-  groups: any[] = []
+  groups: any[] = [],
 ): NotificationDestination | null {
   if (!item) return null;
 
   // 1. Friend requests have inline action buttons
   if (item.type === "friend_request") return null;
 
-  // 2. Pure feedback / system tickets: expanded in-place
-  if (isFeedbackOrGeneralNotification(item)) return null;
+  // 2. Expandable detail notifications (Feedback, Accepted info): stay in-place, do not navigate
+  if (isExpandableDetailNotification(item)) return null;
 
   // 3. Created Group Chat detection (Redirects to group chatroom if notification belongs to any created group)
   const isGroup = isGroupNotification(item);
@@ -346,7 +431,8 @@ function resolveNotificationDestination(
       const titleLower = (item.title || "").toLowerCase().trim();
       const groupNameLower = (item.groupName || "").toLowerCase().trim();
       return (
-        (groupNameLower && (gName === groupNameLower || gTripName === groupNameLower)) ||
+        (groupNameLower &&
+          (gName === groupNameLower || gTripName === groupNameLower)) ||
         (titleLower && (gName === titleLower || gTripName === titleLower))
       );
     });
@@ -376,12 +462,16 @@ function resolveNotificationDestination(
 
   // Match against user chats list by peer name or ID
   if (!friendId && chats.length > 0) {
-    const rawSender = (item.senderName || item.title || "").toLowerCase().trim();
+    const rawSender = (item.senderName || item.title || "")
+      .toLowerCase()
+      .trim();
     if (rawSender) {
       const match = chats.find((c: any) => {
         if (!c) return false;
         const cName = (c.name || c.displayName || "").toLowerCase().trim();
-        return cName === rawSender || c.uid === item.senderId || c.id === item.chatId;
+        return (
+          cName === rawSender || c.uid === item.senderId || c.id === item.chatId
+        );
       });
       if (match) {
         friendId =
@@ -424,7 +514,11 @@ function resolveNotificationDestination(
   }
 
   // 8. Generic route fallback
-  if (item.route && typeof item.route === "string" && item.route !== "/notifications") {
+  if (
+    item.route &&
+    typeof item.route === "string" &&
+    item.route !== "/notifications"
+  ) {
     if (item.route.includes("group-chatroom")) {
       const gId = extractGroupId(item) || resolvedGroupId;
       if (gId) {
@@ -500,21 +594,35 @@ function isFeedbackOrGeneralNotification(item: AppNotification): boolean {
   return false;
 }
 
+function isAcceptedNotification(item: AppNotification): boolean {
+  if (!item) return false;
+  const t = (item.type || "").toLowerCase().trim();
+  const s = (item.status || "").toLowerCase().trim();
+  const title = (item.title || "").toLowerCase();
+
+  return (
+    t === "friend_accepted" ||
+    t === "trip_accepted" ||
+    t.includes("accepted") ||
+    s === "accepted" ||
+    title.includes("accepted")
+  );
+}
+
 function isExpandableDetailNotification(item: AppNotification): boolean {
   if (!item) return false;
-  // If friend request, inline buttons are used instead of expansion
-  if (item.type === "friend_request" || item.type === "friend_accepted") {
+
+  // Pending friend requests have inline Accept/Decline action buttons (do not expand)
+  if (item.type === "friend_request" && item.status !== "accepted") {
     return false;
   }
-  // Calls, chats, group chats, and trips have their own dedicated navigation
+
+  // Chats, calls, missed calls, and groups have dedicated navigation (do not expand)
   if (
     item.type === "chat" ||
     item.type === "call" ||
     item.type === "missed_call" ||
-    Boolean(item.senderId) ||
-    Boolean(item.chatId) ||
     Boolean(item.callId) ||
-    Boolean(item.tripId) ||
     Boolean(item.callType) ||
     isGroupNotification(item)
   ) {
@@ -522,7 +630,16 @@ function isExpandableDetailNotification(item: AppNotification): boolean {
   }
 
   // Feedback / General / System tickets are expandable detail items
-  return isFeedbackOrGeneralNotification(item);
+  if (isFeedbackOrGeneralNotification(item)) {
+    return true;
+  }
+
+  // Accepted notifications with info are expandable detail items
+  if (isAcceptedNotification(item)) {
+    return true;
+  }
+
+  return false;
 }
 
 /* ============================================================
@@ -536,7 +653,11 @@ interface TypeConfig {
   label: string;
 }
 
-function getTypeConfig(type?: string, isGroup?: boolean, title?: string): TypeConfig {
+function getTypeConfig(
+  type?: string,
+  isGroup?: boolean,
+  title?: string,
+): TypeConfig {
   if (isGroup || type === "group_chat" || type === "group") {
     return {
       icon: "chatbubbles",
@@ -620,15 +741,42 @@ function getTypeConfig(type?: string, isGroup?: boolean, title?: string): TypeCo
 export default function Notifications() {
   const router = useRouter();
   const params = useLocalSearchParams<{ notificationId?: string }>();
-  const { isDark, scaleFont } = useThemeToggle();
+  const { isDark, scaleFont, themeColors, accentColor } = useThemeToggle();
+  const colors = useMemo(
+    () => ({
+      bg: themeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      textPrimary: themeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+    }),
+    [themeColors, isDark],
+  );
   const { t } = useLanguage();
+  const insets = useSafeAreaInsets();
+  const topInset =
+    insets.top > 0
+      ? insets.top
+      : Platform.OS === "android"
+        ? StatusBar.currentHeight || 24
+        : 44;
 
   const [currentUser, setCurrentUser] = useState<any>(() => auth.currentUser);
-  const { chats = [] } = useUserChats(currentUser?.uid || auth.currentUser?.uid || null);
-  const { groups = [] } = useUserGroups(currentUser?.uid || auth.currentUser?.uid || null);
+  const { chats = [] } = useUserChats(
+    currentUser?.uid || auth.currentUser?.uid || null,
+  );
+  const { groups = [] } = useUserGroups(
+    currentUser?.uid || auth.currentUser?.uid || null,
+  );
 
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [loading, setLoading] = useState(true);
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+
+  const [notifications, setNotifications] = useState<AppNotification[]>(
+    () => memoryNotificationsCache,
+  );
+  const [loading, setLoading] = useState(
+    () => memoryNotificationsCache.length === 0,
+  );
   const [refreshing, setRefreshing] = useState(false);
 
   // Active Category Filter
@@ -645,7 +793,7 @@ export default function Notifications() {
     return unsubscribe;
   }, []);
 
-  // 2. 0ms Offline Hydration from AsyncStorage (Safe CursorWindow handling)
+  // 2. Instant Offline Hydration from AsyncStorage
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -654,13 +802,14 @@ export default function Notifications() {
         if (cached && isMounted) {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            setNotifications(parsed);
-            setLoading(false);
+            if (memoryNotificationsCache.length === 0) {
+              memoryNotificationsCache = parsed;
+              setNotifications(parsed);
+              setLoading(false);
+            }
           }
         }
       } catch (err) {
-        console.warn("[notifications] Cache hydration error, clearing bloated cache:", err);
-        // Automatically purge oversized or corrupted cache row to fix Android CursorWindow errors
         AsyncStorage.removeItem(NOTIFICATIONS_CACHE_KEY).catch(() => { });
       }
     })();
@@ -669,7 +818,7 @@ export default function Notifications() {
     };
   }, []);
 
-  // 3. Realtime Firestore Sync
+  // 3. Realtime Firestore Sync with 50-limit and batched updates
   useEffect(() => {
     if (!currentUser) {
       setNotifications([]);
@@ -680,6 +829,7 @@ export default function Notifications() {
     const currentUid = currentUser.uid;
     let unsubUid: (() => void) | null = null;
     let unsubRecipient: (() => void) | null = null;
+    let updateTimer: ReturnType<typeof setTimeout> | null = null;
     const docMap = new Map<string, AppNotification>();
 
     const updateAndCache = () => {
@@ -697,19 +847,21 @@ export default function Notifications() {
         return tB - tA;
       });
 
+      memoryNotificationsCache = mergedList;
       setNotifications(mergedList);
       setLoading(false);
       setRefreshing(false);
 
       // Async Cache to AsyncStorage: save only latest 40 items with sanitized fields
-      // Strictly prevents SQLite 2MB CursorWindow limit crashes on Android
       const sanitizedCache = mergedList.slice(0, 40).map((item) => ({
         id: item.id,
         uid: item.uid,
         title: item.title,
         body: item.body || item.content || item.message,
         type: item.type,
-        timestamp: item.timestamp?.toMillis ? item.timestamp.toMillis() : item.timestamp,
+        timestamp: item.timestamp?.toMillis
+          ? item.timestamp.toMillis()
+          : item.timestamp,
         seen: item.seen,
         isRead: item.isRead,
         read: item.read,
@@ -720,45 +872,67 @@ export default function Notifications() {
         pic: item.pic && !item.pic.startsWith("data:") ? item.pic : undefined,
       }));
 
-      AsyncStorage.setItem(NOTIFICATIONS_CACHE_KEY, JSON.stringify(sanitizedCache)).catch(() => { });
+      AsyncStorage.setItem(
+        NOTIFICATIONS_CACHE_KEY,
+        JSON.stringify(sanitizedCache),
+      ).catch(() => { });
     };
 
-    // Query 1: where uid == currentUid
-    const qUid = query(collection(db, "notifications"), where("uid", "==", currentUid));
+    const scheduleUpdate = () => {
+      if (updateTimer) clearTimeout(updateTimer);
+      updateTimer = setTimeout(() => {
+        updateAndCache();
+      }, 35);
+    };
+
+    // Query 1: where uid == currentUid (capped at latest 50 for instantaneous response)
+    const qUid = query(
+      collection(db, "notifications"),
+      where("uid", "==", currentUid),
+      limit(50),
+    );
     unsubUid = onSnapshot(
       qUid,
       (snapshot) => {
         snapshot.docs.forEach((docSnap) => {
-          docMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as AppNotification);
+          docMap.set(docSnap.id, {
+            id: docSnap.id,
+            ...docSnap.data(),
+          } as AppNotification);
         });
-        updateAndCache();
+        scheduleUpdate();
       },
       (error) => {
         console.warn("[notifications] Firestore uid listener error:", error);
         setLoading(false);
         setRefreshing(false);
-      }
+      },
     );
 
-    // Query 2: where recipientId == currentUid
+    // Query 2: where recipientId == currentUid (capped at latest 50)
     const qRecipient = query(
       collection(db, "notifications"),
-      where("recipientId", "==", currentUid)
+      where("recipientId", "==", currentUid),
+      limit(50),
     );
     unsubRecipient = onSnapshot(
       qRecipient,
       (snapshot) => {
         snapshot.docs.forEach((docSnap) => {
-          docMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() } as AppNotification);
+          docMap.set(docSnap.id, {
+            id: docSnap.id,
+            ...docSnap.data(),
+          } as AppNotification);
         });
-        updateAndCache();
+        scheduleUpdate();
       },
       (error) => {
         // Ignored if index or recipientId isn't populated
-      }
+      },
     );
 
     return () => {
+      if (updateTimer) clearTimeout(updateTimer);
       if (unsubUid) unsubUid();
       if (unsubRecipient) unsubRecipient();
     };
@@ -773,36 +947,10 @@ export default function Notifications() {
     setTimeout(() => setRefreshing(false), 800);
   }, []);
 
-  // Custom layout animation configuration for fast, snappy height expansion/collapse
-  const SPRING_LAYOUT_CONFIG = useMemo(
-    () => ({
-      duration: 250,
-      create: {
-        type: LayoutAnimation.Types.easeInEaseOut,
-        property: LayoutAnimation.Properties.opacity,
-      },
-      update: {
-        type: LayoutAnimation.Types.easeInEaseOut,
-      },
-      delete: {
-        type: LayoutAnimation.Types.easeInEaseOut,
-        property: LayoutAnimation.Properties.opacity,
-      },
-    }),
-    []
-  );
-
-  // Inline Accordion Toggle Handler with Snappy Layout Animation
-  const toggleStack = useCallback(
-    (stackId: string) => {
-      try {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      } catch { }
-      LayoutAnimation.configureNext(SPRING_LAYOUT_CONFIG);
-      setExpandedStackId((prev) => (prev === stackId ? null : stackId));
-    },
-    [SPRING_LAYOUT_CONFIG]
-  );
+  // Inline Accordion Toggle Handler with instantaneous response (0ms delay)
+  const toggleStack = useCallback((stackId: string) => {
+    setExpandedStackId((prev) => (prev === stackId ? null : stackId));
+  }, []);
 
   // 5. Read / Direct Action Handlers
   const markAsRead = useCallback(async (item: AppNotification) => {
@@ -810,7 +958,9 @@ export default function Notifications() {
 
     // Optimistic local update
     setNotifications((prev) =>
-      prev.map((n) => (n.id === item.id ? { ...n, isRead: true, seen: true, read: true } : n))
+      prev.map((n) =>
+        n.id === item.id ? { ...n, isRead: true, seen: true, read: true } : n,
+      ),
     );
 
     try {
@@ -824,6 +974,69 @@ export default function Notifications() {
     }
   }, []);
 
+  // Slide-to-action: Toggle read/unread status on notification(s)
+  const handleToggleRead = useCallback(
+    async (target: AppNotification | AppNotification[]) => {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch { }
+      const items = Array.isArray(target) ? target : [target];
+      if (items.length === 0) return;
+
+      const anyUnread = items.some((n) => !n.isRead && !n.seen && !n.read);
+      const newStatus = anyUnread ? true : false;
+      const ids = items.map((n) => n.id);
+
+      setNotifications((prev) =>
+        prev.map((n) =>
+          ids.includes(n.id)
+            ? { ...n, isRead: newStatus, seen: newStatus, read: newStatus }
+            : n,
+        ),
+      );
+
+      try {
+        await Promise.all(
+          ids.map((id) =>
+            updateDoc(doc(db, "notifications", id), {
+              isRead: newStatus,
+              seen: newStatus,
+              read: newStatus,
+            }).catch(() => { }),
+          ),
+        );
+      } catch (err) {
+        console.warn("Failed to update notification read status:", err);
+      }
+    },
+    [],
+  );
+
+  // Slide-to-action: Delete notification(s)
+  const handleDeleteNotification = useCallback(
+    async (target: AppNotification | AppNotification[]) => {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } catch { }
+      const items = Array.isArray(target) ? target : [target];
+      if (items.length === 0) return;
+
+      const ids = items.map((n) => n.id);
+      setNotifications((prev) => prev.filter((n) => !ids.includes(n.id)));
+
+      try {
+        await Promise.all(
+          ids.map((id) =>
+            deleteDoc(doc(db, "notifications", id)).catch(() => { }),
+          ),
+        );
+      } catch (err) {
+        console.warn("Failed to delete notification(s):", err);
+      }
+    },
+    [],
+  );
+
   const handleNotificationPress = useCallback(
     (item: AppNotification) => {
       try {
@@ -833,20 +1046,23 @@ export default function Notifications() {
 
       const currentUid = auth.currentUser?.uid || currentUser?.uid;
 
-      // 1. If friend request, inline buttons are used (Accept / Decline)
-      if (item.type === "friend_request") {
+      // 1. If pending friend request, inline buttons are used (Accept / Decline)
+      if (item.type === "friend_request" && item.status !== "accepted") {
         return;
       }
 
-      // 1.5. If pure feedback/ticket notification without chat/group context, toggle expansion
-      if (isFeedbackOrGeneralNotification(item)) {
-        const targetStackKey = `stack_${item.id}`;
-        toggleStack(targetStackKey);
+      // 1.5. If expandable detail notification (Feedback or Accepted info), do not navigate away
+      if (isExpandableDetailNotification(item)) {
         return;
       }
 
       // 2. High-precision destination resolver (uses real Firestore groups and chats data)
-      const destination = resolveNotificationDestination(item, currentUid, chats, groups);
+      const destination = resolveNotificationDestination(
+        item,
+        currentUid,
+        chatsRef.current,
+        groupsRef.current,
+      );
       if (destination && destination.path) {
         router.push(destination.path as any);
         return;
@@ -866,133 +1082,152 @@ export default function Notifications() {
       }
 
       // 5. Fallback: Generic route
-      if (item.route && typeof item.route === "string" && item.route !== "/notifications") {
+      if (
+        item.route &&
+        typeof item.route === "string" &&
+        item.route !== "/notifications"
+      ) {
         router.push(item.route as any);
         return;
       }
     },
-    [router, markAsRead, toggleStack, currentUser?.uid, chats, groups]
+    [router, markAsRead, currentUser?.uid],
   );
 
   // 6. Inline Friend Request Accept / Decline Handlers (Optimistic + Firestore)
-  const handleAcceptFriendRequest = useCallback(async (item: AppNotification) => {
-    const currentUid = auth.currentUser?.uid;
-    const targetSenderId = item.senderId;
-    if (!currentUid || !targetSenderId) return;
+  const handleAcceptFriendRequest = useCallback(
+    async (item: AppNotification) => {
+      const currentUid = auth.currentUser?.uid;
+      const targetSenderId = item.senderId;
+      if (!currentUid || !targetSenderId) return;
 
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } catch { }
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } catch { }
 
-    // Instant local optimistic UI update
-    setNotifications((prev) =>
-      prev.map((n) =>
-        n.id === item.id
-          ? {
-            ...n,
-            status: "accepted",
-            isRead: true,
-            seen: true,
-            read: true,
-            content: "You are now friends! 🎉",
-            message: "You are now friends! 🎉",
-            body: "You are now friends! 🎉",
-          }
-          : n
-      )
-    );
-
-    try {
-      await updateDoc(doc(db, "notifications", item.id), {
-        status: "accepted",
-        isRead: true,
-        seen: true,
-        read: true,
-        content: "You are now friends! 🎉",
-        message: "You are now friends! 🎉",
-        body: "You are now friends! 🎉",
-      });
-
-      await Promise.all([
-        updateDoc(doc(db, "users", currentUid), {
-          friends: arrayUnion(targetSenderId),
-        }),
-        updateDoc(doc(db, "users", targetSenderId), {
-          friends: arrayUnion(currentUid),
-        }),
-      ]);
-
-      await setDoc(
-        doc(db, "notifications", `${targetSenderId}_${currentUid}_friend_accepted_${Date.now()}`),
-        {
-          type: "friend_accepted",
-          senderId: currentUid,
-          uid: targetSenderId,
-          recipientId: targetSenderId,
-          title: "Friend Request Accepted",
-          content: `${auth.currentUser?.displayName || "A user"} accepted your friend request.`,
-          message: `${auth.currentUser?.displayName || "A user"} accepted your friend request.`,
-          body: `${auth.currentUser?.displayName || "A user"} accepted your friend request.`,
-          pic: auth.currentUser?.photoURL || "",
-          senderAvatar: auth.currentUser?.photoURL || "",
-          isRead: false,
-          seen: false,
-          read: false,
-          timestamp: new Date(),
-          viaOneSignal: true,
-          pushSent: true,
-        }
+      // Instant local optimistic UI update
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.id === item.id
+            ? {
+              ...n,
+              status: "accepted",
+              isRead: true,
+              seen: true,
+              read: true,
+              content: "You are now friends! 🎉",
+              message: "You are now friends! 🎉",
+              body: "You are now friends! 🎉",
+            }
+            : n,
+        ),
       );
 
-      sendFriendAcceptedNotification({
-        receiverId: targetSenderId,
-        senderId: currentUid,
-        senderName: auth.currentUser?.displayName || "A BunkMate",
-        senderAvatar: auth.currentUser?.photoURL || "",
-      }).catch((err) => console.warn("[notifications] sendFriendAcceptedNotification error:", err));
-    } catch (err) {
-      console.error("Error accepting friend request:", err);
-      Alert.alert("Error", "Could not accept friend request.");
-    }
-  }, []);
+      try {
+        await updateDoc(doc(db, "notifications", item.id), {
+          status: "accepted",
+          isRead: true,
+          seen: true,
+          read: true,
+          content: "You are now friends! 🎉",
+          message: "You are now friends! 🎉",
+          body: "You are now friends! 🎉",
+        });
 
-  const handleRejectFriendRequest = useCallback(async (item: AppNotification) => {
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch { }
+        await Promise.all([
+          updateDoc(doc(db, "users", currentUid), {
+            friends: arrayUnion(targetSenderId),
+          }),
+          updateDoc(doc(db, "users", targetSenderId), {
+            friends: arrayUnion(currentUid),
+          }),
+        ]);
 
-    // Instant local optimistic UI update
-    setNotifications((prev) =>
-      prev.map((n) =>
-        n.id === item.id
-          ? {
-            ...n,
-            status: "rejected",
-            isRead: true,
-            seen: true,
-            read: true,
-            content: "Friend request declined.",
-            message: "Friend request declined.",
-            body: "Friend request declined.",
-          }
-          : n
-      )
-    );
+        await setDoc(
+          doc(
+            db,
+            "notifications",
+            `${targetSenderId}_${currentUid}_friend_accepted_${Date.now()}`,
+          ),
+          {
+            type: "friend_accepted",
+            senderId: currentUid,
+            uid: targetSenderId,
+            recipientId: targetSenderId,
+            title: "Friend Request Accepted",
+            content: `${auth.currentUser?.displayName || "A user"} accepted your friend request.`,
+            message: `${auth.currentUser?.displayName || "A user"} accepted your friend request.`,
+            body: `${auth.currentUser?.displayName || "A user"} accepted your friend request.`,
+            pic: auth.currentUser?.photoURL || "",
+            senderAvatar: auth.currentUser?.photoURL || "",
+            isRead: false,
+            seen: false,
+            read: false,
+            timestamp: new Date(),
+            viaOneSignal: true,
+            pushSent: true,
+          },
+        );
 
-    try {
-      await updateDoc(doc(db, "notifications", item.id), {
-        status: "rejected",
-        isRead: true,
-        seen: true,
-        read: true,
-        content: "Friend request declined.",
-        message: "Friend request declined.",
-        body: "Friend request declined.",
-      });
-    } catch (err) {
-      console.error("Error rejecting friend request:", err);
-    }
-  }, []);
+        sendFriendAcceptedNotification({
+          receiverId: targetSenderId,
+          senderId: currentUid,
+          senderName: auth.currentUser?.displayName || "A BunkMate",
+          senderAvatar: auth.currentUser?.photoURL || "",
+        }).catch((err) =>
+          console.warn(
+            "[notifications] sendFriendAcceptedNotification error:",
+            err,
+          ),
+        );
+      } catch (err) {
+        console.error("Error accepting friend request:", err);
+        Alert.alert("Error", "Could not accept friend request.");
+      }
+    },
+    [],
+  );
+
+  const handleRejectFriendRequest = useCallback(
+    async (item: AppNotification) => {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch { }
+
+      // Instant local optimistic UI update
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.id === item.id
+            ? {
+              ...n,
+              status: "rejected",
+              isRead: true,
+              seen: true,
+              read: true,
+              content: "Friend request declined.",
+              message: "Friend request declined.",
+              body: "Friend request declined.",
+            }
+            : n,
+        ),
+      );
+
+      try {
+        await updateDoc(doc(db, "notifications", item.id), {
+          status: "rejected",
+          isRead: true,
+          seen: true,
+          read: true,
+          content: "Friend request declined.",
+          message: "Friend request declined.",
+          body: "Friend request declined.",
+        });
+      } catch (err) {
+        console.error("Error rejecting friend request:", err);
+      }
+    },
+    [],
+  );
 
   const handleSelectCategory = useCallback((cat: FilterCategory) => {
     try {
@@ -1025,7 +1260,7 @@ export default function Notifications() {
                   n.type !== "friend_request" &&
                   n.type !== "friend_accepted" &&
                   n.type !== "trip" &&
-                  n.type !== "like"))))
+                  n.type !== "like")))),
       );
     } else if (activeCategory === "group_chat") {
       result = result.filter(isGroupNotification);
@@ -1035,7 +1270,7 @@ export default function Notifications() {
           n.type === "call" ||
           n.type === "missed_call" ||
           Boolean(n.callId) ||
-          Boolean(n.callType)
+          Boolean(n.callType),
       );
     } else if (activeCategory === "feedback") {
       result = result.filter(isFeedbackOrGeneralNotification);
@@ -1045,7 +1280,10 @@ export default function Notifications() {
   }, [notifications, activeCategory]);
 
   const groupedDateSections = useMemo(() => {
-    const sectionMap = new Map<string, { title: string; sortTimestamp: number; items: AppNotification[] }>();
+    const sectionMap = new Map<
+      string,
+      { title: string; sortTimestamp: number; items: AppNotification[] }
+    >();
 
     filteredNotifications.forEach((item) => {
       const sec = getDateSectionInfo(item.timestamp);
@@ -1078,8 +1316,18 @@ export default function Notifications() {
             // General / Feedback / System tickets: single expandable detail item per notification
             groupKey = `feedback_${item.id}`;
             catLabel = "Feedback";
-          } else if (item.type === "call" || item.type === "missed_call" || item.callId) {
-            const sender = grpId ? `group_${grpId}` : item.senderId || item.senderName || item.title || "calls";
+          } else if (isAcceptedNotification(item)) {
+            // Accepted info: single expandable detail item per notification
+            groupKey = `accepted_${item.id}`;
+            catLabel = "Accepted";
+          } else if (
+            item.type === "call" ||
+            item.type === "missed_call" ||
+            item.callId
+          ) {
+            const sender = grpId
+              ? `group_${grpId}`
+              : item.senderId || item.senderName || item.title || "calls";
             groupKey = `calls_${sender}`;
             catLabel = "Calls";
           } else if (isGroup || grpId) {
@@ -1095,7 +1343,12 @@ export default function Notifications() {
               item.type !== "trip" &&
               item.type !== "like")
           ) {
-            const sender = item.chatId || item.senderId || item.senderName || item.title || "chat";
+            const sender =
+              item.chatId ||
+              item.senderId ||
+              item.senderName ||
+              item.title ||
+              "chat";
             groupKey = `chat_${sender}`;
             catLabel = "Chat";
           }
@@ -1117,8 +1370,16 @@ export default function Notifications() {
         if (!item.stackId) {
           if (isFeedbackOrGeneralNotification(item)) {
             groupKey = `feedback_${item.id}`;
-          } else if (item.type === "call" || item.type === "missed_call" || item.callId) {
-            const sender = grpId ? `group_${grpId}` : item.senderId || item.senderName || item.title || "calls";
+          } else if (isAcceptedNotification(item)) {
+            groupKey = `accepted_${item.id}`;
+          } else if (
+            item.type === "call" ||
+            item.type === "missed_call" ||
+            item.callId
+          ) {
+            const sender = grpId
+              ? `group_${grpId}`
+              : item.senderId || item.senderName || item.title || "calls";
             groupKey = `calls_${sender}`;
           } else if (isGroup || grpId) {
             const grp = grpId || item.groupName || item.title || "group";
@@ -1132,7 +1393,12 @@ export default function Notifications() {
               item.type !== "trip" &&
               item.type !== "like")
           ) {
-            const sender = item.chatId || item.senderId || item.senderName || item.title || "chat";
+            const sender =
+              item.chatId ||
+              item.senderId ||
+              item.senderName ||
+              item.title ||
+              "chat";
             groupKey = `chat_${sender}`;
           }
         }
@@ -1169,26 +1435,52 @@ export default function Notifications() {
   ============================================================ */
 
   return (
-    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-      <StatusBar barStyle="light-content" />
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.bg }]}
+      edges={["top", "left", "right"]}
+    >
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask matching Settings */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        height={topInset + (Platform.OS === "android" ? 6 : 4) + 88 + 128 + 42}
+        zIndex={15}
+      />
 
-      {/* 1. TOP APP BAR (Screenshot 3) */}
-      <View style={styles.header}>
-        <TouchableOpacity
+      {/* 1. TOP APP BAR — Exact circular back button matching Settings page */}
+      <View style={[styles.header, { zIndex: 20 }]}>
+        <Pressable
           onPress={() => {
             try {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             } catch { }
-            router.back();
+            if (router.canGoBack()) router.back();
+            else router.replace("/(tabs)/chats" as any);
           }}
-          style={styles.circleIconButton}
-          activeOpacity={0.7}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          style={({ pressed }) => [
+            styles.modernHeaderBtn,
+            {
+              backgroundColor: isDark ? "#161616" : "#e6e6e6",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
+            pressed && styles.pressed,
+          ]}
+          hitSlop={8}
+          accessibilityLabel="Go back"
         >
-          <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
-        </TouchableOpacity>
+          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} />
+        </Pressable>
 
-        <Text style={[styles.headerTitle, { fontSize: scaleFont(22) }]}>
+        <Text
+          style={[
+            styles.headerTitle,
+            { color: colors.textPrimary, fontSize: scaleFont(22) },
+          ]}
+          numberOfLines={1}
+        >
           {t("notifications", "Notifications")}
         </Text>
       </View>
@@ -1203,36 +1495,42 @@ export default function Notifications() {
           <FilterPill
             label="All"
             active={activeCategory === "all"}
+            isDark={isDark}
             scaleFont={scaleFont}
             onPress={() => handleSelectCategory("all")}
           />
           <FilterPill
             label="Unreads"
             active={activeCategory === "unreads"}
+            isDark={isDark}
             scaleFont={scaleFont}
             onPress={() => handleSelectCategory("unreads")}
           />
           <FilterPill
             label="Chat"
             active={activeCategory === "chat"}
+            isDark={isDark}
             scaleFont={scaleFont}
             onPress={() => handleSelectCategory("chat")}
           />
           <FilterPill
             label="Group Chat"
             active={activeCategory === "group_chat"}
+            isDark={isDark}
             scaleFont={scaleFont}
             onPress={() => handleSelectCategory("group_chat")}
           />
           <FilterPill
             label="Calls"
             active={activeCategory === "calls"}
+            isDark={isDark}
             scaleFont={scaleFont}
             onPress={() => handleSelectCategory("calls")}
           />
           <FilterPill
             label="Feedback"
             active={activeCategory === "feedback"}
+            isDark={isDark}
             scaleFont={scaleFont}
             onPress={() => handleSelectCategory("feedback")}
           />
@@ -1242,22 +1540,61 @@ export default function Notifications() {
       {/* 3. MAIN NOTIFICATION SCROLLVIEW */}
       {loading ? (
         <View style={styles.centerLoading}>
-          <ActivityIndicator size="large" color="#FFFFFF" />
+          <ActivityIndicator size="large" color={isDark ? "#FFFFFF" : "#000000"} />
         </View>
       ) : filteredNotifications.length === 0 ? (
         <ScrollView
           contentContainerStyle={styles.emptyContainer}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#FFFFFF" />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={isDark ? "#FFFFFF" : "#000000"}
+            // progressViewOffset={200}
+            />
           }
         >
-          <View style={styles.emptyGlowCircle}>
-            <Ionicons name="notifications-off-outline" size={38} color="#7E8590" />
+          <View
+            style={[
+              styles.emptyGlowCircle,
+              {
+                backgroundColor: isDark
+                  ? "rgba(255, 255, 255, 0.04)"
+                  : "rgba(0, 0, 0, 0.04)",
+                boxShadow: isDark
+                  ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                  : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              },
+            ]}
+          >
+            <Ionicons
+              name="notifications-off-outline"
+              size={38}
+              color={isDark ? "#7E8590" : "#6E7682"}
+            />
           </View>
-          <Text style={[styles.emptyTitle, { fontSize: scaleFont(18) }]}>
-            {activeCategory === "unreads" ? "You're all caught up! ✨" : "No notifications yet"}
+          <Text
+            style={[
+              styles.emptyTitle,
+              {
+                fontSize: scaleFont(18),
+                color: isDark ? "#FFFFFF" : "#11141A",
+              },
+            ]}
+          >
+            {activeCategory === "unreads"
+              ? "You're all caught up! ✨"
+              : "No notifications yet"}
           </Text>
-          <Text style={[styles.emptyDescription, { fontSize: scaleFont(13) }]}>
+          <Text
+            style={[
+              styles.emptyDescription,
+              {
+                fontSize: scaleFont(13),
+                color: isDark ? "#7E8590" : "#6B7280",
+              },
+            ]}
+          >
             {activeCategory === "unreads"
               ? "Zero unread alerts remaining."
               : "When your friends message, call, or invite you, they'll show up right here."}
@@ -1265,18 +1602,32 @@ export default function Notifications() {
         </ScrollView>
       ) : (
         <ScrollView
+          style={styles.notificationListOverlay}
           showsVerticalScrollIndicator={false}
-          removeClippedSubviews={Platform.OS === "android"}
+          removeClippedSubviews={false}
           scrollEventThrottle={16}
           contentContainerStyle={styles.listScrollContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#FFFFFF" />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={isDark ? "#FFFFFF" : "#000000"}
+              progressViewOffset={125}
+            />
           }
         >
           {groupedDateSections.map((section) => (
             <View key={section.key} style={styles.sectionBlock}>
               {/* Chronological Timeline Header: e.g. "YESTERDAY", "THURSDAY", "SUNDAY" */}
-              <Text style={[styles.sectionTitle, { fontSize: scaleFont(12) }]}>
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  {
+                    fontSize: scaleFont(12),
+                    color: isDark ? "#7E8590" : "#6E7682",
+                  },
+                ]}
+              >
                 {section.title}
               </Text>
 
@@ -1288,11 +1639,15 @@ export default function Notifications() {
                     key={group.groupKey}
                     group={group}
                     isExpanded={isExpanded}
+                    isDark={isDark}
                     scaleFont={scaleFont}
+                    accentColor={accentColor}
                     onToggleStack={toggleStack}
                     onPressItem={handleNotificationPress}
                     onAccept={handleAcceptFriendRequest}
                     onReject={handleRejectFriendRequest}
+                    onToggleRead={handleToggleRead}
+                    onDelete={handleDeleteNotification}
                   />
                 );
               })}
@@ -1311,11 +1666,13 @@ export default function Notifications() {
 const FilterPill = React.memo(function FilterPill({
   label,
   active,
+  isDark,
   scaleFont,
   onPress,
 }: {
   label: string;
   active: boolean;
+  isDark: boolean;
   scaleFont: (size: number) => number;
   onPress: () => void;
 }) {
@@ -1350,15 +1707,27 @@ const FilterPill = React.memo(function FilterPill({
       <Animated.View
         style={[
           styles.filterPill,
-          active ? styles.filterPillActive : styles.filterPillInactive,
-          { transform: [{ scale: pressScale }] },
+          {
+            backgroundColor: active
+              ? (isDark ? "#FFFFFF" : "#000000")
+              : (isDark ? "#161616" : "#e6e6e6"),
+            boxShadow: isDark
+              ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+              : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+            transform: [{ scale: pressScale }],
+          },
         ]}
       >
         <Text
           style={[
             styles.filterPillText,
-            { fontSize: scaleFont(13) },
-            active ? styles.filterPillTextActive : styles.filterPillTextInactive,
+            {
+              fontSize: scaleFont(13),
+              color: active
+                ? (isDark ? "#000000" : "#FFFFFF")
+                : (isDark ? "#F1F1F1" : "#11141A"),
+              fontWeight: active ? "700" : "600",
+            },
           ]}
         >
           {label}
@@ -1372,342 +1741,486 @@ const FilterPill = React.memo(function FilterPill({
    COMPONENT: NOTIFICATION STACK GROUP ITEM (Layered Deck Animation)
 ============================================================ */
 
-const NotificationStackGroupItem = React.memo(function NotificationStackGroupItem({
-  group,
-  isExpanded,
-  scaleFont,
-  onToggleStack,
-  onPressItem,
-  onAccept,
-  onReject,
-}: {
-  group: NotificationStackGroup;
-  isExpanded: boolean;
-  scaleFont: (size: number) => number;
-  onToggleStack: (stackId: string) => void;
-  onPressItem: (item: AppNotification) => void;
-  onAccept: (item: AppNotification) => void;
-  onReject: (item: AppNotification) => void;
-}) {
-  const isStacked = group.items.length > 1;
-  const isDetailItem = !isStacked && isExpandableDetailNotification(group.masterItem);
-  const isExpandable = isStacked || isDetailItem;
+const NotificationStackGroupItem = React.memo(
+  function NotificationStackGroupItem({
+    group,
+    isExpanded,
+    isDark,
+    scaleFont,
+    accentColor,
+    onToggleStack,
+    onPressItem,
+    onAccept,
+    onReject,
+    onToggleRead,
+    onDelete,
+  }: {
+    group: NotificationStackGroup;
+    isExpanded: boolean;
+    isDark: boolean;
+    scaleFont: (size: number) => number;
+    accentColor?: string;
+    onToggleStack: (stackId: string) => void;
+    onPressItem: (item: AppNotification) => void;
+    onAccept: (item: AppNotification) => void;
+    onReject: (item: AppNotification) => void;
+    onToggleRead: (items: AppNotification | AppNotification[]) => void;
+    onDelete: (items: AppNotification | AppNotification[]) => void;
+  }) {
+    const isStacked = group.items.length > 1;
+    const isDetailItem =
+      !isStacked && isExpandableDetailNotification(group.masterItem);
+    const isExpandable = isStacked || isDetailItem;
 
-  const expandAnim = useRef(new Animated.Value(isExpanded ? 1 : 0)).current;
-  const [isRendered, setIsRendered] = useState(isExpanded);
+    const INITIAL_VISIBLE_COUNT = 10;
+    const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_COUNT);
 
-  // Synchronously ensure children are mounted in DOM tree when expanding
-  if (isExpanded && !isRendered) {
-    setIsRendered(true);
-  }
+    const heightAnim = useRef(new Animated.Value(isExpanded ? 1 : 0)).current;
+    const cardsAnim = useRef(new Animated.Value(isExpanded ? 1 : 0)).current;
+    const prevExpandedRef = useRef(isExpanded);
 
-  // Individual animation values for each child card to achieve distinct staggered cascading
-  const itemAnimsRef = useRef<Animated.Value[]>([]);
-  if (itemAnimsRef.current.length !== group.items.length) {
-    itemAnimsRef.current = group.items.map(
-      (_, i) => itemAnimsRef.current[i] || new Animated.Value(isExpanded ? 1 : 0)
-    );
-  }
+    const count = group.items.length;
 
-  const isMountedRef = useRef(true);
-  const isFirstMountRef = useRef(true);
+    // Symmetrical duration for both unstack and stack (relaxed for smoother visual accordion cascade)
+    const animDuration = useMemo(() => {
+      const activeCount = Math.min(count, INITIAL_VISIBLE_COUNT);
+      if (activeCount <= 2) return 380;
+      if (activeCount <= 4) return 460;
+      if (activeCount <= 7) return 540;
+      return 620;
+    }, [count]);
 
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+    const renderedItems = useMemo(() => {
+      if (isDetailItem) return group.items.slice(0, 1);
+      return group.items.slice(0, visibleLimit);
+    }, [isDetailItem, group.items, visibleLimit]);
 
-  useEffect(() => {
-    if (isFirstMountRef.current) {
-      isFirstMountRef.current = false;
-      if (!isExpanded) return;
-    }
+    const hasMore = !isDetailItem && group.items.length > renderedItems.length;
+    const remainingCount = group.items.length - renderedItems.length;
 
-    if (isExpanded) {
-      setIsRendered(true);
+    // Stable pre-computed content height (avoids mid-animation re-renders and layout thrashing for 30+/1000+ items)
+    const contentHeight = useMemo(() => {
+      if (isDetailItem) return 110;
+      return 38 + renderedItems.length * 74 + (hasMore ? 54 : 0);
+    }, [isDetailItem, renderedItems.length, hasMore]);
 
-      // Buttery smooth container expand
-      Animated.timing(expandAnim, {
-        toValue: 1,
-        duration: 220,
-        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
-        useNativeDriver: true,
-      }).start();
 
-      // Reset individual item animations to 0 before starting staggered cascade
-      itemAnimsRef.current.forEach((anim) => anim.setValue(0));
-
-      // 24ms micro-stagger per card for an organic, silky cascading flow
-      const staggerDelay = isDetailItem ? 0 : 24;
-      const staggerAnimations = itemAnimsRef.current.map((anim) =>
-        Animated.timing(anim, {
+    const runExpandAnimation = useCallback(() => {
+      Animated.parallel([
+        Animated.timing(heightAnim, {
           toValue: 1,
-          duration: 170,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        })
-      );
-
-      Animated.stagger(staggerDelay, staggerAnimations).start();
-    } else {
-      // Smooth sequential collapse: sub-cards tuck away one by one in reverse order (bottom card first)
-      const reversedAnims = [...itemAnimsRef.current].reverse();
-      const collapseStaggerDelay = isDetailItem ? 0 : 20;
-
-      const reverseAnimations = reversedAnims.map((anim) =>
-        Animated.timing(anim, {
-          toValue: 0,
-          duration: 130,
+          duration: animDuration,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: false,
+        }),
+        Animated.timing(cardsAnim, {
+          toValue: 1,
+          duration: animDuration,
           easing: Easing.inOut(Easing.cubic),
           useNativeDriver: true,
-        })
-      );
+        }),
+      ]).start();
+    }, [heightAnim, cardsAnim, animDuration]);
 
-      // Micro-stagger each sub-card out one by one
-      Animated.stagger(collapseStaggerDelay, reverseAnimations).start();
-
-      // Fold container in parallel with the tucking cards
-      const totalCollapseTime = Math.min(190, 130 + reversedAnims.length * collapseStaggerDelay);
-      Animated.timing(expandAnim, {
-        toValue: 0,
-        duration: totalCollapseTime,
-        easing: Easing.inOut(Easing.cubic),
-        useNativeDriver: true,
-      }).start(() => {
-        if (isMountedRef.current) {
-          setIsRendered(false);
+    const runCollapseAnimation = useCallback(() => {
+      Animated.parallel([
+        Animated.timing(heightAnim, {
+          toValue: 0,
+          duration: animDuration,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: false,
+        }),
+        Animated.timing(cardsAnim, {
+          toValue: 0,
+          duration: animDuration,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) {
+          setVisibleLimit(INITIAL_VISIBLE_COUNT);
         }
       });
-    }
-  }, [isExpanded, isDetailItem]);
+    }, [heightAnim, cardsAnim, animDuration]);
 
-  const handleToggle = useCallback(() => {
-    try {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch { }
+    const handleToggle = useCallback(() => {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch { }
 
-    onToggleStack(group.groupKey);
-  }, [onToggleStack, group.groupKey]);
+      try {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      } catch { }
 
-  const handlePressMaster = useCallback(() => {
-    onPressItem(group.masterItem);
-  }, [onPressItem, group.masterItem]);
+      const willExpand = !isExpanded;
+      prevExpandedRef.current = willExpand;
 
-  const handlePressChild = useCallback(
-    (subItem: AppNotification) => {
-      if (isDetailItem) {
-        handleToggle();
-      } else {
-        const itemToRoute = { ...subItem };
-        // Deep inheritance from master item for rock-solid routing
-        if (!itemToRoute.groupId && group.masterItem?.groupId) {
-          itemToRoute.groupId = group.masterItem.groupId;
+      if (isStacked) {
+        if (willExpand) {
+          runExpandAnimation();
+        } else {
+          runCollapseAnimation();
         }
-        if (!itemToRoute.chatId && group.masterItem?.chatId) {
-          itemToRoute.chatId = group.masterItem.chatId;
-        }
-        if (!itemToRoute.senderId && group.masterItem?.senderId) {
-          itemToRoute.senderId = group.masterItem.senderId;
-        }
-        if (!itemToRoute.groupName && group.masterItem?.groupName) {
-          itemToRoute.groupName = group.masterItem.groupName;
-        }
-        if (!itemToRoute.route && group.masterItem?.route) {
-          itemToRoute.route = group.masterItem.route;
-        }
-        if (!itemToRoute.tripId && group.masterItem?.tripId) {
-          itemToRoute.tripId = group.masterItem.tripId;
-        }
-        if (group.categoryLabel === "Group Chat" && !extractGroupId(itemToRoute)) {
-          const fallbackGrp =
-            extractGroupId(group.masterItem) ||
-            (group.groupKey
-              ? group.groupKey.split("_group_")[1] || group.groupKey.replace(/^.*?group_/, "")
-              : null);
-          if (fallbackGrp) {
-            itemToRoute.groupId = fallbackGrp;
-          }
-        }
-        onPressItem(itemToRoute);
       }
-    },
-    [isDetailItem, handleToggle, onPressItem, group]
-  );
 
-  const handleAcceptMaster = useCallback(() => {
-    onAccept(group.masterItem);
-  }, [onAccept, group.masterItem]);
+      onToggleStack(group.groupKey);
+    }, [isExpanded, isStacked, runExpandAnimation, runCollapseAnimation, onToggleStack, group.groupKey]);
 
-  const handleRejectMaster = useCallback(() => {
-    onReject(group.masterItem);
-  }, [onReject, group.masterItem]);
+useEffect(() => {
+  if (prevExpandedRef.current !== isExpanded) {
+    prevExpandedRef.current = isExpanded;
+    if (isExpanded) {
+      runExpandAnimation();
+    } else {
+      runCollapseAnimation();
+    }
+  }
+}, [isExpanded, runExpandAnimation, runCollapseAnimation]);
 
-  // Peek Layer 1: fades out cleanly when unstacking so it never clashes with child cards
-  const layer1Style = {
-    opacity: expandAnim.interpolate({
-      inputRange: [0, 0.2],
-      outputRange: [1, 0],
-    }),
-  };
+const handlePressMaster = useCallback(() => {
+  onPressItem(group.masterItem);
+}, [onPressItem, group.masterItem]);
 
-  // Peek Layer 2: fades out cleanly when unstacking
-  const layer2Style = {
-    opacity: expandAnim.interpolate({
-      inputRange: [0, 0.15],
-      outputRange: [1, 0],
-    }),
-  };
+const handlePressChild = useCallback(
+  (subItem: AppNotification) => {
+    if (isDetailItem) {
+      handleToggle();
+    } else {
+      const itemToRoute = { ...subItem };
+      // Deep inheritance from master item for rock-solid routing
+      if (!itemToRoute.groupId && group.masterItem?.groupId) {
+        itemToRoute.groupId = group.masterItem.groupId;
+      }
+      if (!itemToRoute.chatId && group.masterItem?.chatId) {
+        itemToRoute.chatId = group.masterItem.chatId;
+      }
+      if (!itemToRoute.senderId && group.masterItem?.senderId) {
+        itemToRoute.senderId = group.masterItem.senderId;
+      }
+      if (!itemToRoute.groupName && group.masterItem?.groupName) {
+        itemToRoute.groupName = group.masterItem.groupName;
+      }
+      if (!itemToRoute.route && group.masterItem?.route) {
+        itemToRoute.route = group.masterItem.route;
+      }
+      if (!itemToRoute.tripId && group.masterItem?.tripId) {
+        itemToRoute.tripId = group.masterItem.tripId;
+      }
+      if (
+        group.categoryLabel === "Group Chat" &&
+        !extractGroupId(itemToRoute)
+      ) {
+        const fallbackGrp =
+          extractGroupId(group.masterItem) ||
+          (group.groupKey
+            ? group.groupKey.split("_group_")[1] ||
+            group.groupKey.replace(/^.*?group_/, "")
+            : null);
+        if (fallbackGrp) {
+          itemToRoute.groupId = fallbackGrp;
+        }
+      }
+      onPressItem(itemToRoute);
+    }
+  },
+  [isDetailItem, handleToggle, onPressItem, group],
+);
 
-  // Inset child list container: sliding down from top, fading in with spring
-  const insetContainerStyle = {
-    opacity: expandAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, 1],
-    }),
-    transform: [
-      {
-        translateY: expandAnim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [-10, 0],
-        }),
-      },
-      {
-        scale: expandAnim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0.97, 1],
-        }),
-      },
-    ],
-  };
+const handleAcceptMaster = useCallback(() => {
+  onAccept(group.masterItem);
+}, [onAccept, group.masterItem]);
 
-  return (
-    <View
-      style={[
-        styles.groupWrapper,
-        isStacked && !isExpanded && styles.groupWrapperStacked,
-      ]}
-    >
-      {/* 3D Layered Cards behind (Deck of Cards visual when collapsed) */}
+const handleRejectMaster = useCallback(() => {
+  onReject(group.masterItem);
+}, [onReject, group.masterItem]);
 
-      {/* Back card layers */}
-      {isStacked && !isExpanded && group.items.length >= 3 && (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.stackedPeekLayer2,
-            layer2Style,
-          ]}
-        />
-      )}
+return (
+  <View
+    style={[
+      styles.groupWrapper,
+      isStacked && !isExpanded && styles.groupWrapperStacked,
+    ]}
+  >
+    {/* 3D Layered Cards behind (Deck of Cards visual when collapsed, smooth fade when unstacking) */}
+    {isStacked && (
+      <>
+        {group.items.length >= 3 && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.stackedPeekLayer2,
+              {
+                backgroundColor: isDark ? "#131315" : "#DADAE0",
+                boxShadow: isDark
+                  ? undefined
+                  : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.05)",
+                opacity: cardsAnim.interpolate({
+                  inputRange: [0, 0.4, 1],
+                  outputRange: [1, 0, 0],
+                }),
+              },
+            ]}
+          />
+        )}
 
-      {isStacked && !isExpanded && (
         <Animated.View
           pointerEvents="none"
           style={[
             styles.stackedPeekLayer1,
-            layer1Style,
+            {
+              backgroundColor: isDark ? "#1B1B1D" : "#E5E5E8",
+              boxShadow: isDark
+                ? undefined
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.05)",
+              opacity: cardsAnim.interpolate({
+                inputRange: [0, 0.4, 1],
+                outputRange: [1, 0, 0],
+              }),
+            },
           ]}
         />
-      )}
+      </>
+    )}
 
-      {/* Front / Master notification card: tapping ALWAYS toggles stack/unstack */}
-      <View style={styles.masterCardLayer}>
-        <NotificationMasterCard
-          item={group.masterItem}
-          stackCount={group.items.length}
-          categoryLabel={group.categoryLabel}
-          isExpanded={isExpanded}
-          isDetailItem={isDetailItem}
-          expandAnim={expandAnim}
-          scaleFont={scaleFont}
-          onPress={() => {
-            if (isExpandable) {
-              handleToggle();
-            } else {
-              handlePressMaster();
-            }
-          }}
-          onToggleStack={handleToggle}
-          onAccept={handleAcceptMaster}
-          onReject={handleRejectMaster}
-        />
-      </View>
+    {/* Front / Master notification card: tapping ALWAYS toggles stack/unstack */}
+    <View style={styles.masterCardLayer}>
+      <NotificationMasterCard
+        item={group.masterItem}
+        stackCount={group.items.length}
+        categoryLabel={group.categoryLabel}
+        isExpanded={isExpanded}
+        isDark={isDark}
+        isDetailItem={isDetailItem}
+        expandAnim={cardsAnim}
+        scaleFont={scaleFont}
+        accentColor={accentColor}
+        onPress={() => {
+          if (isExpandable) {
+            handleToggle();
+          } else {
+            handlePressMaster();
+          }
+        }}
+        onToggleStack={handleToggle}
+        onAccept={handleAcceptMaster}
+        onReject={handleRejectMaster}
+        onToggleRead={() => onToggleRead(group.items)}
+        onDelete={() => onDelete(group.items)}
+      />
+    </View>
 
-
-      {/* INLINE CARD STACKING / ACCORDION CONTAINER */}
-      {isExpandable && isRendered && (
-        <Animated.View
-          pointerEvents={isExpanded ? "auto" : "none"}
-          style={[styles.stackInsetContainer, insetContainerStyle]}
-        >
-          {/* Stack Header Row: 5 Stacked Calls Alerts | Collapse ∧ OR 1 Detail Item | Collapse ∧ */}
-          <View style={styles.stackHeaderRow}>
-            <Text style={[styles.stackHeaderTitle, { fontSize: scaleFont(13) }]}>
-              {isDetailItem
-                ? "1 Detail Item"
-                : `${group.items.length} Stacked ${group.categoryLabel} Alerts`}
-            </Text>
-
-            <TouchableOpacity
-              onPress={handleToggle}
-              style={styles.collapseButton}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.collapseButtonText, { fontSize: scaleFont(11) }]}>
-                Collapse
-              </Text>
-              <Ionicons
-                name="chevron-up"
-                size={13}
-                color="#F1F1F1"
-                style={{ marginLeft: 3 }}
-              />
-            </TouchableOpacity>
-          </View>
-
-          {/* Indented Nested Cards with Staggered Cascading Animation */}
-          {group.items.map((subItem, index) => {
-            const itemAnim = itemAnimsRef.current[index] || expandAnim;
-            const itemStyle = {
-              zIndex: group.items.length - index,
-              opacity: itemAnim.interpolate({
+    {/* INLINE CARD STACKING / ACCORDION CONTAINER */}
+    {isStacked && (
+      <Animated.View
+        pointerEvents={isExpanded ? "auto" : "none"}
+        style={[
+          styles.stackInsetContainer,
+          {
+            height: heightAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, contentHeight],
+            }),
+            overflow: "hidden",
+            marginTop: heightAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 8],
+            }),
+            marginBottom: heightAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 8],
+            }),
+            opacity: heightAnim.interpolate({
+              inputRange: [0, 0.12, 1],
+              outputRange: [0, 1, 1],
+            }),
+            borderLeftColor: isDark
+              ? "rgba(255, 255, 255, 0.12)"
+              : "rgba(0, 0, 0, 0.10)",
+          },
+        ]}
+      >
+        <View>
+          {/* Stack Header Row with animated slide/fade */}
+          <Animated.View
+            style={{
+              opacity: cardsAnim.interpolate({
                 inputRange: [0, 0.35, 1],
-                outputRange: [0, 0.7, 1],
+                outputRange: [0, 1, 1],
               }),
               transform: [
                 {
-                  translateY: itemAnim.interpolate({
+                  translateY: cardsAnim.interpolate({
                     inputRange: [0, 1],
-                    outputRange: [-16, 0],
-                  }),
-                },
-                {
-                  scale: itemAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.94, 1],
+                    outputRange: [-8, 0],
                   }),
                 },
               ],
-            };
+            }}
+          >
+            <View style={styles.stackHeaderRow}>
+              <Text
+                style={[
+                  styles.stackHeaderTitle,
+                  {
+                    fontSize: scaleFont(13),
+                    color: isDark ? "#FFFFFF" : "#11141A",
+                  },
+                ]}
+              >
+                {isDetailItem
+                  ? "1 Detail Item"
+                  : `${group.items.length} Stacked ${group.categoryLabel} Alerts`}
+              </Text>
+
+              <TouchableOpacity
+                onPress={handleToggle}
+                style={[
+                  styles.collapseButton,
+                  {
+                    backgroundColor: isDark ? "#1E1E22" : "#E6E6E6",
+                    boxShadow: isDark
+                      ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                      : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                  },
+                ]}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.collapseButtonText,
+                    {
+                      fontSize: scaleFont(11),
+                      color: isDark ? "#F1F1F1" : "#11141A",
+                    },
+                  ]}
+                >
+                  Collapse
+                </Text>
+                <Ionicons
+                  name="chevron-up"
+                  size={13}
+                  color={isDark ? "#F1F1F1" : "#11141A"}
+                  style={{ marginLeft: 3 }}
+                />
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+
+          {/* Indented Nested Cards with Symmetrical One-by-One Accordion Unstack/Stack */}
+          {renderedItems.map((subItem, index) => {
+            const activeCount = Math.min(renderedItems.length, INITIAL_VISIBLE_COUNT);
+            const transitionSpan = Math.max(0.2, 0.8 / Math.max(1, activeCount));
+            const step = activeCount > 1 ? (1 - transitionSpan) / (activeCount - 1) : 0;
+            const p1 = Math.max(0.001, Math.min(index, INITIAL_VISIBLE_COUNT - 1) * step);
+            const p2 = Math.min(0.999, p1 + transitionSpan);
+
+            const startY = -8;
+            const isAnimatedCard = index < INITIAL_VISIBLE_COUNT;
+
+            const cardTranslateY = isAnimatedCard
+              ? cardsAnim.interpolate({
+                inputRange: [0, p1, p2, 1],
+                outputRange: [startY, startY, 0, 0],
+                extrapolate: "clamp",
+              })
+              : 0;
+
+            const cardOpacity = isAnimatedCard
+              ? cardsAnim.interpolate({
+                inputRange: [0, p1, p2, 1],
+                outputRange: [0, 0, 1, 1],
+                extrapolate: "clamp",
+              })
+              : 1;
 
             return (
-              <Animated.View key={subItem.id} style={itemStyle}>
+              <Animated.View
+                key={subItem.id}
+                style={{
+                  zIndex: count - index,
+                  opacity: cardOpacity,
+                  transform: [{ translateY: cardTranslateY }],
+                }}
+              >
                 <StackedChildCard
                   item={subItem}
                   isDetail={isDetailItem}
+                  isDark={isDark}
                   scaleFont={scaleFont}
-                  onPress={() => handlePressChild(subItem)}
+                  accentColor={accentColor}
+                  onPress={handlePressChild}
+                  onToggleRead={(item) => onToggleRead(item)}
+                  onDelete={(item) => onDelete(item)}
                 />
               </Animated.View>
             );
           })}
-        </Animated.View>
-      )}
-    </View>
-  );
-});
+
+          {/* Progressive Load More pill for stacks larger than 10 */}
+          {hasMore && (
+            <Animated.View
+              style={{
+                opacity: cardsAnim.interpolate({
+                  inputRange: [0, 0.75, 1],
+                  outputRange: [0, 0, 1],
+                  extrapolate: "clamp",
+                }),
+                transform: [
+                  {
+                    translateY: cardsAnim.interpolate({
+                      inputRange: [0, 0.75, 1],
+                      outputRange: [-8, -8, 0],
+                      extrapolate: "clamp",
+                    }),
+                  },
+                ],
+              }}
+            >
+              <TouchableOpacity
+                onPress={() => {
+                  try {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  } catch { }
+                  setVisibleLimit((prev) => Math.min(group.items.length, prev + 15));
+                }}
+                style={[
+                  styles.showMoreButton,
+                  {
+                    backgroundColor: isDark ? "#1C1C1F" : "#EAEAEA",
+                    boxShadow: isDark
+                      ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                      : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                  },
+                ]}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="layers-outline"
+                  size={14}
+                  color={isDark ? "#A0A5B0" : "#555A64"}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[
+                    styles.showMoreText,
+                    {
+                      fontSize: scaleFont(12.5),
+                      color: isDark ? "#F1F1F1" : "#11141A",
+                    },
+                  ]}
+                >
+                  +{remainingCount} more in this stack • Tap to view
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+        </View>
+      </Animated.View>
+    )}
+  </View>
+);
+  },
+);
 
 /* ============================================================
    COMPONENT: NOTIFICATION MASTER CARD (Screenshots 1, 2, 3)
@@ -1718,27 +2231,36 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
   stackCount,
   categoryLabel,
   isExpanded,
+  isDark,
   isDetailItem = false,
   expandAnim,
   scaleFont,
+  accentColor,
   onPress,
   onToggleStack,
   onAccept,
   onReject,
+  onToggleRead,
+  onDelete,
 }: {
   item: AppNotification;
   stackCount: number;
   categoryLabel: string;
   isExpanded: boolean;
+  isDark: boolean;
   isDetailItem?: boolean;
   expandAnim?: Animated.Value;
   scaleFont: (size: number) => number;
+  accentColor?: string;
   onPress: () => void;
   onToggleStack: () => void;
   onAccept: () => void;
   onReject: () => void;
+  onToggleRead?: () => void;
+  onDelete?: () => void;
 }) {
   const isStacked = stackCount > 1;
+  const isExpandable = isStacked || isDetailItem;
   const isFriendRequest = item.type === "friend_request";
   const isFriendAccepted = item.type === "friend_accepted";
   const isPendingRequest =
@@ -1750,12 +2272,19 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
 
   // Clean and formatted title
   let titleText = item.senderName || item.title || typeConfig.label;
-  if (item.type === "call" || item.type === "missed_call" || Boolean(item.callId)) {
+  if (
+    item.type === "call" ||
+    item.type === "missed_call" ||
+    Boolean(item.callId)
+  ) {
     if (item.senderName) {
       titleText = item.senderName;
     } else if (titleText.startsWith("Missed Call from ")) {
       titleText = titleText.replace(/^Missed Call from /i, "");
-    } else if (titleText.startsWith("Incoming ") && titleText.includes(" from ")) {
+    } else if (
+      titleText.startsWith("Incoming ") &&
+      titleText.includes(" from ")
+    ) {
       titleText = titleText.split(" from ")[1] || titleText;
     }
   }
@@ -1764,79 +2293,81 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
 
   // Clean body snippet
   const rawCleanBody = stripHtml(
-    item.body || item.content || item.message || (isFriendAccepted ? `${item.senderName || "User"} accepted your friend request.` : "")
+    item.body ||
+    item.content ||
+    item.message ||
+    item.info ||
+    item.description ||
+    (isFriendAccepted
+      ? `${item.senderName || "User"} accepted your friend request.`
+      : ""),
   );
   let displayBody = rawCleanBody;
   if (isMissedCall && displayBody.toLowerCase().includes("missed audio call")) {
     displayBody = "1 missed audio call";
-  } else if (isMissedCall && displayBody.toLowerCase().includes("missed video call")) {
+  } else if (
+    isMissedCall &&
+    displayBody.toLowerCase().includes("missed video call")
+  ) {
     displayBody = "1 missed video call";
   }
 
   const isFeedbackItem = isFeedbackOrGeneralNotification(item);
   const avatarUrl = item.pic || item.senderAvatar;
-  const fallbackInitial = isFeedbackItem ? "" : (titleText.trim()[0] || "B").toUpperCase();
-  const fallbackBg = isFeedbackItem ? "#FFFFFF" : getAvatarInitialBg(titleText);
+  const fallbackInitial = isFeedbackItem
+    ? ""
+    : (titleText.trim()[0] || "B").toUpperCase();
+  const fallbackBg = isFeedbackItem
+    ? (isDark ? "#FFFFFF" : "#E2E8F0")
+    : getAvatarInitialBg(titleText);
 
-  // Interactive Hover and Touch Highlight animation
-  const highlightAnim = useRef(new Animated.Value(0)).current;
+  // Swipeable ref to close after slide action click
+  const swipeableRef = useRef<any>(null);
+
+  // Tactile press animation
   const pressScale = useRef(new Animated.Value(1)).current;
 
   const handlePressIn = () => {
-    Animated.parallel([
-      Animated.spring(pressScale, {
-        toValue: 0.985,
-        useNativeDriver: true,
-        stiffness: 450,
-        damping: 25,
-        mass: 0.7,
-      }),
-      Animated.timing(highlightAnim, {
-        toValue: 1,
-        duration: 80,
-        useNativeDriver: false,
-      }),
-    ]).start();
+    Animated.spring(pressScale, {
+      toValue: 0.985,
+      useNativeDriver: true,
+      stiffness: 600,
+      damping: 28,
+      mass: 0.5,
+    }).start();
   };
 
   const handlePressOut = () => {
-    Animated.parallel([
-      Animated.spring(pressScale, {
-        toValue: 1,
-        useNativeDriver: true,
-        stiffness: 350,
-        damping: 20,
-        mass: 0.7,
-      }),
-      Animated.timing(highlightAnim, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: false,
-      }),
-    ]).start();
-  };
-
-  const handleHoverIn = () => {
-    Animated.timing(highlightAnim, {
-      toValue: 0.65,
-      duration: 120,
-      useNativeDriver: false,
+    Animated.spring(pressScale, {
+      toValue: 1,
+      useNativeDriver: true,
+      stiffness: 500,
+      damping: 24,
+      mass: 0.5,
     }).start();
   };
 
-  const handleHoverOut = () => {
-    Animated.timing(highlightAnim, {
-      toValue: 0,
-      duration: 200,
-      useNativeDriver: false,
-    }).start();
+  const handlePress = () => {
+    if (isExpandable) {
+      try {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      } catch { }
+      if (isDetailItem) {
+        onPress();
+      }
+      onToggleStack();
+      return;
+    }
+    onPress();
   };
 
-  const cardBgColor = highlightAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [isExpanded ? "#1A1A1E" : "#161618", "#24242A"],
-  });
-
+  const cardBgColor = isDark
+    ? isExpanded
+      ? "#1A1A1E"
+      : "#161618"
+    : isExpanded
+      ? "#F5F5F7"
+      : "#FFFFFF";
 
   const chevronRotate = expandAnim
     ? expandAnim.interpolate({
@@ -1847,20 +2378,143 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
       ? "180deg"
       : "0deg";
 
+  const renderRightActions = (
+    _progress?: any,
+    _translation?: any,
+    swipeableMethods?: any,
+  ) => {
+    if (!onDelete && !onToggleRead) return null;
+    const closeSwipe = () => {
+      try {
+        swipeableMethods?.close();
+      } catch { }
+      try {
+        swipeableRef.current?.close();
+      } catch { }
+    };
+    return (
+      <View
+        style={[
+          styles.swipeActionsContainer,
+          { backgroundColor: isDark ? "#101012" : "#E2E8F0" },
+        ]}
+      >
+        {onToggleRead && (
+          <TouchableOpacity
+            style={styles.swipeActionButton}
+            onPress={() => {
+              closeSwipe();
+              onToggleRead();
+            }}
+            activeOpacity={0.85}
+            accessibilityLabel="Mark as read"
+          >
+            <LinearGradient
+              colors={
+                isDark
+                  ? [
+                      "rgba(16,16,16,0.05)",
+                      "rgba(21,53,38,0.72)",
+                      "rgba(21,53,38,0.96)",
+                    ]
+                  : [
+                      "rgba(241,245,249,0.05)",
+                      "rgba(220,252,231,0.72)",
+                      "rgba(187,247,208,0.96)",
+                    ]
+              }
+              locations={[0, 0.4, 1]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View
+              style={[
+                styles.swipeActionIconCircle,
+                { backgroundColor: isDark ? "#184726" : "#DCFCE7" },
+              ]}
+            >
+              <Ionicons
+                name="checkmark"
+                size={21}
+                color={isDark ? "#4ADE80" : "#16A34A"}
+              />
+            </View>
+          </TouchableOpacity>
+        )}
+        {onDelete && (
+          <TouchableOpacity
+            style={styles.swipeActionButton}
+            onPress={() => {
+              closeSwipe();
+              onDelete();
+            }}
+            activeOpacity={0.85}
+            accessibilityLabel="Delete notification"
+          >
+            <LinearGradient
+              colors={
+                isDark
+                  ? [
+                      onToggleRead
+                        ? "rgba(21,53,38,0.35)"
+                        : "rgba(16,16,16,0.05)",
+                      "rgba(53,25,27,0.82)",
+                      "rgba(53,25,27,0.98)",
+                    ]
+                  : [
+                      onToggleRead
+                        ? "rgba(187,247,208,0.35)"
+                        : "rgba(241,245,249,0.05)",
+                      "rgba(254,226,226,0.82)",
+                      "rgba(254,202,202,0.98)",
+                    ]
+              }
+              locations={[0, 0.35, 1]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View
+              style={[
+                styles.swipeActionIconCircle,
+                { backgroundColor: isDark ? "#4E201D" : "#FEE2E2" },
+              ]}
+            >
+              <Ionicons
+                name="trash"
+                size={19}
+                color={isDark ? "#FF5A5F" : "#DC2626"}
+              />
+            </View>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
   return (
-    <Pressable
-      onPress={onPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      onHoverIn={handleHoverIn}
-      onHoverOut={handleHoverOut}
+    <Swipeable
+      ref={swipeableRef}
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      friction={2}
+      containerStyle={styles.masterSwipeableContainer}
     >
-      <Animated.View style={{ transform: [{ scale: pressScale }] }}>
-        <Animated.View
-          style={[
-            styles.cardContainer,
+      <Pressable
+        onPress={handlePress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+      >
+        <Animated.View style={{ transform: [{ scale: pressScale }] }}>
+          <Animated.View
+            style={[
+              styles.cardContainer,
             {
               backgroundColor: cardBgColor,
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
               borderWidth: 0,
             },
           ]}
@@ -1871,9 +2525,24 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
               {avatarUrl ? (
                 <Image source={{ uri: avatarUrl }} style={styles.cardAvatar} />
               ) : (
-                <View style={[styles.cardAvatarFallback, { backgroundColor: fallbackBg }]}>
+                <View
+                  style={[
+                    styles.cardAvatarFallback,
+                    { backgroundColor: fallbackBg },
+                  ]}
+                >
                   {fallbackInitial ? (
-                    <Text style={[styles.avatarInitialText, { fontSize: scaleFont(19) }]}>
+                    <Text
+                      style={[
+                        styles.avatarInitialText,
+                        {
+                          fontSize: scaleFont(19),
+                          color: isFeedbackItem
+                            ? (isDark ? "#000000" : "#11141A")
+                            : "#FFFFFF",
+                        },
+                      ]}
+                    >
                       {fallbackInitial}
                     </Text>
                   ) : null}
@@ -1881,19 +2550,50 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
               )}
 
               {/* Bottom-right Mini Status Badge */}
-              <View style={[styles.avatarMiniBadge, { backgroundColor: typeConfig.bgColor }]}>
+              <View
+                style={[
+                  styles.avatarMiniBadge,
+                  {
+                    backgroundColor: typeConfig.bgColor,
+                    borderColor: isDark ? "#161618" : "#FFFFFF",
+                  },
+                ]}
+              >
                 <Ionicons
                   name={typeConfig.icon}
                   size={10}
                   color="#FFFFFF"
-                  style={isMissedCall ? { transform: [{ rotate: "135deg" }] } : undefined}
+                  style={
+                    isMissedCall
+                      ? { transform: [{ rotate: "135deg" }] }
+                      : undefined
+                  }
                 />
               </View>
 
-              {/* Top-right Stack Count Badge (White circle with black counter e.g. 5, 3, 2) */}
+              {/* Top-right Stack Count Badge (White circle with black counter e.g. 5, 3, 2 in dark mode, inverted in light) */}
               {isStacked && (
-                <View style={styles.stackBadge}>
-                  <Text style={[styles.stackBadgeText, { fontSize: scaleFont(10.5) }]}>
+                <View
+                  style={[
+                    styles.stackBadge,
+                    {
+                      backgroundColor: isDark ? "#FFFFFF" : "#000000",
+                      borderColor: isDark ? "#161618" : "#FFFFFF",
+                      boxShadow: isDark
+                        ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                        : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.stackBadgeText,
+                      {
+                        fontSize: scaleFont(10.5),
+                        color: isDark ? "#000000" : "#FFFFFF",
+                      },
+                    ]}
+                  >
                     {stackCount}
                   </Text>
                 </View>
@@ -1904,10 +2604,27 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
             <View style={styles.cardContent}>
               {/* Header Row: Title and Timestamp */}
               <View style={styles.cardHeaderRow}>
-                <Text numberOfLines={1} style={[styles.cardTitle, { fontSize: scaleFont(15) }]}>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.cardTitle,
+                    {
+                      fontSize: scaleFont(15),
+                      color: isDark ? "#FFFFFF" : "#11141A",
+                    },
+                  ]}
+                >
                   {titleText}
                 </Text>
-                <Text style={[styles.cardTimeText, { fontSize: scaleFont(12) }]}>
+                <Text
+                  style={[
+                    styles.cardTimeText,
+                    {
+                      fontSize: scaleFont(12),
+                      color: isDark ? "#7E8590" : "#8A909A",
+                    },
+                  ]}
+                >
                   {formatCardTime(item.timestamp)}
                 </Text>
               </View>
@@ -1919,9 +2636,17 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
                     name="call"
                     size={12}
                     color="#FF5A5F"
-                    style={{ marginRight: 5, transform: [{ rotate: "135deg" }] }}
+                    style={{
+                      marginRight: 5,
+                      transform: [{ rotate: "135deg" }],
+                    }}
                   />
-                  <Text style={[styles.missedCallLabel, { fontSize: scaleFont(12) }]}>
+                  <Text
+                    style={[
+                      styles.missedCallLabel,
+                      { fontSize: scaleFont(12) },
+                    ]}
+                  >
                     Missed Call
                   </Text>
                 </View>
@@ -1930,11 +2655,19 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
               {/* Message / Subtitle */}
               {displayBody.length > 0 && (
                 <Text
-                  numberOfLines={1}
+                  numberOfLines={isDetailItem && isExpanded ? undefined : 1}
                   style={[
                     styles.cardMessage,
-                    { fontSize: scaleFont(13.5) },
-                    isMissedCall && styles.cardMessageWhite,
+                    {
+                      fontSize: scaleFont(13.5),
+                      color: isDark ? "rgba(255, 255, 255, 0.65)" : "#555A64",
+                    },
+                    isDetailItem && isExpanded && {
+                      lineHeight: 20,
+                      marginTop: 4,
+                      color: isDark ? "#FFFFFF" : "#11141A",
+                    },
+                    isMissedCall && (isDark ? styles.cardMessageWhite : { color: "#11141A", fontWeight: "500" }),
                   ]}
                 >
                   {displayBody}
@@ -1943,12 +2676,23 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
 
               {/* Group Summary Row for Multi-card Stacks (Matching Image 1) */}
               {isStacked && (
-                <View
-                  style={styles.groupSummaryRow}
-                  pointerEvents="none"
-                >
-                  <Ionicons name="layers" size={13} color="#F1F1F1" style={styles.summaryLayersIcon} />
-                  <Text numberOfLines={1} style={[styles.groupSummaryText, { fontSize: scaleFont(12) }]}>
+                <View style={styles.groupSummaryRow} pointerEvents="none">
+                  <Ionicons
+                    name="layers"
+                    size={13}
+                    color={isDark ? "#F1F1F1" : "#555860"}
+                    style={styles.summaryLayersIcon}
+                  />
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.groupSummaryText,
+                      {
+                        fontSize: scaleFont(12),
+                        color: isDark ? "#F1F1F1" : "#4B5563",
+                      },
+                    ]}
+                  >
                     {isExpanded
                       ? `Tap to collapse ${stackCount} stacked alerts`
                       : `+${stackCount - 1} more in ${categoryLabel} • Tap to unstack`}
@@ -1962,26 +2706,32 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
                     <Ionicons
                       name="chevron-down"
                       size={13}
-                      color="#F1F1F1"
+                      color={isDark ? "#F1F1F1" : "#555860"}
                     />
                   </Animated.View>
                 </View>
               )}
 
-              {/* Single Detail Notification Summary Row (Matching screenshot for Feedback/General) */}
+              {/* Single Detail Notification Summary Row (Matching screenshot for Feedback/General/Accepted) */}
               {isDetailItem && (
-                <View
-                  style={styles.groupSummaryRow}
-                  pointerEvents="none"
-                >
+                <View style={styles.groupSummaryRow} pointerEvents="none">
                   <Ionicons
-                    name="open-outline"
+                    name={isExpanded ? "chevron-up" : "chevron-down"}
                     size={13}
-                    color="#F1F1F1"
+                    color={isDark ? "#F1F1F1" : "#555860"}
                     style={styles.summaryLayersIcon}
                   />
-                  <Text numberOfLines={1} style={[styles.groupSummaryText, { fontSize: scaleFont(12) }]}>
-                    {isExpanded ? "Tap to hide details" : "Tap to view details"}
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.groupSummaryText,
+                      {
+                        fontSize: scaleFont(12),
+                        color: isDark ? "#F1F1F1" : "#4B5563",
+                      },
+                    ]}
+                  >
+                    {isExpanded ? "Tap to collapse" : "Tap to view full info"}
                   </Text>
                 </View>
               )}
@@ -1994,10 +2744,28 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
                       e.stopPropagation();
                       onAccept();
                     }}
-                    style={styles.acceptButton}
+                    style={[
+                      styles.acceptButton,
+                      {
+                        backgroundColor: isDark ? "#FFFFFF" : "#000000",
+                        boxShadow: isDark
+                          ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                          : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                      },
+                    ]}
                     activeOpacity={0.8}
                   >
-                    <Text style={[styles.acceptButtonText, { fontSize: scaleFont(13) }]}>Accept</Text>
+                    <Text
+                      style={[
+                        styles.acceptButtonText,
+                        {
+                          fontSize: scaleFont(13),
+                          color: isDark ? "#000000" : "#FFFFFF",
+                        },
+                      ]}
+                    >
+                      Accept
+                    </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -2005,10 +2773,28 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
                       e.stopPropagation();
                       onReject();
                     }}
-                    style={styles.declineButton}
+                    style={[
+                      styles.declineButton,
+                      {
+                        backgroundColor: isDark ? "#242428" : "#E6E6E6",
+                        boxShadow: isDark
+                          ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                          : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                      },
+                    ]}
                     activeOpacity={0.8}
                   >
-                    <Text style={[styles.declineButtonText, { fontSize: scaleFont(13) }]}>Decline</Text>
+                    <Text
+                      style={[
+                        styles.declineButtonText,
+                        {
+                          fontSize: scaleFont(13),
+                          color: isDark ? "#FFFFFF" : "#11141A",
+                        },
+                      ]}
+                    >
+                      Decline
+                    </Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -2017,6 +2803,7 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
         </Animated.View>
       </Animated.View>
     </Pressable>
+    </Swipeable>
   );
 });
 
@@ -2027,13 +2814,21 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
 const StackedChildCard = React.memo(function StackedChildCard({
   item,
   isDetail = false,
+  isDark,
   scaleFont,
+  accentColor,
   onPress,
+  onToggleRead,
+  onDelete,
 }: {
   item: AppNotification;
   isDetail?: boolean;
+  isDark: boolean;
   scaleFont: (size: number) => number;
-  onPress: () => void;
+  accentColor?: string;
+  onPress: (item: AppNotification) => void;
+  onToggleRead?: (item: AppNotification) => void;
+  onDelete?: (item: AppNotification) => void;
 }) {
   const isMissedCall = item.type === "missed_call";
   const isGroup = isGroupNotification(item);
@@ -2041,68 +2836,44 @@ const StackedChildCard = React.memo(function StackedChildCard({
   const cleanBody = stripHtml(item.body || item.content || item.message || "");
   const isFeedbackItem = isFeedbackOrGeneralNotification(item);
   const avatarUrl = item.pic || item.senderAvatar;
-  const fallbackInitial = isFeedbackItem ? "" : (item.title || item.senderName || "B")[0]?.toUpperCase() || "B";
-  const fallbackBg = isFeedbackItem ? "#FFFFFF" : getAvatarInitialBg(item.title || item.senderName || "B");
+  const fallbackInitial = isFeedbackItem
+    ? ""
+    : (item.title || item.senderName || "B")[0]?.toUpperCase() || "B";
+  const fallbackBg = isFeedbackItem
+    ? (isDark ? "#FFFFFF" : "#E2E8F0")
+    : getAvatarInitialBg(item.title || item.senderName || "B");
 
-  // Tactile press & hover animation
+  // Swipeable ref to close after slide action click
+  const swipeableRef = useRef<any>(null);
+
+  // Tactile press animation (native driver)
   const pressScale = useRef(new Animated.Value(1)).current;
-  const highlightAnim = useRef(new Animated.Value(0)).current;
 
   const handlePressIn = () => {
-    Animated.parallel([
-      Animated.spring(pressScale, {
-        toValue: 0.98,
-        useNativeDriver: true,
-        stiffness: 450,
-        damping: 25,
-        mass: 0.7,
-      }),
-      Animated.timing(highlightAnim, {
-        toValue: 1,
-        duration: 80,
-        useNativeDriver: false,
-      }),
-    ]).start();
+    Animated.spring(pressScale, {
+      toValue: 0.98,
+      useNativeDriver: true,
+      stiffness: 600,
+      damping: 28,
+      mass: 0.5,
+    }).start();
   };
 
   const handlePressOut = () => {
-    Animated.parallel([
-      Animated.spring(pressScale, {
-        toValue: 1,
-        useNativeDriver: true,
-        stiffness: 350,
-        damping: 20,
-        mass: 0.7,
-      }),
-      Animated.timing(highlightAnim, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: false,
-      }),
-    ]).start();
-  };
-
-  const handleHoverIn = () => {
-    Animated.timing(highlightAnim, {
-      toValue: 0.6,
-      duration: 120,
-      useNativeDriver: false,
+    Animated.spring(pressScale, {
+      toValue: 1,
+      useNativeDriver: true,
+      stiffness: 500,
+      damping: 24,
+      mass: 0.5,
     }).start();
   };
 
-  const handleHoverOut = () => {
-    Animated.timing(highlightAnim, {
-      toValue: 0,
-      duration: 200,
-      useNativeDriver: false,
-    }).start();
-  };
+  const handleCardPress = useCallback(() => {
+    onPress(item);
+  }, [onPress, item]);
 
-  const cardBgColor = highlightAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["#161618", "#222228"],
-  });
-
+  const cardBgColor = isDark ? "#161618" : "#FFFFFF";
 
   let callDisplayTitle = cleanBody || item.title || "";
   if (!callDisplayTitle) {
@@ -2115,21 +2886,144 @@ const StackedChildCard = React.memo(function StackedChildCard({
     }
   }
 
+  const renderRightActions = (
+    _progress?: any,
+    _translation?: any,
+    swipeableMethods?: any,
+  ) => {
+    if (!onDelete && !onToggleRead) return null;
+    const closeSwipe = () => {
+      try {
+        swipeableMethods?.close();
+      } catch { }
+      try {
+        swipeableRef.current?.close();
+      } catch { }
+    };
+    return (
+      <View
+        style={[
+          styles.childSwipeActionsContainer,
+          { backgroundColor: isDark ? "#101012" : "#E2E8F0" },
+        ]}
+      >
+        {onToggleRead && (
+          <TouchableOpacity
+            style={styles.childSwipeActionButton}
+            onPress={() => {
+              closeSwipe();
+              onToggleRead(item);
+            }}
+            activeOpacity={0.85}
+            accessibilityLabel="Mark as read"
+          >
+            <LinearGradient
+              colors={
+                isDark
+                  ? [
+                      "rgba(16,16,16,0.05)",
+                      "rgba(21,53,38,0.72)",
+                      "rgba(21,53,38,0.96)",
+                    ]
+                  : [
+                      "rgba(241,245,249,0.05)",
+                      "rgba(220,252,231,0.72)",
+                      "rgba(187,247,208,0.96)",
+                    ]
+              }
+              locations={[0, 0.4, 1]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View
+              style={[
+                styles.swipeActionIconCircle,
+                { backgroundColor: isDark ? "#184726" : "#DCFCE7" },
+              ]}
+            >
+              <Ionicons
+                name="checkmark"
+                size={19}
+                color={isDark ? "#4ADE80" : "#16A34A"}
+              />
+            </View>
+          </TouchableOpacity>
+        )}
+        {onDelete && (
+          <TouchableOpacity
+            style={styles.childSwipeActionButton}
+            onPress={() => {
+              closeSwipe();
+              onDelete(item);
+            }}
+            activeOpacity={0.85}
+            accessibilityLabel="Delete notification"
+          >
+            <LinearGradient
+              colors={
+                isDark
+                  ? [
+                      onToggleRead
+                        ? "rgba(21,53,38,0.35)"
+                        : "rgba(16,16,16,0.05)",
+                      "rgba(53,25,27,0.82)",
+                      "rgba(53,25,27,0.98)",
+                    ]
+                  : [
+                      onToggleRead
+                        ? "rgba(187,247,208,0.35)"
+                        : "rgba(241,245,249,0.05)",
+                      "rgba(254,226,226,0.82)",
+                      "rgba(254,202,202,0.98)",
+                    ]
+              }
+              locations={[0, 0.35, 1]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View
+              style={[
+                styles.swipeActionIconCircle,
+                { backgroundColor: isDark ? "#4E201D" : "#FEE2E2" },
+              ]}
+            >
+              <Ionicons
+                name="trash"
+                size={17}
+                color={isDark ? "#FF5A5F" : "#DC2626"}
+              />
+            </View>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
   return (
-    <Pressable
-      onPress={onPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      onHoverIn={handleHoverIn}
-      onHoverOut={handleHoverOut}
+    <Swipeable
+      ref={swipeableRef}
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      friction={2}
+      containerStyle={styles.childSwipeableContainer}
     >
-      <Animated.View style={{ transform: [{ scale: pressScale }] }}>
-        <Animated.View
-          style={[
-            styles.stackedCardContainer,
+      <Pressable
+        onPress={handleCardPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+      >
+        <Animated.View style={{ transform: [{ scale: pressScale }] }}>
+          <Animated.View
+            style={[
+              styles.stackedCardContainer,
             isDetail && styles.stackedDetailCardContainer,
             {
               backgroundColor: cardBgColor,
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
               borderWidth: 0,
             },
           ]}
@@ -2139,27 +3033,56 @@ const StackedChildCard = React.memo(function StackedChildCard({
             {avatarUrl ? (
               <Image source={{ uri: avatarUrl }} style={styles.stackedAvatar} />
             ) : (
-              <View style={[styles.stackedAvatarFallback, { backgroundColor: fallbackBg }]}>
+              <View
+                style={[
+                  styles.stackedAvatarFallback,
+                  { backgroundColor: fallbackBg },
+                ]}
+              >
                 {fallbackInitial ? (
-                  <Text style={[styles.stackedInitialText, { fontSize: scaleFont(16) }]}>
+                  <Text
+                    style={[
+                      styles.stackedInitialText,
+                      {
+                        fontSize: scaleFont(16),
+                        color: isFeedbackItem
+                          ? (isDark ? "#000000" : "#11141A")
+                          : "#FFFFFF",
+                      },
+                    ]}
+                  >
                     {fallbackInitial}
                   </Text>
                 ) : null}
               </View>
             )}
 
-            <View style={[styles.stackedMiniBadge, { backgroundColor: typeConfig.bgColor }]}>
+            <View
+              style={[
+                styles.stackedMiniBadge,
+                {
+                  backgroundColor: typeConfig.bgColor,
+                  borderColor: isDark ? "#161618" : "#FFFFFF",
+                },
+              ]}
+            >
               <Ionicons
                 name={typeConfig.icon}
                 size={9}
                 color="#FFFFFF"
-                style={isMissedCall ? { transform: [{ rotate: "135deg" }] } : undefined}
+                style={
+                  isMissedCall
+                    ? { transform: [{ rotate: "135deg" }] }
+                    : undefined
+                }
               />
             </View>
           </View>
 
           {/* Card Details */}
-          <View style={[styles.stackedCardContent, isDetail && { paddingTop: 2 }]}>
+          <View
+            style={[styles.stackedCardContent, isDetail && { paddingTop: 2 }]}
+          >
             {isMissedCall ? (
               <>
                 <View style={styles.missedCallHeaderRow}>
@@ -2167,9 +3090,17 @@ const StackedChildCard = React.memo(function StackedChildCard({
                     name="call"
                     size={12}
                     color="#FF5A5F"
-                    style={{ marginRight: 5, transform: [{ rotate: "135deg" }] }}
+                    style={{
+                      marginRight: 5,
+                      transform: [{ rotate: "135deg" }],
+                    }}
                   />
-                  <Text style={[styles.missedCallBadgeText, { fontSize: scaleFont(12) }]}>
+                  <Text
+                    style={[
+                      styles.missedCallBadgeText,
+                      { fontSize: scaleFont(12) },
+                    ]}
+                  >
                     Missed Call
                   </Text>
                 </View>
@@ -2178,7 +3109,10 @@ const StackedChildCard = React.memo(function StackedChildCard({
                   style={[
                     styles.stackedMessageTitle,
                     isDetail && styles.stackedMessageTitleMultiline,
-                    { fontSize: scaleFont(13.5) },
+                    {
+                      fontSize: scaleFont(13.5),
+                      color: isDark ? "#FFFFFF" : "#11141A",
+                    },
                   ]}
                 >
                   {callDisplayTitle}
@@ -2190,20 +3124,32 @@ const StackedChildCard = React.memo(function StackedChildCard({
                 style={[
                   styles.stackedMessageTitle,
                   isDetail && styles.stackedMessageTitleMultiline,
-                  { fontSize: scaleFont(13.5) },
+                  {
+                    fontSize: scaleFont(13.5),
+                    color: isDark ? "#FFFFFF" : "#11141A",
+                  },
                 ]}
               >
                 {callDisplayTitle}
               </Text>
             )}
 
-            <Text style={[styles.stackedTimestampText, { fontSize: scaleFont(11.5) }]}>
+            <Text
+              style={[
+                styles.stackedTimestampText,
+                {
+                  fontSize: scaleFont(11.5),
+                  color: isDark ? "#7E8590" : "#8A909A",
+                },
+              ]}
+            >
               {formatStackedTime(item.timestamp)}
             </Text>
           </View>
         </Animated.View>
       </Animated.View>
     </Pressable>
+    </Swipeable>
   );
 });
 
@@ -2214,34 +3160,51 @@ const StackedChildCard = React.memo(function StackedChildCard({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000000",
+    backgroundColor: "transparent",
   },
 
   /* 1. Top App Bar */
   header: {
-    height: 56,
+    height: 48,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
+    zIndex: 20,
+    backgroundColor: "transparent",
   },
-  circleIconButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#161618",
+  modernHeaderBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
+  notificationListOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 1,
+    elevation: 1,
+  },
+  pressed: {
+    opacity: 0.85,
+  },
   headerTitle: {
-    fontWeight: "800",
-    color: "#FFFFFF",
-    marginLeft: 14,
-    letterSpacing: -0.3,
+    fontWeight: "700",
+    marginLeft: 12,
+    letterSpacing: -0.4,
   },
 
   /* 2. Filter Pills */
   filtersWrapper: {
     paddingVertical: 10,
+    position: "relative",
+    zIndex: 20,
+    elevation: 20,
+    backgroundColor: "transparent",
   },
   filtersScrollContent: {
     paddingHorizontal: 16,
@@ -2254,28 +3217,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 0,
-    boxShadow:
-      "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)",
-  },
-  filterPillActive: {
-    backgroundColor: "#FFFFFF",
-  },
-  filterPillInactive: {
-    backgroundColor: "#000000",
   },
   filterPillText: {
     fontWeight: "600",
   },
-  filterPillTextActive: {
-    color: "#000000",
-    fontWeight: "700",
-  },
-  filterPillTextInactive: {
-    color: "#F1F1F1",
-  },
 
   /* 3. Chronological Timeline Grouping */
   listScrollContent: {
+    paddingTop: 150,
     paddingBottom: 40,
   },
   sectionBlock: {
@@ -2289,8 +3238,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginHorizontal: 20,
   },
-
-
 
   groupWrapper: {
     position: "relative",
@@ -2326,20 +3273,51 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
 
-
   masterCardLayer: {
     position: "relative",
     zIndex: 10,
     elevation: 10,
   },
 
-
-
   /* 4. Parent / Master Card (Border Radius = 26px) */
-  cardContainer: {
-    backgroundColor: "#161618",
-    borderRadius: 26,
+  masterSwipeableContainer: {
     marginHorizontal: 16,
+    borderRadius: 26,
+    overflow: "hidden",
+  },
+  swipeActionsContainer: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    justifyContent: "flex-end",
+    height: "100%",
+    backgroundColor: "#101010",
+    paddingHorizontal: 0,
+    overflow: "hidden",
+  },
+  swipeActionButton: {
+    width: 54,
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+    position: "relative",
+  },
+  swipeActionIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  readIconCircle: {
+    backgroundColor: "#184726",
+  },
+  deleteIconCircle: {
+    backgroundColor: "#4E201D",
+  },
+  cardContainer: {
+    borderRadius: 26,
+    marginHorizontal: 0,
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderWidth: 0,
@@ -2371,7 +3349,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   avatarInitialText: {
-    color: "#FFFFFF",
     fontWeight: "700",
   },
   avatarMiniBadge: {
@@ -2384,7 +3361,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "#161618",
   },
   stackBadge: {
     position: "absolute",
@@ -2393,15 +3369,12 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: "#FFFFFF",
     borderWidth: 2,
-    borderColor: "#161618",
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 2,
   },
   stackBadgeText: {
-    color: "#000000",
     fontWeight: "800",
   },
   cardContent: {
@@ -2417,19 +3390,15 @@ const styles = StyleSheet.create({
   cardTitle: {
     flex: 1,
     fontWeight: "700",
-    color: "#FFFFFF",
     marginRight: 8,
   },
   cardTimeText: {
-    color: "#7E8590",
     fontWeight: "500",
   },
   cardMessage: {
-    color: "rgba(255, 255, 255, 0.65)",
     lineHeight: 18,
   },
   cardMessageWhite: {
-    color: "#FFFFFF",
     fontWeight: "500",
   },
   missedCallBadgeRow: {
@@ -2453,7 +3422,6 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   groupSummaryText: {
-    color: "#F1F1F1",
     fontWeight: "500",
     letterSpacing: -0.1,
     flexShrink: 1,
@@ -2470,24 +3438,22 @@ const styles = StyleSheet.create({
     height: 36,
     paddingHorizontal: 26,
     borderRadius: 20,
-    backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 0,
   },
   acceptButtonText: {
-    color: "#000000",
     fontWeight: "700",
   },
   declineButton: {
     height: 36,
     paddingHorizontal: 22,
     borderRadius: 20,
-    backgroundColor: "#242428",
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 0,
   },
   declineButtonText: {
-    color: "#FFFFFF",
     fontWeight: "600",
   },
 
@@ -2508,9 +3474,6 @@ const styles = StyleSheet.create({
     marginLeft: 20,
     paddingLeft: 14,
     borderLeftWidth: 1.5,
-    borderLeftColor: "rgba(255, 255, 255, 0.12)",
-    marginTop: 8,
-    marginBottom: 8,
     paddingRight: 16,
   },
   stackHeaderRow: {
@@ -2522,28 +3485,61 @@ const styles = StyleSheet.create({
   },
   stackHeaderTitle: {
     fontWeight: "700",
-    color: "#FFFFFF",
   },
   collapseButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1E1E22",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    borderWidth: 0,
   },
   collapseButtonText: {
     fontWeight: "600",
-    color: "#F1F1F1",
+  },
+  showMoreButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    borderWidth: 0,
+  },
+  showMoreText: {
+    fontWeight: "600",
+  },
+  childSwipeableContainer: {
+    borderRadius: 22,
+    overflow: "hidden",
+    marginBottom: 8,
+  },
+  childSwipeActionsContainer: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    justifyContent: "flex-end",
+    height: "100%",
+    backgroundColor: "#101010",
+    paddingHorizontal: 0,
+    overflow: "hidden",
+  },
+  childSwipeActionButton: {
+    width: 50,
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+    position: "relative",
   },
   stackedCardContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#161618",
     borderRadius: 22,
+    minHeight: 66,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    marginBottom: 8,
+    marginBottom: 0,
     borderWidth: 0,
   },
   stackedDetailCardContainer: {
@@ -2569,7 +3565,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   stackedInitialText: {
-    color: "#FFFFFF",
     fontWeight: "700",
   },
   stackedMiniBadge: {
@@ -2582,7 +3577,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1.5,
-    borderColor: "#161618",
   },
   stackedCardContent: {
     flex: 1,
@@ -2599,17 +3593,14 @@ const styles = StyleSheet.create({
   },
   stackedMessageTitle: {
     fontWeight: "500",
-    color: "#FFFFFF",
     marginBottom: 2,
   },
   stackedMessageTitleMultiline: {
     lineHeight: 20,
-    color: "#FFFFFF",
     marginTop: 0,
     marginBottom: 8,
   },
   stackedTimestampText: {
-    color: "#7E8590",
     fontWeight: "400",
   },
 
@@ -2630,19 +3621,17 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,
+    borderWidth: 0,
   },
   emptyTitle: {
     fontWeight: "800",
-    color: "#FFFFFF",
     textAlign: "center",
   },
   emptyDescription: {
     lineHeight: 19,
-    color: "#7E8590",
     textAlign: "center",
     marginTop: 8,
   },
