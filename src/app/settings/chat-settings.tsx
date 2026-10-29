@@ -5,21 +5,11 @@
 // Redundant settings (Theme, Font Size) are removed and centralized in Appearance.
 
 import React, { useState, useMemo, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  FlatList,
-  Image,
-  Dimensions,
-  Appearance,
-  ScrollView,
-  Switch,
-  Animated,
-  Platform,
-} from "react-native";
+import { View, Text, StyleSheet, Pressable, FlatList, Image, Dimensions, Appearance, ScrollView, Animated, Platform, StatusBar } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
@@ -47,6 +37,8 @@ const DISAPPEARING_OPTIONS: { id: DisappearingTimer; label: string; desc: string
 ];
 
 export default function ChatSettingsScreen() {
+  const insets = useSafeAreaInsets();
+  const topInset = insets.top > 0 ? insets.top : Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 44;
   const router = useRouter();
   const { t } = useLanguage();
   const { triggerHaptic } = useAppSettings();
@@ -107,6 +99,8 @@ export default function ChatSettingsScreen() {
   const themeContext = useThemeToggle();
   const themeMode = themeContext?.mode ?? "system";
   const activeAccent = themeContext?.accentColor ?? "#FF5A5F";
+  const onAccentTextColor = themeContext?.onAccentTextColor ?? "#FFFFFF";
+  const isWhiteAccent = themeContext?.isWhiteAccent ?? (activeAccent?.toLowerCase() === "#ffffff" || themeContext?.accent === "white");
 
   const isDark =
     themeMode === "dark" ||
@@ -122,14 +116,17 @@ export default function ChatSettingsScreen() {
     iconBoxBg: isDark ? "#202024" : "#F4F5F7",
     chevron: isDark ? "#555860" : "#B4B9C2",
     insetBg: isDark ? "#202024" : "#F4F5F7",
+    divider: themeContext?.themeColors?.divider ?? (isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)"),
     modalOverlay: "rgba(0, 0, 0, 0.65)",
-    switchActive: activeAccent || (isDark ? "#34C759" : "#10B981"),
+    switchActive: isWhiteAccent && !isDark ? "#11141A" : (activeAccent || (isDark ? "#34C759" : "#10B981")),
+    onAccent: onAccentTextColor,
+    accentText: themeContext?.themeColors?.accentText ?? (isWhiteAccent ? (isDark ? "#FFFFFF" : "#11141A") : activeAccent),
     switchInactive: isDark ? "#2A2D36" : "#E5E7EB",
     activeRowBg: isDark ? "#202024" : "#F4F5F7",
     toastBg: isDark ? "#1F2937" : "#111827",
     toastText: "#F9FAFB",
     destructive: "#FF5A5F",
-    destructiveBg: isDark ? "rgba(255, 90, 95, 0.12)" : "#FFF1F0",
+    destructiveBg: isDark ? "rgba(255, 90, 95, 0.14)" : "rgba(255, 90, 95, 0.08)",
   }), [isDark, activeAccent]);
 
   const activeWallpaperItem = useMemo(() => {
@@ -270,14 +267,25 @@ export default function ChatSettingsScreen() {
         </Animated.View>
       )}
 
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.backButton,
-            { backgroundColor: colors.card },
-            pressed && { opacity: 0.7 },
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={8}
           accessibilityLabel="Go back"
@@ -326,10 +334,17 @@ export default function ChatSettingsScreen() {
             </View>
           </Pressable>
 
-          <View style={[styles.divider, { backgroundColor: colors.insetBg }]} />
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Enter is Send */}
-          <View style={styles.settingItem}>
+          <Pressable
+            style={({ pressed }) => [styles.settingItem, pressed && { opacity: 0.7 }]}
+            onPress={() => handleToggleEnterIsSend(!enterIsSend)}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: enterIsSend }}
+            accessibilityLabel="Enter is Send"
+          >
             <View style={[styles.iconContainer, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="return-down-forward-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -339,18 +354,24 @@ export default function ChatSettingsScreen() {
                 {t("Enter key on keyboard will send message")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={enterIsSend}
               onValueChange={handleToggleEnterIsSend}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
-          <View style={[styles.divider, { backgroundColor: colors.insetBg }]} />
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Link Previews */}
-          <View style={styles.settingItem}>
+          <Pressable
+            style={({ pressed }) => [styles.settingItem, pressed && { opacity: 0.7 }]}
+            onPress={() => handleToggleLinkPreviews(!linkPreviews)}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: linkPreviews }}
+            accessibilityLabel="Link Previews"
+          >
             <View style={[styles.iconContainer, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="link-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -360,13 +381,12 @@ export default function ChatSettingsScreen() {
                 {t("Show rich preview cards for web links")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={linkPreviews}
               onValueChange={handleToggleLinkPreviews}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
         </View>
 
         {/* ========================================================
@@ -378,7 +398,14 @@ export default function ChatSettingsScreen() {
 
         <View style={[styles.cardGroup, { backgroundColor: colors.card }]}>
           {/* Read Receipts */}
-          <View style={styles.settingItem}>
+          <Pressable
+            style={({ pressed }) => [styles.settingItem, pressed && { opacity: 0.7 }]}
+            onPress={() => handleToggleReadReceipts(!readReceipts)}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: readReceipts }}
+            accessibilityLabel="Read Receipts"
+          >
             <View style={[styles.iconContainer, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="checkmark-done-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -388,18 +415,24 @@ export default function ChatSettingsScreen() {
                 {t("Show double checkmarks when messages are seen")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={readReceipts}
               onValueChange={handleToggleReadReceipts}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
-          <View style={[styles.divider, { backgroundColor: colors.insetBg }]} />
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Typing Indicator */}
-          <View style={styles.settingItem}>
+          <Pressable
+            style={({ pressed }) => [styles.settingItem, pressed && { opacity: 0.7 }]}
+            onPress={() => handleToggleTypingIndicator(!typingIndicator)}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: typingIndicator }}
+            accessibilityLabel="Typing Indicator"
+          >
             <View style={[styles.iconContainer, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -409,15 +442,14 @@ export default function ChatSettingsScreen() {
                 {t("Share typing status while composing a message")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={typingIndicator}
               onValueChange={handleToggleTypingIndicator}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
-          <View style={[styles.divider, { backgroundColor: colors.insetBg }]} />
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Disappearing Messages */}
           <Pressable
@@ -454,7 +486,14 @@ export default function ChatSettingsScreen() {
 
         <View style={[styles.cardGroup, { backgroundColor: colors.card }]}>
           {/* Auto Download Media */}
-          <View style={styles.settingItem}>
+          <Pressable
+            style={({ pressed }) => [styles.settingItem, pressed && { opacity: 0.7 }]}
+            onPress={() => handleToggleAutoDownload(!autoDownloadMedia)}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: autoDownloadMedia }}
+            accessibilityLabel="Auto-Download Media"
+          >
             <View style={[styles.iconContainer, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="cloud-download-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -464,18 +503,24 @@ export default function ChatSettingsScreen() {
                 {t("Automatically download photos and audio")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={autoDownloadMedia}
               onValueChange={handleToggleAutoDownload}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
-          <View style={[styles.divider, { backgroundColor: colors.insetBg }]} />
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Save to Gallery */}
-          <View style={styles.settingItem}>
+          <Pressable
+            style={({ pressed }) => [styles.settingItem, pressed && { opacity: 0.7 }]}
+            onPress={() => handleToggleSaveToGallery(!saveToGallery)}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: saveToGallery }}
+            accessibilityLabel="Save to Gallery"
+          >
             <View style={[styles.iconContainer, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="albums-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -485,13 +530,12 @@ export default function ChatSettingsScreen() {
                 {t("Save incoming photos and videos to device gallery")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={saveToGallery}
               onValueChange={handleToggleSaveToGallery}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
         </View>
 
         {/* ========================================================
@@ -503,7 +547,14 @@ export default function ChatSettingsScreen() {
 
         <View style={[styles.cardGroup, { backgroundColor: colors.card }]}>
           {/* Keep Chats Archived */}
-          <View style={styles.settingItem}>
+          <Pressable
+            style={({ pressed }) => [styles.settingItem, pressed && { opacity: 0.7 }]}
+            onPress={() => handleToggleKeepArchived(!keepArchived)}
+            accessible={true}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: keepArchived }}
+            accessibilityLabel="Keep Chats Archived"
+          >
             <View style={[styles.iconContainer, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="archive-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -513,15 +564,14 @@ export default function ChatSettingsScreen() {
                 {t("Archived chats remain hidden when a new message arrives")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={keepArchived}
               onValueChange={handleToggleKeepArchived}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
 
-          <View style={[styles.divider, { backgroundColor: colors.insetBg }]} />
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Clear All Messages */}
           <Pressable
@@ -543,7 +593,7 @@ export default function ChatSettingsScreen() {
             <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
           </Pressable>
 
-          <View style={[styles.divider, { backgroundColor: colors.insetBg }]} />
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Delete All Chats */}
           <Pressable
@@ -565,7 +615,7 @@ export default function ChatSettingsScreen() {
             <Ionicons name="chevron-forward" size={18} color={colors.chevron} />
           </Pressable>
 
-          <View style={[styles.divider, { backgroundColor: colors.insetBg }]} />
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Reset Chat Settings */}
           <Pressable
@@ -597,10 +647,10 @@ export default function ChatSettingsScreen() {
       <SwipeableDrawer
         visible={showWallpaperModal}
         onClose={() => setShowWallpaperModal(false)}
-        showHandle={false}
+        showHandle={true}
+        handleColor={colors.chevron}
         sheetStyle={[styles.wallpaperModalContent, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.handle, { backgroundColor: colors.chevron }]} />
         <View style={styles.sheetHeader}>
           <Text style={[styles.modalSheetTitle, { color: colors.textPrimary }]}>
             {t("Choose Chat Wallpaper")}
@@ -619,7 +669,7 @@ export default function ChatSettingsScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderWallpaperCell}
           numColumns={WALLPAPER_COLUMNS}
-          contentContainerStyle={styles.wallpaperGrid}
+          contentContainerStyle={[styles.wallpaperGrid, { paddingBottom: 24 }]}
           showsVerticalScrollIndicator={false}
         />
       </SwipeableDrawer>
@@ -630,10 +680,10 @@ export default function ChatSettingsScreen() {
       <SwipeableDrawer
         visible={showDisappearingModal}
         onClose={() => setShowDisappearingModal(false)}
-        showHandle={false}
+        showHandle={true}
+        handleColor={colors.chevron}
         sheetStyle={[styles.bottomSheetModal, { backgroundColor: colors.card }]}
       >
-        <View style={[styles.handle, { backgroundColor: colors.chevron }]} />
         <View style={styles.sheetHeader}>
           <Text style={[styles.modalSheetTitle, { color: colors.textPrimary }]}>
             {t("Disappearing Messages")}
@@ -805,7 +855,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: StyleSheet.hairlineWidth,
-    marginLeft: 68,
+    marginHorizontal: 16,
   },
   valueContainer: {
     flexDirection: "row",

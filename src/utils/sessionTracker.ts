@@ -126,10 +126,14 @@ export const recordDeviceSessionInFirestore = async (user: any): Promise<void> =
 
     let existingLogins: DeviceSession[] = [];
     let userCity = "";
+    let locationSharingAllowed = true;
 
     if (snap.exists()) {
       const data = snap.data();
       userCity = data.homeCity || data.city || "";
+      if (data.privacy?.locationSharing !== undefined) {
+        locationSharingAllowed = !!data.privacy.locationSharing;
+      }
       if (Array.isArray(data.security?.loginActivity)) {
         // Strip out any legacy static mock entries
         existingLogins = data.security.loginActivity.filter(
@@ -138,9 +142,20 @@ export const recordDeviceSessionInFirestore = async (user: any): Promise<void> =
       }
     }
 
-    const locationPromise = getRealLocation(userCity);
-    const timeoutPromise = new Promise<string>((res) => setTimeout(() => res(userCity || "Active Location"), 1200));
-    const location = await Promise.race([locationPromise, timeoutPromise]);
+    // Also check local cache override
+    try {
+      const cachedLocSharing = await AsyncStorage.getItem("location_sharing_enabled");
+      if (cachedLocSharing !== null) {
+        locationSharingAllowed = cachedLocSharing === "true";
+      }
+    } catch {}
+
+    let location = "Location Sharing Paused";
+    if (locationSharingAllowed) {
+      const locationPromise = getRealLocation(userCity);
+      const timeoutPromise = new Promise<string>((res) => setTimeout(() => res(userCity || "Active Location"), 1200));
+      location = await Promise.race([locationPromise, timeoutPromise]);
+    }
 
     // Keep other sessions intact, updating their lastActive label if timestamp exists
     const otherSessions = existingLogins.filter((s) => s.id !== devId).map((s) => {

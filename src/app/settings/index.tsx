@@ -1,52 +1,45 @@
 import {
+  Feather,
   Ionicons,
-  MaterialCommunityIcons,
-  Feather, // **@** Added Feather for profile edit pen icon
+  MaterialIcons
 } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
-import * as Haptics from "expo-haptics";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   collection,
   doc,
   getDoc,
-  getDocs,
-  query,
-  where,
+  getDocs
 } from "firebase/firestore";
-import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
+  ActivityIndicator, // **@** Added Appearance for theme detection
+  Animated, // **@** Added Platform import
+  Appearance, // **@** Added Animated for header mask gradient reveal on scroll
+  BackHandler,
   Dimensions,
-  ImageBackground,
-  Image, // **@** Added Image for modern avatar
-  InteractionManager, // **@** Defer heavy work until after nav animation
-  Linking,
+  Easing,
+  Image,
+  Keyboard, // **@** Defer heavy work until after nav animation
+  Linking, // **@** Added Keyboard for in-settings search dismissal
+  Platform,
   Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
-  View,
-  Alert,
-  Modal,
   TextInput,
-  Keyboard, // **@** Added Keyboard for in-settings search dismissal
-  Platform, // **@** Added Platform import
-  Appearance, // **@** Added Appearance for theme detection
-  Animated, // **@** Added Animated for header mask gradient reveal on scroll
-  BackHandler,
+  type TextInputInstance,
+  View
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useUser } from "../../contexts/UserContext";
-import { useThemeToggle } from "../../contexts/ThemeContext"; // **@** Added dynamic theme hook
-import { useLanguage } from "../../contexts/LanguageContext"; // **@** Dynamic language hook
-import { auth, db } from "../../lib/firebase";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { SettingsActionModal } from "./_components/SettingsActionModal";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SkeletonLoadingScreen } from "../../components/ui/SkeletonLoadingScreen";
-import { SwipeableDrawer } from "./_components/SwipeableDrawer";
+import { useLanguage } from "../../contexts/LanguageContext"; // **@** Dynamic language hook
+import { useThemeToggle } from "../../contexts/ThemeContext"; // **@** Added dynamic theme hook
+import { useUser } from "../../contexts/UserContext";
+import { db } from "../../lib/firebase";
 import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 type SettingsPage =
   | "main"
@@ -65,6 +58,20 @@ type ProfileData = {
   photoURL: string;
   type: string;
 };
+
+interface SearchItem {
+  id: string;
+  category: "ACCOUNT" | "APP SETTINGS" | "TRIP EXPERIENCE" | "SUPPORT" | "DEVELOPER";
+  title: string;
+  subtitle: string;
+  keywords: string[];
+  icon: string;
+  iconFamily?: "ionicons" | "feather" | "material";
+  badge?: string;
+  rightText?: string;
+  route?: string;
+  onAction?: () => void;
+}
 
 // ============================================================
 // RESPONSIVE UI HELPERS
@@ -145,111 +152,125 @@ const SettingRow = React.memo(function SettingRow({
   const fontScale = rowCtx.fontScale || 1.0;
 
   const textPrimary = colors?.textPrimary ?? (isDark ? "#FFFFFF" : "#11141A");
-  const textSecondary = colors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590");
+  const textSecondary = colors?.textSecondary ?? (isDark ? "#F1F1F1" : "#7E8590");
   const chevronColor = colors?.chevron ?? (isDark ? "#555860" : "#B4B9C2");
-  const defaultIconColor = colors?.greyishWhite ?? (isDark ? "#E2E8F0" : "#4B5563");
+  const defaultIconColor = colors?.greyishWhite ?? (isDark ? "#F1F1F1" : "#4B5563");
   const finalIconColor = iconColor ?? defaultIconColor;
   const resolvedIconBg = iconBg ?? (colors?.iconBoxBg ?? (isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)"));
 
   const scaleFont = (s: number) => Math.round(s * fontScale);
 
   return (
-    <Pressable
-      onPress={onPress}
-      android_ripple={{
-        color: isDark ? "rgba(255, 255, 255, 0.07)" : "rgba(0, 0, 0, 0.05)",
-      }}
-      style={({ pressed }) => [
-        styles.modernRow,
-        Platform.OS === "ios" &&
+    <>
+      <Pressable
+        onPress={onPress}
+        android_ripple={{
+          color: isDark ? "rgba(255, 255, 255, 0.07)" : "rgba(0, 0, 0, 0.05)",
+        }}
+        style={({ pressed }) => [
+          styles.modernRow,
+          Platform.OS === "ios" &&
           pressed && {
             backgroundColor: isDark
               ? "rgba(255,255,255,0.04)"
               : "rgba(0,0,0,0.03)",
           },
-      ]}
-    >
-      <View style={[styles.modernIconBox, { backgroundColor: resolvedIconBg }]}>
-        {iconFamily === "material" ? (
-          <MaterialCommunityIcons name={icon} size={20} color={finalIconColor} />
-        ) : iconFamily === "feather" ? (
-          <Feather name={icon} size={19} color={finalIconColor} />
-        ) : (
-          <Ionicons name={icon} size={20} color={finalIconColor} />
-        )}
-      </View>
+        ]}
+      >
+        <View style={[styles.modernIconBox, { backgroundColor: resolvedIconBg }]}>
+          {iconFamily === "material" ? (
+            <MaterialIcons name={icon as any} size={20} color={finalIconColor} />
+          ) : iconFamily === "feather" ? (
+            <Feather name={icon as any} size={19} color={finalIconColor} />
+          ) : (
+            <Ionicons name={icon as any} size={20} color={finalIconColor} />
+          )}
+        </View>
 
-      <View style={styles.modernRowContent}>
-        <View style={styles.modernRowTextGroup}>
-          <View style={styles.modernRowTitleWrap}>
-            <Text
-              style={[
-                styles.modernRowTitle,
-                { color: textPrimary, fontSize: scaleFont(15) },
-              ]}
-              numberOfLines={1}
-            >
-              {title}
-            </Text>
-            {category ? (
-              <View
+        <View style={styles.modernRowContent}>
+          <View style={styles.modernRowTextGroup}>
+            <View style={styles.modernRowTitleWrap}>
+              <Text
                 style={[
-                  styles.modernCategoryBadge,
-                  {
-                    backgroundColor: isDark
-                      ? "rgba(255,255,255,0.08)"
-                      : "rgba(0,0,0,0.05)",
-                  },
+                  styles.modernRowTitle,
+                  { color: textPrimary, fontSize: scaleFont(15) },
                 ]}
+                numberOfLines={1}
               >
-                <Text
+                {title}
+              </Text>
+              {category ? (
+                <View
                   style={[
-                    styles.modernCategoryBadgeText,
-                    { color: textSecondary, fontSize: scaleFont(9.5) },
+                    styles.modernCategoryBadge,
+                    {
+                      backgroundColor: isDark
+                        ? "rgba(255,255,255,0.08)"
+                        : "rgba(0,0,0,0.05)",
+                    },
                   ]}
                 >
-                  {category}
-                </Text>
-              </View>
-            ) : null}
-            {badge ? (
-              <View style={styles.modernHotBadge}>
-                <Text style={[styles.modernHotBadgeText, { fontSize: scaleFont(10) }]}>{badge}</Text>
-              </View>
+                  <Text
+                    style={[
+                      styles.modernCategoryBadgeText,
+                      { color: textSecondary, fontSize: scaleFont(9.5) },
+                    ]}
+                  >
+                    {category}
+                  </Text>
+                </View>
+              ) : null}
+              {badge ? (
+                <View style={styles.modernHotBadge}>
+                  <Text style={[styles.modernHotBadgeText, { fontSize: scaleFont(10) }]}>{badge}</Text>
+                </View>
+              ) : null}
+            </View>
+            {subtitle ? (
+              <Text
+                style={[
+                  styles.modernRowSubtitle,
+                  { color: textSecondary, fontSize: scaleFont(12.5) },
+                ]}
+                numberOfLines={2}
+              >
+                {subtitle}
+              </Text>
             ) : null}
           </View>
-          {subtitle ? (
-            <Text
-              style={[
-                styles.modernRowSubtitle,
-                { color: textSecondary, fontSize: scaleFont(12.5) },
-              ]}
-              numberOfLines={2}
-            >
-              {subtitle}
-            </Text>
-          ) : null}
-        </View>
 
-        <View style={styles.modernRowRightGroup}>
-          {rightText ? (
-            <Text
-              style={[
-                styles.modernRowRightText,
-                { color: textSecondary, fontSize: scaleFont(13.5) },
-              ]}
-            >
-              {rightText}
-            </Text>
-          ) : null}
-          <Ionicons
-            name="chevron-forward"
-            size={17}
-            color={chevronColor}
-          />
+          <View style={styles.modernRowRightGroup}>
+            {rightText ? (
+              <Text
+                style={[
+                  styles.modernRowRightText,
+                  { color: textSecondary, fontSize: scaleFont(13.5) },
+                ]}
+              >
+                {rightText}
+              </Text>
+            ) : null}
+            <Ionicons
+              name="chevron-forward"
+              size={17}
+              color={chevronColor}
+            />
+          </View>
         </View>
-      </View>
-    </Pressable>
+      </Pressable>
+      {!isLast && (
+        <View
+          style={[
+            styles.modernDivider,
+            {
+              backgroundColor:
+                colors?.divider ??
+                (isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)"),
+            },
+          ]}
+        />
+      )}
+    </>
   );
 });
 
@@ -263,8 +284,8 @@ export default function ProfileSettings() {
       insets.top > 0
         ? insets.top
         : Platform.OS === "android"
-        ? (StatusBar.currentHeight || 24)
-        : 44,
+          ? (StatusBar.currentHeight || 24)
+          : 44,
     [insets.top]
   );
   const { language: activeLanguage, t: tr } = useLanguage();
@@ -295,20 +316,13 @@ export default function ProfileSettings() {
       }
       await Linking.openURL(playStoreUrl);
     } catch {
-      Linking.openURL(playStoreUrl).catch(() => {
-        Alert.alert(
-          tr("Rate BunkMates"),
-          "Unable to open Play Store. Please search 'BunkMates' on Google Play Store."
-        );
-      });
+      Linking.openURL(playStoreUrl).catch(() => { });
     }
   }, [tr]);
 
   const { user, loading: authLoading, userData } = useUser();
 
-  const [loading, setLoading] = useState(true);
-
-  const params = useLocalSearchParams<{ page?: string }>();
+  const params = useLocalSearchParams<{ page?: string; search?: string }>();
 
   useEffect(() => {
     if (params?.page === "developers") {
@@ -320,10 +334,10 @@ export default function ProfileSettings() {
   const [tapCount, setTapCount] = useState(0);
   const [showDevDialog, setShowDevDialog] = useState(false);
   const [enteredKey, setEnteredKey] = useState("");
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
   const [isDeveloper, setIsDeveloper] = useState(false);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [tripCount, setTripCount] = useState(4);
   const [selectedLanguage, setSelectedLanguage] = useState("English (India)");
 
   useEffect(() => {
@@ -340,41 +354,189 @@ export default function ProfileSettings() {
     })();
   }, []);
 
-  // **@** In-Settings Search states for searching setting features/options
-  const [isSearching, setIsSearching] = useState(false);
+  // Compact Floating Bottom Search Bar layout & positioning
+  const BOTTOM_NAV_HEIGHT = 10;
+  const BOTTOM_NAV_BASE_OFFSET = Math.max(insets.bottom, 10) + 8;
+  const GAP_ABOVE_BOTTOM_NAV = 1;
+  const searchBottomOffset = BOTTOM_NAV_BASE_OFFSET + BOTTOM_NAV_HEIGHT + GAP_ABOVE_BOTTOM_NAV;
+
+  // **@** In-Place Single-Page Search Mode (Components change with 0.2s smooth mix-and-merge)
+  const [isSearchActive, setIsSearchActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const searchInputRef = useRef<TextInput>(null);
+  const [selectedCategory, setSelectedCategory] = useState("ALL");
+  const searchInputRef = useRef<TextInputInstance>(null);
 
-  const [profile, setProfile] =
-    useState<ProfileData>({
-      name: "",
-      username: "",
-      email: "",
-      mobile: "",
-      bio: "",
-      photoURL: "",
-      type: "",
+  const searchMorphAnim = useRef(new Animated.Value(0)).current;
+  const keyboardLift = useRef(new Animated.Value(0)).current;
+  const contentFadeAnim = useRef(new Animated.Value(1)).current;
+  const RESTING_PILL_WIDTH = Math.min(185, SCREEN_WIDTH - 48);
+  const EXPANDED_PILL_WIDTH = SCREEN_WIDTH - 32;
+
+  const handleOpenSearch = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(contentFadeAnim, {
+        toValue: 0,
+        duration: 90,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      }),
+      Animated.timing(searchMorphAnim, {
+        toValue: 1,
+        duration: 200,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }),
+    ]).start(() => {
+      setIsSearchActive(true);
+      Animated.timing(contentFadeAnim, {
+        toValue: 1,
+        duration: 110,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      }).start();
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 30);
     });
+  }, [contentFadeAnim, searchMorphAnim]);
 
-  // Keep profile synchronized with real-time userData
+  const handleCloseSearch = useCallback(() => {
+    Keyboard.dismiss();
+    Animated.parallel([
+      Animated.timing(contentFadeAnim, {
+        toValue: 0,
+        duration: 90,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      }),
+      Animated.timing(searchMorphAnim, {
+        toValue: 0,
+        duration: 200,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }),
+    ]).start(() => {
+      setIsSearchActive(false);
+      setSearchQuery("");
+      setSelectedCategory("ALL");
+      Animated.timing(contentFadeAnim, {
+        toValue: 1,
+        duration: 110,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      }).start();
+    });
+  }, [contentFadeAnim, searchMorphAnim]);
+
+  // Open search mode automatically if navigated with ?search=true or ?page=search
+  useEffect(() => {
+    if (params?.search === "true" || params?.page === "search") {
+      handleOpenSearch();
+    }
+  }, [params?.search, params?.page, handleOpenSearch]);
+
+  // Keyboard tracking for lifting the search bar smoothly above keyboard
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const onShow = (e: any) => {
+      const h = e.endCoordinates ? e.endCoordinates.height : 0;
+      const targetOffset = -Math.max(0, h + 10 - searchBottomOffset);
+      const isAndroid = Platform.OS === "android";
+      const dur = isAndroid ? 100 : (e.duration || 180);
+
+      Animated.timing(keyboardLift, {
+        toValue: targetOffset,
+        duration: dur,
+        easing: isAndroid ? Easing.out(Easing.quad) : Easing.bezier(0.25, 0.1, 0.25, 1),
+        useNativeDriver: true,
+      }).start();
+    };
+
+    const onHide = (e: any) => {
+      const dur = Platform.OS === "ios" ? (e?.duration || 180) : 100;
+      Animated.timing(keyboardLift, {
+        toValue: 0,
+        duration: dur,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    };
+
+    const subShow = Keyboard.addListener(showEvent, onShow);
+    const subHide = Keyboard.addListener(hideEvent, onHide);
+
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+  }, [searchBottomOffset, keyboardLift]);
+
+  const animatedSearchPillWidth = searchMorphAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [RESTING_PILL_WIDTH, EXPANDED_PILL_WIDTH],
+  });
+
+  const mainSettingsOpacity = searchMorphAnim.interpolate({
+    inputRange: [0, 0.45, 1],
+    outputRange: [1, 0.35, 0],
+    extrapolate: "clamp",
+  });
+
+  const searchContentOpacity = searchMorphAnim.interpolate({
+    inputRange: [0, 0.45, 1],
+    outputRange: [0, 0.35, 1],
+    extrapolate: "clamp",
+  });
+
+  // Initialize profile with cached data immediately so there is zero delay and zero layout jump
+  const [profile, setProfile] = useState<ProfileData>(() => ({
+    name: userData?.name || userData?.displayName || user?.displayName || "",
+    username: userData?.username || "",
+    email: userData?.email || user?.email || "",
+    mobile: userData?.mobile || userData?.phone || user?.phoneNumber || "",
+    bio: userData?.bio || "",
+    photoURL: userData?.photoURL || user?.photoURL || "",
+    type: userData?.type || "Member",
+  }));
+
+  // Keep profile synchronized with real-time userData without unnecessary re-renders
   useEffect(() => {
     if (userData) {
-      setProfile({
-        name: userData.name || userData.displayName || user?.displayName || "",
-        username: userData.username || "",
-        email: userData.email || user?.email || "",
-        mobile: userData.mobile || userData.phone || user?.phoneNumber || "",
-        bio: userData.bio || "",
-        photoURL: userData.photoURL || user?.photoURL || "",
-        type: userData.type || "Member",
+      setProfile((prev) => {
+        const name = userData.name || userData.displayName || user?.displayName || "";
+        const username = userData.username || "";
+        const email = userData.email || user?.email || "";
+        const mobile = userData.mobile || userData.phone || user?.phoneNumber || "";
+        const bio = userData.bio || "";
+        const photoURL = userData.photoURL || user?.photoURL || "";
+        const type = userData.type || "Member";
+
+        if (
+          prev.name === name &&
+          prev.username === username &&
+          prev.email === email &&
+          prev.mobile === mobile &&
+          prev.bio === bio &&
+          prev.photoURL === photoURL &&
+          prev.type === type
+        ) {
+          return prev;
+        }
+
+        return { name, username, email, mobile, bio, photoURL, type };
       });
     } else if (user) {
-      setProfile((prev) => ({
-        ...prev,
-        name: user.displayName || "",
-        email: user.email || "",
-        photoURL: user.photoURL || "",
-      }));
+      setProfile((prev) => {
+        const name = user.displayName || "";
+        const email = user.email || "";
+        const photoURL = user.photoURL || "";
+        if (prev.name === name && prev.email === email && prev.photoURL === photoURL) {
+          return prev;
+        }
+        return { ...prev, name, email, photoURL };
+      });
     }
   }, [userData, user]);
 
@@ -390,7 +552,7 @@ export default function ProfileSettings() {
   };
 
   let themeMode: "dark" | "light" | "system" = "system";
-  let toggleThemeFn: () => void = () => {};
+  let toggleThemeFn: () => void = () => { };
   let dynamicAccent = "#FF5A5F";
   let dynamicThemeColors: any = null;
   let dynamicFontScale = 1.0;
@@ -430,18 +592,256 @@ export default function ProfileSettings() {
       cardBorder: "transparent",
       divider: dynamicThemeColors?.divider ?? (isDark ? "#242428" : "#E6E7EB"),
       textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
-      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
-      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
+      textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#F1F1F1" : "#7E8590"),
+      sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#F1F1F1" : "#7E8590"),
       coral: effectiveAccent,
       coralAccent: effectiveAccent,
       coralBg: hexToRgba(effectiveAccent, isDark ? 0.16 : 0.09),
-      greyishWhite: isDark ? "#E2E8F0" : "#4B5563",
+      greyishWhite: isDark ? "#F1F1F1" : "#4B5563",
       iconBoxBg: isDark ? "#222226" : "#F3F4F6", // Solid neutral container
       chevron: isDark ? "#555860" : "#B4B9C2",
       logoutBorder: "transparent",
-      logoutBg: isDark ? "rgba(255, 90, 95, 0.10)" : "rgba(255, 90, 95, 0.06)",
+      logoutBg: isDark ? "rgba(239, 68, 68, 0.10)" : "rgba(239, 68, 68, 0.06)",
     };
   }, [isDark, dynamicAccent, dynamicThemeColors]);
+
+  const allSettings: SearchItem[] = useMemo(() => {
+    const list: SearchItem[] = [
+      // 1. ACCOUNT
+      {
+        id: "account-security",
+        category: "ACCOUNT",
+        title: tr("accounts_security", "Account & Security"),
+        subtitle: tr("Password, Two-factor auth & security"),
+        keywords: ["account", "security", "password", "two factor", "2fa", "session", "login", "auth"],
+        icon: "shield-checkmark-outline",
+        route: "/settings/accounts",
+      },
+      {
+        id: "privacy-data",
+        category: "ACCOUNT",
+        title: tr("Privacy & Data"),
+        subtitle: tr("Profile visibility, location logs"),
+        keywords: ["privacy", "data", "visibility", "tracking", "location", "logs"],
+        icon: "lock-closed-outline",
+        route: "/settings/privacy",
+      },
+      {
+        id: "linked-devices",
+        category: "ACCOUNT",
+        title: tr("linked_devices", "Linked Devices"),
+        subtitle: tr("Active sessions, phones & computers"),
+        keywords: ["linked devices", "devices", "sessions", "login", "phone", "laptop", "computer", "active sessions"],
+        icon: "devices",
+        iconFamily: "material",
+        route: "/settings/linked-devices",
+      },
+
+      // 2. APP SETTINGS
+      {
+        id: "appearance",
+        category: "APP SETTINGS",
+        title: tr("appearance", "Appearance"),
+        subtitle: tr("Theme color, dark mode & light mode"),
+        keywords: ["appearance", "theme", "dark mode", "light mode", "color", "display"],
+        rightText:
+          themeMode === "system"
+            ? tr("System (Auto)")
+            : themeMode === "dark"
+              ? tr("Dark Mode")
+              : tr("Light Mode"),
+        icon: "color-filter-outline",
+        route: "/settings/appearance",
+      },
+      {
+        id: "language-region",
+        category: "APP SETTINGS",
+        title: tr("language_region_title", "Language & Region"),
+        subtitle: `${activeLanguage || selectedLanguage}, ${tr("locale formats")}`,
+        keywords: ["language", "region", "country", "english", "locale", "timezone", "hindi", "date", "time"],
+        rightText: activeLanguage || selectedLanguage,
+        icon: "globe-outline",
+        route: "/settings/language-region",
+      },
+      {
+        id: "accessibility",
+        category: "APP SETTINGS",
+        title: tr("accessibility", "Accessibility"),
+        subtitle: tr("Vision support, high contrast, motion & haptics"),
+        keywords: ["accessibility", "font", "contrast", "size", "zoom", "reader", "haptic", "motion", "color blind", "vision"],
+        icon: "accessibility-outline",
+        route: "/settings/accessibility",
+      },
+      {
+        id: "chats",
+        category: "APP SETTINGS",
+        title: tr("chats", "Chats"),
+        subtitle: tr("Theme, Wallpapers, and Chat Settings"),
+        keywords: ["chats", "chat", "messages", "wallpaper", "chat theme", "bubbles"],
+        icon: "chatbubble-ellipses-outline",
+        route: "/settings/chat-settings",
+      },
+      {
+        id: "ai-features",
+        category: "APP SETTINGS",
+        title: tr("ai_features", "AI Features"),
+        subtitle: tr("Configure Groq API Key & AI settings"),
+        keywords: ["ai", "groq", "artificial intelligence", "api key", "bot", "assistant", "model", "smart"],
+        icon: "sparkles",
+        route: "/settings/ai-settings",
+      },
+
+      // 3. TRIP EXPERIENCE
+      {
+        id: "notifications",
+        category: "TRIP EXPERIENCE",
+        title: tr("notifications", "Notifications"),
+        subtitle: tr("Trip updates, chat pings, alerts"),
+        keywords: ["notifications", "alerts", "ping", "updates", "trip notification", "messages"],
+        icon: "notifications-outline",
+        route: "/settings/notification",
+      },
+      {
+        id: "trip-preferences",
+        category: "TRIP EXPERIENCE",
+        title: tr("trip_preferences", "Trip Preferences"),
+        subtitle: tr("Dietary rules, accommodation styles, travel pace"),
+        keywords: ["preferences", "diet", "food", "accommodation", "hotel", "travel pace", "style"],
+        icon: "compass-outline",
+        route: "/settings/trip-preference",
+      },
+      {
+        id: "currency-expenses",
+        category: "TRIP EXPERIENCE",
+        title: tr("currency_expenses", "Currency & Expenses"),
+        subtitle: tr("Default Split bills, home currency USD"),
+        keywords: ["currency", "expenses", "split", "bills", "money", "budget", "cost", "dollar", "usd"],
+        icon: "cash-outline",
+        route: "/settings/currency-expenses",
+      },
+      {
+        id: "backup-downloads",
+        category: "TRIP EXPERIENCE",
+        title: tr("backup_downloads", "Backup & Downloads"),
+        subtitle: tr("Cloud backup, storage & offline maps"),
+        keywords: ["backup", "restore", "cloud", "downloads", "storage", "cache", "offline maps", "data saving", "notes backup", "chat backup"],
+        icon: "cloud-upload-outline",
+        route: "/settings/backup-downloads",
+      },
+      {
+        id: "maps-navigation",
+        category: "TRIP EXPERIENCE",
+        title: tr("maps_navigation", "Maps & Navigation"),
+        subtitle: tr("Offline cache, route preferences"),
+        keywords: ["maps", "navigation", "routes", "directions", "gps", "travel route"],
+        icon: "location-outline",
+        route: "/settings/maps-navigation",
+      },
+      {
+        id: "weather",
+        category: "TRIP EXPERIENCE",
+        title: tr("weather", "Weather"),
+        subtitle: tr("Local weather forecasts & rain warnings"),
+        keywords: ["weather", "alerts", "aqi", "air quality", "rain", "temperature", "forecast"],
+        icon: "partly-sunny-outline",
+        route: "/settings/weather",
+      },
+
+      // 4. SUPPORT
+      {
+        id: "help-support",
+        category: "SUPPORT",
+        title: tr("help_support", "Help & Support"),
+        subtitle: tr("Guides, FAQs, 24/7 BunkMates bot"),
+        keywords: ["help", "support", "faq", "customer service", "guide", "problem", "ticket"],
+        icon: "help-circle-outline",
+        route: "/settings/help",
+      },
+      {
+        id: "feedback",
+        category: "SUPPORT",
+        title: tr("send_feedback", "Send Feedback"),
+        subtitle: tr("Feature requests, report bugs"),
+        keywords: ["feedback", "bug", "issue", "suggestion", "report", "feature request"],
+        icon: "megaphone-outline",
+        route: "/settings/feedback",
+      },
+      {
+        id: "rate-app",
+        category: "SUPPORT",
+        title: tr("Rate BunkMates"),
+        subtitle: tr("Show us some love on the store"),
+        keywords: ["rate", "review", "google play", "store", "star", "feedback"],
+        icon: "ribbon-outline",
+        onAction: handleRateApp,
+      },
+      {
+        id: "licenses",
+        category: "SUPPORT",
+        title: tr("Third-Party Licenses"),
+        subtitle: tr("Open source software & dependencies"),
+        keywords: ["license", "licenses", "open source", "attribution", "third party", "libraries"],
+        icon: "document-text-outline",
+        iconFamily: "ionicons",
+        route: "/settings/licenses",
+      },
+      {
+        id: "invite-friend",
+        category: "SUPPORT",
+        title: tr("invite_friend", "Invite a Friend"),
+        subtitle: tr("Share BunkMates with travel companions"),
+        keywords: ["invite", "friend", "referral", "share", "refer"],
+        icon: "person-add-outline",
+        route: "/inviteFriend",
+      },
+      {
+        id: "about-app",
+        category: "SUPPORT",
+        title: tr("about_app", "About BunkMates"),
+        subtitle: "Version 3.4.1 (Build 4108)",
+        keywords: ["about", "version", "build", "info", "release", "bunkmates"],
+        icon: "information-circle-outline",
+        route: "/settings/about",
+      },
+    ];
+
+    if (isDeveloper) {
+      list.push({
+        id: "developer-tools",
+        category: "DEVELOPER",
+        title: tr("Developer Tools & Sandbox"),
+        subtitle: tr("Access internal tools, sandboxes, and developer routes"),
+        keywords: ["developer", "dev", "tools", "sandbox", "debug"],
+        icon: "code-slash-outline",
+        badge: "DEV",
+        route: "/settings/developers",
+      });
+    }
+
+    return list;
+  }, [themeMode, activeLanguage, selectedLanguage, tr, isDeveloper, handleRateApp]);
+
+  const searchCategories = useMemo(
+    () => ["ALL", "ACCOUNT", "APP SETTINGS", "TRIP EXPERIENCE", "SUPPORT"],
+    []
+  );
+
+  const filteredSearchList = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return allSettings.filter((item) => {
+      const matchesCategory =
+        selectedCategory === "ALL" || item.category === selectedCategory;
+
+      if (!q) return matchesCategory;
+
+      const titleMatch = item.title.toLowerCase().includes(q);
+      const subMatch = item.subtitle.toLowerCase().includes(q);
+      const catMatch = item.category.toLowerCase().includes(q);
+      const keywordMatch = item.keywords.some((k) => k.toLowerCase().includes(q));
+
+      return matchesCategory && (titleMatch || subMatch || catMatch || keywordMatch);
+    });
+  }, [searchQuery, selectedCategory, allSettings]);
 
   // **@** Track scroll position for header mask gradient reveal on slide/scroll
   const [scrollY] = useState(() => new Animated.Value(0));
@@ -463,144 +863,20 @@ export default function ProfileSettings() {
   // =========================================================
 
   useEffect(() => {
-    if (authLoading) return;
-
-    if (!user) {
+    if (!authLoading && !user) {
       router.replace("/(auth)/login" as any);
-      return;
     }
-
-    // **@** Defer all Firestore work until after the navigation
-    // animation finishes so the transition feels instant.
-    const task = InteractionManager.runAfterInteractions(async () => {
-      try {
-        let profileData: ProfileData = {
-          name:
-            user.displayName ||
-            "Explorer",
-
-          username: "",
-
-          email:
-            user.email ||
-            "",
-
-          mobile: "",
-
-          bio: "",
-
-          photoURL:
-            user.photoURL ||
-            "",
-
-          type: "Dev Beta",
-        };
-
-        const userRef = doc(
-          db,
-          "users",
-          user.uid
-        );
-
-        const userSnap =
-          await getDoc(userRef);
-
-        if (userSnap.exists()) {
-          const data =
-            userSnap.data();
-
-          profileData = {
-            name:
-              data.name ||
-              user.displayName ||
-              "Explorer",
-
-            username:
-              data.username ||
-              data.userName ||
-              "",
-
-            email:
-              data.email ||
-              user.email ||
-              "",
-
-            mobile:
-              data.mobile ||
-              data.phone ||
-              "",
-
-            bio:
-              data.bio ||
-              "",
-
-            photoURL:
-              data.photoURL ||
-              user.photoURL ||
-              "",
-
-            type:
-              data.type ||
-              data.userType ||
-              "Dev Beta",
-          };
-        }
-
-        setProfile(profileData);
-      } catch (error) {
-        console.log(
-          "Profile fetch error:",
-          error
-        );
-      } finally {
-        setLoading(false);
-      }
-    });
-
-    return () => task.cancel();
-  }, [authLoading, user]);
-
-  // **@** Trip count is fetched in a SEPARATE effect, further deferred,
-  // so it never blocks the main settings render or initial navigation.
-  useEffect(() => {
-    if (authLoading || !user) return;
-
-    // Small delay to ensure settings page has fully rendered first.
-    const timer = setTimeout(() => {
-      const task = InteractionManager.runAfterInteractions(async () => {
-        try {
-          // Fast targeted query for user's trips instead of scanning full collection
-          const q1 = query(collection(db, "trips"), where("userId", "==", user.uid));
-          const snap1 = await getDocs(q1);
-          if (!snap1.empty) {
-            setTripCount(snap1.size);
-            return;
-          }
-          const q2 = query(collection(db, "trips"), where("uid", "==", user.uid));
-          const snap2 = await getDocs(q2);
-          if (!snap2.empty) {
-            setTripCount(snap2.size);
-          }
-        } catch (tripError) {
-          console.log(
-            "Trip count unavailable:",
-            tripError
-          );
-        }
-      });
-
-      return () => task.cancel();
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [authLoading, user]);
+  }, [authLoading, user, router]);
 
   // Restore developer mode on this device, and refresh whenever screen is focused
   useFocusEffect(
     useCallback(() => {
       let mounted = true;
       AsyncStorage.getItem("isDeveloper").then((value) => {
-        if (mounted) setIsDeveloper(value === "true");
+        const isDev = value === "true";
+        if (mounted) {
+          setIsDeveloper((prev) => (prev !== isDev ? isDev : prev));
+        }
       });
       return () => {
         mounted = false;
@@ -636,12 +912,13 @@ export default function ProfileSettings() {
 
   const handleVerifyDevKey = async () => {
     if (!enteredKey.trim()) {
-      Alert.alert("Required", "Please enter the developer key.");
+      setPasskeyError("Please enter the developer key.");
       return;
     }
 
     try {
       setVerifyingKey(true);
+      setPasskeyError(null);
       const keyDoc = await getDoc(doc(db, "secret", "devkey"));
       const validKey = keyDoc.exists() ? keyDoc.data().key : null;
 
@@ -650,14 +927,14 @@ export default function ProfileSettings() {
         await AsyncStorage.setItem("isDeveloper", "true");
         setShowDevDialog(false);
         setEnteredKey("");
+        setPasskeyError(null);
         smoothNavigate("/settings/developers");
-        Alert.alert("Developer Mode", "🧑‍💻 Developer Mode Unlocked!");
       } else {
-        Alert.alert("Invalid Developer Key", "The developer key is incorrect.");
+        setPasskeyError("The developer key is incorrect.");
       }
     } catch (error) {
       console.error("Error verifying developer key:", error);
-      Alert.alert("Error", "Could not verify the developer key. Try again later.");
+      setPasskeyError("Could not verify the developer key. Try again later.");
     } finally {
       setVerifyingKey(false);
     }
@@ -667,27 +944,26 @@ export default function ProfileSettings() {
     smoothNavigate("/settings/developers");
   };
 
-  const handleInternalBack = () => {
+  const handleInternalBack = useCallback(() => {
+    if (isSearchActive) {
+      handleCloseSearch();
+      return;
+    }
     if (router.canGoBack()) {
       router.back();
     } else {
       router.replace("/(tabs)" as any);
     }
-  };
+  }, [isSearchActive, handleCloseSearch, router]);
 
   // **@** Hardware back press listener for Android
   useEffect(() => {
     const backSub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (isSearching) {
-        setIsSearching(false);
-        setSearchQuery("");
-        return true;
-      }
       handleInternalBack();
       return true;
     });
     return () => backSub.remove();
-  }, [isSearching, handleInternalBack]);
+  }, [handleInternalBack]);
 
 
   // =========================================================
@@ -720,367 +996,8 @@ export default function ProfileSettings() {
     [isDark, colors, dynamicFontScale]
   );
 
-  // **@** Comprehensive list of all searchable settings & features inside Settings
-  type SearchableSetting = {
-    id: string;
-    category: string;
-    title: string;
-    subtitle: string;
-    keywords: string[];
-    icon: any;
-    iconFamily?: "ionicons" | "material" | "feather";
-    iconColor?: string;
-    iconBg?: string;
-    badge?: string;
-    rightText?: string;
-    onPress: () => void;
-  };
-
-  // **@** Memoized so the massive array is only rebuilt when dependencies change
-  const searchableSettings: SearchableSetting[] = useMemo(() => [
-    // ACCOUNT
-    {
-      id: "edit-profile",
-      category: "ACCOUNT",
-      title: "Edit Profile",
-      subtitle: "Personal details, travel bio & contact",
-      keywords: ["edit profile", "profile", "bio", "name", "email", "phone", "avatar", "photo", "username"],
-      icon: "edit-3",
-      iconFamily: "feather" as const,
-      iconColor: colors.greyishWhite,
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/ProfileEdit");
-      },
-    },
-    {
-      id: "account-security",
-      category: "ACCOUNT",
-      title: "Account & Security",
-      subtitle: "Password, Two-factor auth, session logs",
-      keywords: ["account", "security", "password", "two factor", "2fa", "session", "login", "auth"],
-      icon: "shield-checkmark-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/accounts");
-      },
-    },
-    {
-      id: "privacy-data",
-      category: "ACCOUNT",
-      title: "Privacy & Data",
-      subtitle: "Profile visibility, location logs",
-      keywords: ["privacy", "data", "visibility", "tracking", "location", "logs"],
-      icon: "lock-closed-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/privacy");
-      },
-    },
-    {
-      id: "linked-devices",
-      category: "ACCOUNT",
-      title: "Linked Devices",
-      subtitle: "Active sessions, phones & computers",
-      keywords: ["linked devices", "devices", "sessions", "login", "phone", "laptop", "computer", "active sessions"],
-      icon: "devices",
-      iconFamily: "material" as const,
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/linked-devices");
-      },
-    },
-    {
-      id: "qr-code",
-      category: "ACCOUNT",
-      title: "My QR Code",
-      subtitle: "Share profile & quick connect scanner",
-      keywords: ["qr", "code", "scan", "scanner", "share", "barcode"],
-      icon: "qr-code-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/qr-code");
-      },
-    },
-
-    // APP SETTINGS
-    {
-      id: "appearance",
-      category: "APP SETTINGS",
-      title: "Appearance",
-      subtitle: "Theme color, dark mode & light mode",
-      keywords: ["appearance", "theme", "dark mode", "light mode", "color", "display"],
-      rightText:
-        themeMode === "system"
-          ? "System (Auto)"
-          : themeMode === "dark"
-          ? "Dark Mode"
-          : "Light Mode",
-      icon: "color-filter-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/appearance");
-      },
-    },
-    {
-      id: "language-region",
-      category: "APP SETTINGS",
-      title: "Language & Region",
-      subtitle: `${selectedLanguage}, locale formats`,
-      keywords: ["language", "region", "country", "english", "locale", "timezone", "hindi", "date", "time"],
-      rightText: selectedLanguage,
-      icon: "globe-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/language-region");
-      },
-    },
-    {
-      id: "accessibility",
-      category: "APP SETTINGS",
-      title: "Accessibility",
-      subtitle: "High contrast, motion, touch targets & color blind filters",
-      keywords: ["accessibility", "font", "contrast", "size", "zoom", "reader", "haptic", "motion", "color blind", "vision"],
-      icon: "accessibility-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/accessibility");
-      },
-    },
-    {
-      id: "chats",
-      category: "APP SETTINGS",
-      title: "Chats",
-      subtitle: "Theme, Wallpapers, and Chat Settings",
-      keywords: ["chats", "chat", "messages", "wallpaper", "chat theme", "bubbles"],
-      icon: "chatbubble-ellipses-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/chat-settings");
-      },
-    },
-
-    {
-      id: "ai-features",
-      category: "APP SETTINGS",
-      title: "AI Features",
-      subtitle: "Configure Groq API Key & AI settings",
-      keywords: ["ai", "groq", "artificial intelligence", "api key", "bot", "assistant", "model", "smart"],
-      icon: "sparkles",
-      iconColor: colors.greyishWhite,
-      iconBg: colors.iconBoxBg,
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/ai-settings");
-      },
-    },
-
-    // TRIP EXPERIENCE
-    {
-      id: "notifications",
-      category: "TRIP EXPERIENCE",
-      title: "Notifications",
-      subtitle: "Trip updates, chat pings, alerts",
-      keywords: ["notifications", "alerts", "ping", "updates", "trip notification", "messages"],
-      icon: "notifications-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/notification");
-      },
-    },
-    {
-      id: "trip-preferences",
-      category: "TRIP EXPERIENCE",
-      title: "Trip Preferences",
-      subtitle: "Dietary rules, accommodation styles, travel pace",
-      keywords: ["preferences", "diet", "food", "accommodation", "hotel", "travel pace", "style"],
-      icon: "compass-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/trip-preference");
-      },
-    },
-    {
-      id: "currency-expenses",
-      category: "TRIP EXPERIENCE",
-      title: "Currency & Expenses",
-      subtitle: "Default Split bills, home currency USD",
-      keywords: ["currency", "expenses", "split", "bills", "money", "budget", "cost", "dollar", "usd"],
-      icon: "cash-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/currency-expenses");
-      },
-    },
-    {
-      id: "offline-downloads",
-      category: "TRIP EXPERIENCE",
-      title: "Offline & Downloads",
-      subtitle: "Storage management, offline maps",
-      keywords: ["offline", "downloads", "storage", "cache", "offline maps", "data saving"],
-      icon: "cloud-download-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/offline-downloads");
-      },
-    },
-    {
-      id: "maps-navigation",
-      category: "TRIP EXPERIENCE",
-      title: "Maps & Navigation",
-      subtitle: "Offline cache, route preferences",
-      keywords: ["maps", "navigation", "routes", "directions", "gps", "travel route"],
-      icon: "location-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/maps-navigation");
-      },
-    },
-    {
-      id: "weather-alerts",
-      category: "TRIP EXPERIENCE",
-      title: "Weather Alerts & AQI",
-      subtitle: "Local weather forecasts & rain warnings",
-      keywords: ["weather", "alerts", "aqi", "air quality", "rain", "temperature", "forecast"],
-      icon: "partly-sunny-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/weather");
-      },
-    },
-    {
-      id: "my-trips",
-      category: "TRIP EXPERIENCE",
-      title: "My Trips & Itineraries",
-      subtitle: "Explore, manage, and plan adventures",
-      keywords: ["trips", "my trips", "itinerary", "journey", "vacation", "planner"],
-      icon: "airplane-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/trips");
-      },
-      
-    },
-
-    // SUPPORT
-    {
-      id: "help-support",
-      category: "SUPPORT",
-      title: "Help & Support",
-      subtitle: "Guides, FAQs, 24/7 BunkMates bot",
-      keywords: ["help", "support", "faq", "customer service", "guide", "problem", "ticket"],
-      icon: "help-circle-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/help");
-      },
-    },
-    {
-      id: "feedback",
-      category: "SUPPORT",
-      title: "Send Feedback",
-      subtitle: "Feature requests, report bugs",
-      keywords: ["feedback", "bug", "issue", "suggestion", "report", "feature request"],
-      icon: "megaphone-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/feedback");
-      },
-    },
-    {
-      id: "rate-app",
-      category: "SUPPORT",
-      title: "Rate BunkMates",
-      subtitle: "Show us some love on the store",
-      keywords: ["rate", "review", "stars", "app store", "play store"],
-      icon: "ribbon-outline",
-      onPress: () => {
-        setIsSearching(false);
-        handleRateApp();
-      },
-    },
-    {
-      id: "licenses",
-      category: "SUPPORT",
-      title: "Third-Party Licenses",
-      subtitle: "Open source software & dependencies",
-      keywords: ["license", "licenses", "open source", "attribution", "third party", "libraries"],
-      icon: "license",
-      iconFamily: "material" as const,
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/licenses");
-      },
-    },
-    {
-      id: "invite-friend",
-      category: "SUPPORT",
-      title: "Invite a Friend",
-      subtitle: "Share BunkMates with travel companions",
-      keywords: ["invite", "friend", "referral", "share", "refer"],
-      icon: "person-add-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/inviteFriend");
-      },
-    },
-    {
-      id: "about-app",
-      category: "SUPPORT",
-      title: "About BunkMates",
-      subtitle: "Version 3.4.1 (Build 4108)",
-      keywords: ["about", "version", "build", "info", "release", "bunkmates"],
-      icon: "information-circle-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/about");
-      },
-    },
-    ...(isDeveloper
-      ? [
-          {
-            id: "developer-tools",
-            category: "DEVELOPER",
-            title: "Developer Tools & Sandbox",
-            subtitle: "Access internal tools, sandboxes, and developer routes",
-            keywords: ["developer", "dev", "tools", "sandbox", "debug"],
-            icon: "code-slash-outline",
-            onPress: () => {
-              setIsSearching(false);
-              smoothNavigate("/settings/developers");
-            },
-          } as SearchableSetting,
-        ]
-      : []),
-    {
-      id: "logout",
-      category: "ACCOUNT",
-      title: "Log Out",
-      subtitle: "Sign out of your current session",
-      keywords: ["logout", "log out", "sign out", "exit"],
-      icon: "log-out-outline",
-      onPress: () => {
-        setIsSearching(false);
-        smoothNavigate("/settings/accounts");
-      },
-    },
-  ], [isDark, isDeveloper, themeMode, toggleThemeFn]);
-
-  // **@** Memoized filter — only recalculates when query or settings list changes
-  const filteredSettings = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return [];
-    return searchableSettings.filter((item) => {
-      const titleMatch = item.title.toLowerCase().includes(q);
-      const subtitleMatch = item.subtitle?.toLowerCase().includes(q);
-      const categoryMatch = item.category.toLowerCase().includes(q);
-      const keywordMatch = item.keywords.some((k) => k.toLowerCase().includes(q));
-      return titleMatch || subtitleMatch || categoryMatch || keywordMatch;
-    });
-  }, [searchQuery, searchableSettings]);
-
   // Loading check placed after all hooks to prevent hook count mismatch
-  if (authLoading) {
+  if (authLoading && !user) {
     return <SkeletonLoadingScreen title="Settings" />;
   }
 
@@ -1119,6 +1036,12 @@ export default function ProfileSettings() {
           style={styles.devModalInput}
         />
 
+        {passkeyError ? (
+          <Text style={{ color: "#EF4444", fontSize: 13, textAlign: "center", marginBottom: 10, fontWeight: "500" }}>
+            {passkeyError}
+          </Text>
+        ) : null}
+
         <View style={styles.devModalActions}>
           <Pressable
             onPress={() => {
@@ -1156,67 +1079,72 @@ export default function ProfileSettings() {
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
       <StatusBar
         barStyle={isDark ? "light-content" : "dark-content"}
-        backgroundColor="transparent"
-        translucent
       />
 
       {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
       <SettingsHeaderGradientMask
         backgroundColor={colors.bg}
-        height={topInset + (Platform.OS === "android" ? 6 : 4) + 48 + 36}
+        height={topInset + (Platform.OS === "android" ? 6 : 4) + 90 + 86}
         zIndex={15}
       />
 
-      {/* **@** Invisible Floating App Bar: Back arrow, Settings, QR, and Search stay in their exact positions floating on top */}
-      {!isSearching ? (
-        <View
-          style={[
-            styles.modernHeader,
-            {
-              position: "absolute",
-              left: 0,
-              right: 0,
-              top: topInset + (Platform.OS === "android" ? 6 : 4),
-            },
-          ]}
-        >
-          {/* Left side: Back navigation button + Settings Title */}
-          <View style={styles.modernHeaderLeft}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.modernHeaderBtn,
-                { backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)" },
-                pressed && styles.pressed,
-              ]}
-              onPress={handleInternalBack}
-              accessibilityLabel="Go back"
-              hitSlop={8}
-            >
-              <Ionicons
-                name="arrow-back"
-                size={21}
-                color={colors.textPrimary}
-              />
-            </Pressable>
+      {/* **@** Invisible Floating App Bar: Back arrow, Settings Title, and QR Code in the header */}
+      <View
+        style={[
+          styles.modernHeader,
+          {
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: topInset + (Platform.OS === "android" ? 6 : 4),
+          },
+        ]}
+      >
+        {/* Left side: Back navigation button + Settings Title */}
+        <View style={styles.modernHeaderLeft}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.modernHeaderBtn,
+              {
+                backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+                boxShadow: isDark ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)" : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                transform: [{ scale: pressed ? 0.92 : 1 }],
+              },
+              pressed && styles.pressed,
+            ]}
+            onPress={handleInternalBack}
+            accessibilityLabel={isSearchActive ? "Exit search" : "Go back"}
+            hitSlop={8}
+          >
+            <Ionicons
+              name="arrow-back"
+              size={21}
+              color={colors.textPrimary}
+            />
+          </Pressable>
 
-            <Text
-              style={[
-                styles.modernHeaderTitle,
-                { color: colors.textPrimary, fontSize: Math.round(22 * dynamicFontScale) },
-              ]}
-              numberOfLines={1}
-            >
-              {tr("Settings")}
-            </Text>
-          </View>
+          <Text
+            style={[
+              styles.modernHeaderTitle,
+              { color: colors.textPrimary, fontSize: Math.round(22 * dynamicFontScale) },
+            ]}
+            numberOfLines={1}
+          >
+            {isSearchActive ? tr("Search Settings") : tr("Settings")}
+          </Text>
+        </View>
 
-          {/* Right side: Action buttons (QR Code & Search) */}
+        {/* Right side: QR Code Action Button occupying original header action location (hidden in search) */}
+        {!isSearchActive && (
           <View style={styles.modernHeaderIcons}>
-            {/* QR Code Action Button */}
             <Pressable
               style={({ pressed }) => [
                 styles.modernHeaderBtn,
-                { backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)" },
+                {
+                  backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+                  boxShadow: isDark ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)" : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                  transform: [{ scale: pressed ? 0.92 : 1 }],
+                },
                 pressed && styles.pressed,
               ]}
               onPress={() => smoothNavigate("/qr-code")}
@@ -1229,92 +1157,9 @@ export default function ProfileSettings() {
                 color={colors.textPrimary}
               />
             </Pressable>
-
-            {/* Search Settings Action Button */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.modernHeaderBtn,
-                { backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)" },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setIsSearching(true)}
-              accessibilityLabel="Search settings"
-              hitSlop={8}
-            >
-              <Ionicons
-                name="search-outline"
-                size={20}
-                color={colors.textPrimary}
-              />
-            </Pressable>
           </View>
-        </View>
-      ) : (
-        <View
-          style={[
-            styles.modernSearchHeader,
-            {
-              top: topInset + (Platform.OS === "android" ? 6 : 4),
-              backgroundColor: colors.bg,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.modernSearchInputWrapper,
-              { backgroundColor: colors.card, borderColor: colors.cardBorder },
-            ]}
-          >
-            <Ionicons
-              name="search-outline"
-              size={18}
-              color={colors.textSecondary}
-              style={{ marginRight: 8 }}
-            />
-            <TextInput
-              ref={searchInputRef}
-              style={[styles.modernSearchInput, { color: colors.textPrimary }]}
-              placeholder={tr("Search settings & features...")}
-              placeholderTextColor={colors.textSecondary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoFocus
-              returnKeyType="search"
-            />
-            {searchQuery.length > 0 && (
-              <Pressable
-                onPress={() => setSearchQuery("")}
-                hitSlop={8}
-                style={styles.modernSearchClearBtn}
-                accessibilityLabel="Clear search"
-              >
-                <Ionicons
-                  name="close-circle"
-                  size={18}
-                  color={colors.textSecondary}
-                />
-              </Pressable>
-            )}
-          </View>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.modernSearchCancelBtn,
-              pressed && { opacity: 0.7 },
-            ]}
-            onPress={() => {
-              setIsSearching(false);
-              setSearchQuery("");
-              Keyboard.dismiss();
-            }}
-            accessibilityLabel="Cancel search"
-          >
-            <Text style={[styles.modernSearchCancelText, { color: colors.coral }]}>
-              {tr("Cancel")}
-            </Text>
-          </Pressable>
-        </View>
-      )}
+        )}
+      </View>
 
       <SettingsRowContext.Provider value={rowContextValue}>
         <Animated.ScrollView
@@ -1324,10 +1169,12 @@ export default function ProfileSettings() {
             styles.modernScrollContent,
             {
               paddingTop: topInset + (Platform.OS === "android" ? 6 : 4) + 48 + 14,
-              paddingBottom: Math.max(insets.bottom, 16) + 105,
+              paddingBottom: searchBottomOffset + 60,
+              flexGrow: 1,
             },
           ]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: true }
@@ -1337,424 +1184,561 @@ export default function ProfileSettings() {
           bounces={Platform.OS === "ios"}
           decelerationRate="normal"
         >
-        {isSearching ? (
-          <View style={styles.modernSearchResultsContainer}>
-            {searchQuery.trim().length === 0 ? (
-              <View>
-                <Text
-                  style={[
-                    styles.modernSectionHeading,
-                    { color: colors.sectionHeader },
-                  ]}
-                >
-                  {tr("Suggested Settings").toUpperCase()}
-                </Text>
-                <View
-                  style={[
-                    styles.modernCardGroup,
-                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
-                  ]}
-                >
-                  {searchableSettings.slice(0, 6).map((item, idx) => (
-                    <SettingRow
-                      key={item.id}
-                      icon={item.icon}
-                      iconFamily={item.iconFamily}
-                      iconColor={item.iconColor}
-                      iconBg={item.iconBg}
-                      title={item.title}
-                      subtitle={item.subtitle}
-                      category={item.category}
-                      badge={item.badge}
-                      rightText={item.rightText}
-                      isLast={idx === 5}
-                      onPress={item.onPress}
-                    />
-                  ))}
+          <Animated.View style={{ opacity: contentFadeAnim, width: "100%" }}>
+            {isSearchActive ? (
+              <View style={styles.searchViewContainer}>
+                {/* Category filter chips */}
+                <View style={styles.searchChipsContainer}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.searchChipsScroll}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {searchCategories.map((cat) => {
+                      const isSelected = selectedCategory === cat;
+                      const label = cat === "ALL" ? tr("All") : tr(cat);
+                      return (
+                        <Pressable
+                          key={cat}
+                          style={[
+                            styles.searchChip,
+                            {
+                              backgroundColor: isSelected
+                                ? (isDark ? "#FFFFFF" : "#11141A")
+                                : (isDark ? "#1C1C1E" : "#E8EAEE"),
+                            },
+                          ]}
+                          onPress={() => setSelectedCategory(cat)}
+                        >
+                          <Text
+                            style={[
+                              styles.searchChipText,
+                              {
+                                color: isSelected
+                                  ? (isDark ? "#000000" : "#FFFFFF")
+                                  : (isDark ? "#8E95A2" : "#6B7280"),
+                                fontWeight: isSelected ? "700" : "500",
+                              },
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
                 </View>
-                <Text style={[styles.modernSearchTip, { color: colors.textSecondary }]}>
-                  {tr("Type any setting name, feature, or keyword to find it instantly.")}
-                </Text>
-              </View>
-            ) : filteredSettings.length > 0 ? (
-              <View>
-                <Text
-                  style={[
-                    styles.modernSectionHeading,
-                    { color: colors.sectionHeader },
-                  ]}
-                >
-                  {tr("Matching Settings").toUpperCase()} ({filteredSettings.length})
-                </Text>
-                <View
-                  style={[
-                    styles.modernCardGroup,
-                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
-                  ]}
-                >
-                  {filteredSettings.map((item, idx) => (
-                    <SettingRow
-                      key={item.id}
-                      icon={item.icon}
-                      iconFamily={item.iconFamily}
-                      iconColor={item.iconColor}
-                      iconBg={item.iconBg}
-                      title={item.title}
-                      subtitle={item.subtitle}
-                      category={item.category}
-                      badge={item.badge}
-                      rightText={item.rightText}
-                      isLast={idx === filteredSettings.length - 1}
-                      onPress={item.onPress}
-                    />
-                  ))}
-                </View>
+
+                {filteredSearchList.length > 0 ? (
+                  <View>
+                    <Text style={[styles.searchSectionHeading, { color: colors.sectionHeader }]}>
+                      {searchQuery.trim().length > 0
+                        ? `${tr("MATCHING SETTINGS").toUpperCase()} (${filteredSearchList.length})`
+                        : tr("SUGGESTED SETTINGS").toUpperCase()}
+                    </Text>
+
+                    <View style={[styles.modernCardGroup, { backgroundColor: colors.card }]}>
+                      {filteredSearchList.map((item, idx) => {
+                        const isLast = idx === filteredSearchList.length - 1;
+                        return (
+                          <View key={item.id}>
+                            <Pressable
+                              style={({ pressed }) => [styles.searchResultRow, pressed && styles.pressed]}
+                              onPress={() => {
+                                Keyboard.dismiss();
+                                if (item.onAction) {
+                                  item.onAction();
+                                } else if (item.route) {
+                                  smoothNavigate(item.route);
+                                }
+                              }}
+                              accessibilityRole="button"
+                              accessibilityLabel={item.title}
+                            >
+                              <View style={[styles.searchResultIconBox, { backgroundColor: colors.iconBoxBg }]}>
+                                {item.iconFamily === "material" ? (
+                                  <MaterialIcons name={item.icon as any} size={20} color={colors.greyishWhite} />
+                                ) : item.iconFamily === "feather" ? (
+                                  <Feather name={item.icon as any} size={19} color={colors.greyishWhite} />
+                                ) : (
+                                  <Ionicons name={item.icon as any} size={20} color={colors.greyishWhite} />
+                                )}
+                              </View>
+
+                              <View style={styles.searchResultContent}>
+                                <View style={styles.searchResultTextGroup}>
+                                  <View style={styles.searchResultTitleWrap}>
+                                    <Text
+                                      style={[styles.searchResultTitle, { color: colors.textPrimary }]}
+                                      numberOfLines={1}
+                                    >
+                                      {item.title}
+                                    </Text>
+                                    {item.category && (
+                                      <View
+                                        style={[
+                                          styles.searchCategoryBadge,
+                                          {
+                                            backgroundColor: isDark
+                                              ? "rgba(255, 255, 255, 0.08)"
+                                              : "rgba(0, 0, 0, 0.05)",
+                                          },
+                                        ]}
+                                      >
+                                        <Text style={[styles.searchCategoryBadgeText, { color: colors.textSecondary }]}>
+                                          {item.category}
+                                        </Text>
+                                      </View>
+                                    )}
+                                    {item.badge && (
+                                      <View style={styles.devBadge}>
+                                        <Text style={styles.devBadgeText}>{item.badge}</Text>
+                                      </View>
+                                    )}
+                                  </View>
+
+                                  {item.subtitle ? (
+                                    <Text
+                                      style={[styles.searchResultSubtitle, { color: colors.textSecondary }]}
+                                      numberOfLines={1}
+                                    >
+                                      {item.subtitle}
+                                    </Text>
+                                  ) : null}
+                                </View>
+
+                                <View style={styles.searchResultRightGroup}>
+                                  {item.rightText ? (
+                                    <Text style={[styles.searchResultRightText, { color: colors.textSecondary }]}>
+                                      {item.rightText}
+                                    </Text>
+                                  ) : null}
+                                  <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
+                                </View>
+                              </View>
+                            </Pressable>
+
+                            {!isLast && <View style={[styles.searchResultDivider, { backgroundColor: colors.divider }]} />}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.searchEmptyContainer}>
+                    <View style={[styles.emptyIconBox, { backgroundColor: colors.iconBoxBg }]}>
+                      <Ionicons name="search-outline" size={34} color={colors.textSecondary} />
+                    </View>
+                    <Text style={[styles.emptySearchTitle, { color: colors.textPrimary }]}>
+                      {tr("No Results for")} &ldquo;{searchQuery}&rdquo;
+                    </Text>
+                    <Text style={[styles.emptySearchSubtitle, { color: colors.textSecondary }]}>
+                      {tr("Check the spelling or try a new search.")}
+                    </Text>
+                    <Pressable
+                      style={[
+                        styles.emptyClearBtn,
+                        { backgroundColor: isDark ? "#2C2C30" : "#E5E7EB" },
+                      ]}
+                      onPress={() => setSearchQuery("")}
+                    >
+                      <Text style={[styles.emptyClearBtnText, { color: colors.textPrimary }]}>
+                        {tr("Clear Search")}
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
               </View>
             ) : (
-              <View style={styles.modernEmptySearchWrap}>
+              <>
+                {/* **@** User Profile Card with Avatar, Name, Email, and Edit Profile Pen Icon */}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.modernProfileCard,
+                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => smoothNavigate("/ProfileEdit")}
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit Profile"
+                >
+                  <Image
+                    source={{ uri: userData?.photoURL || profile.photoURL || user?.photoURL || backgroundImage }}
+                    style={styles.modernProfileAvatar}
+                  />
+                  <View style={styles.modernProfileDetails}>
+                    <Text
+                      style={[
+                        styles.modernProfileName,
+                        { color: colors.textPrimary, fontSize: Math.round(18 * dynamicFontScale) },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {userData?.name || userData?.displayName || profile.name || user?.displayName || "Sasha Miller"}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.modernProfileEmail,
+                        { color: colors.textSecondary, fontSize: Math.round(13.5 * dynamicFontScale) },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {userData?.email ||
+                        profile.email ||
+                        user?.email ||
+                        (userData?.username || profile.username
+                          ? `${(userData?.username || profile.username).toLowerCase()}@bunkmates.xyz`
+                          : "sasha.explorer@bunkmates.xyz")}
+                    </Text>
+                  </View>
+
+                  {/* **@** Edit Profile Pen Icon Button with greyish-white icon */}
+                  <View style={[styles.modernProfileEditBtn, { backgroundColor: colors.iconBoxBg }]}>
+                    <Feather name="edit-3" size={19} color={colors.greyishWhite} />
+                  </View>
+                </Pressable>
+
+                {/* =====================================================
+                    1. ACCOUNT
+                ====================================================== */}
+                <Text
+                  style={[
+                    styles.modernSectionHeading,
+                    { color: colors.sectionHeader, fontSize: Math.round(12 * dynamicFontScale) },
+                  ]}
+                >
+                  {tr("account_section", "ACCOUNT")}
+                </Text>
                 <View
                   style={[
-                    styles.modernEmptySearchIconBox,
+                    styles.modernCardGroup,
                     { backgroundColor: colors.card, borderColor: colors.cardBorder },
                   ]}
                 >
-                  <Ionicons
-                    name="search-outline"
-                    size={30}
-                    color={colors.textSecondary}
+                  <SettingRow
+                    icon="shield-checkmark-outline"
+                    title={tr("accounts_security", "Account & Security")}
+                    subtitle={tr("Password, Two-factor auth & security")}
+                    onPress={() => smoothNavigate("/settings/accounts")}
+                  />
+                  <SettingRow
+                    icon="lock-closed-outline"
+                    title={tr("Privacy & Data")}
+                    subtitle={tr("Profile visibility, location logs")}
+                    onPress={() => smoothNavigate("/settings/privacy")}
+                  />
+                  <SettingRow
+                    icon="devices"
+                    iconFamily="material"
+                    title={tr("linked_devices", "Linked Devices")}
+                    subtitle={tr("Active sessions, phones & computers")}
+                    onPress={() => smoothNavigate("/settings/linked-devices")}
+                  />
+                  {/* <SettingRow
+                    // icon="qr-code-outline"
+                    // title={tr("scan_qr_login", "Scan QR to Log In")}
+                    // subtitle={tr("Log in to BunkMates on desktop or web")}
+                    // isLast
+                    // onPress={() => smoothNavigate("/qr-login")}
+                  /> */}
+                </View>
+
+                {/* =====================================================
+                    2. APP SETTINGS
+                ====================================================== */}
+                <Text
+                  style={[
+                    styles.modernSectionHeading,
+                    { color: colors.sectionHeader },
+                  ]}
+                >
+                  {tr("app_settings_section", "APP SETTINGS")}
+                </Text>
+                <View
+                  style={[
+                    styles.modernCardGroup,
+                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                  ]}
+                >
+                  <SettingRow
+                    icon="color-filter-outline"
+                    title={tr("appearance", "Appearance")}
+                    rightText={
+                      themeMode === "system"
+                        ? tr("System (Auto)")
+                        : themeMode === "dark"
+                          ? tr("Dark Mode")
+                          : tr("Light Mode")
+                    }
+                    onPress={() => smoothNavigate("/settings/appearance")}
+                  />
+                  <SettingRow
+                    icon="globe-outline"
+                    title={tr("language_region_title", "Language & Region")}
+                    rightText={activeLanguage || selectedLanguage}
+                    onPress={() => smoothNavigate("/settings/language-region")}
+                  />
+                  <SettingRow
+                    icon="accessibility-outline"
+                    title={tr("accessibility", "Accessibility")}
+                    subtitle={tr("Vision support, high contrast, motion & haptics")}
+                    onPress={() => smoothNavigate("/settings/accessibility")}
+                  />
+                  <SettingRow
+                    icon="chatbubble-ellipses-outline"
+                    title={tr("chats", "Chats")}
+                    subtitle={tr("Theme, Wallpapers, and Chat Settings")}
+                    onPress={() => smoothNavigate("/settings/chat-settings")}
+                  />
+                  <SettingRow
+                    icon="sparkles"
+                    title={tr("ai_features", "AI Features")}
+                    subtitle={tr("Configure Groq API Key & AI settings")}
+                    isLast
+                    onPress={() => smoothNavigate("/settings/ai-settings")}
                   />
                 </View>
+
+                {/* =====================================================
+                    3. TRIP EXPERIENCE
+                ====================================================== */}
                 <Text
                   style={[
-                    styles.modernEmptySearchTitle,
-                    { color: colors.textPrimary },
+                    styles.modernSectionHeading,
+                    { color: colors.sectionHeader },
                   ]}
                 >
-                  {tr("No settings found")}
+                  {tr("trip_experience_section", "TRIP EXPERIENCE")}
                 </Text>
+                <View
+                  style={[
+                    styles.modernCardGroup,
+                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                  ]}
+                >
+                  <SettingRow
+                    icon="notifications-outline"
+                    title={tr("notifications", "Notifications")}
+                    subtitle={tr("Trip updates, chat pings, alerts")}
+                    onPress={() => smoothNavigate("/settings/notification")}
+                  />
+                  <SettingRow
+                    icon="compass-outline"
+                    title={tr("trip_preferences", "Trip Preferences")}
+                    subtitle={tr("Dietary rules, accommodation styles, travel pace")}
+                    onPress={() => smoothNavigate("/settings/trip-preference")}
+                  />
+                  <SettingRow
+                    icon="cash-outline"
+                    title={tr("currency_expenses", "Currency & Expenses")}
+                    subtitle={tr("Default Split bills, home currency USD")}
+                    onPress={() => smoothNavigate("/settings/currency-expenses")}
+                  />
+                  <SettingRow
+                    icon="cloud-upload-outline"
+                    title={tr("backup_downloads", "Backup & Downloads")}
+                    subtitle={tr("Cloud backup, storage & offline maps")}
+                    onPress={() => smoothNavigate("/settings/backup-downloads")}
+                  />
+                  <SettingRow
+                    icon="location-outline"
+                    title={tr("maps_navigation", "Maps & Navigation")}
+                    subtitle={tr("Offline cache, route preferences")}
+                    onPress={() => smoothNavigate("/settings/maps-navigation")}
+                  />
+                  <SettingRow
+                    icon="partly-sunny-outline"
+                    title={tr("weather", "Weather")}
+                    subtitle={tr("Local weather forecasts & rain warnings")}
+                    isLast
+                    onPress={() => smoothNavigate("/settings/weather")}
+                  />
+                </View>
+
+                {/* =====================================================
+                    4. SUPPORT
+                ====================================================== */}
                 <Text
                   style={[
-                    styles.modernEmptySearchSubtitle,
-                    { color: colors.textSecondary },
+                    styles.modernSectionHeading,
+                    { color: colors.sectionHeader },
                   ]}
                 >
-                  We couldn&apos;t find any settings matching &ldquo;{searchQuery}&rdquo;. Try searching for theme, security, currency, or notifications.
+                  {tr("support_section", "SUPPORT")}
                 </Text>
+                <View
+                  style={[
+                    styles.modernCardGroup,
+                    { backgroundColor: colors.card, borderColor: colors.cardBorder },
+                  ]}
+                >
+                  <SettingRow
+                    icon="help-circle-outline"
+                    title={tr("help_support", "Help & Support")}
+                    subtitle={tr("Guides, FAQs, 24/7 BunkMates bot")}
+                    onPress={() => smoothNavigate("/settings/help")}
+                  />
+                  <SettingRow
+                    icon="megaphone-outline"
+                    title={tr("send_feedback", "Send Feedback")}
+                    subtitle={tr("Feature requests, report bugs")}
+                    onPress={() => smoothNavigate("/settings/feedback")}
+                  />
+                  <SettingRow
+                    icon="ribbon-outline"
+                    title={tr("Rate BunkMates")}
+                    subtitle={tr("Show us some love on the store")}
+                    onPress={handleRateApp}
+                  />
+                  <SettingRow
+                    icon="document-text-outline"
+                    iconFamily="ionicons"
+                    title={tr("Third-Party Licenses")}
+                    subtitle={tr("Open source software & dependencies")}
+                    onPress={() => smoothNavigate("/settings/licenses")}
+                  />
+                  <SettingRow
+                    icon="person-add-outline"
+                    title={tr("invite_friend", "Invite a Friend")}
+                    subtitle={tr("Share BunkMates with travel companions")}
+                    onPress={() => smoothNavigate("/inviteFriend")}
+                  />
+                  {isDeveloper && (
+                    <SettingRow
+                      icon="code-slash-outline"
+                      iconBg="rgba(0, 230, 176, 0.15)"
+                      iconColor="#00e6b0"
+                      title={tr("Developer Tools & Sandbox")}
+                      subtitle={tr("Access internal tools, sandboxes, and developer routes")}
+                      badge="DEV"
+                      onPress={() => smoothNavigate("/settings/developers")}
+                    />
+                  )}
+                  <SettingRow
+                    icon="information-circle-outline"
+                    title={tr("about_app", "About BunkMates")}
+                    subtitle={tr("App version, team credits & legal")}
+                    isLast
+                    onPress={() => smoothNavigate("/settings/about")}
+                  />
+                </View>
+
+                {/* BunkMates App Version Footer with Developer Tap Easter Egg */}
                 <Pressable
-                  style={({ pressed }) => [
-                    styles.modernEmptyClearBtn,
-                    { backgroundColor: colors.coralBg, borderColor: colors.coral },
-                    pressed && { opacity: 0.8 },
-                  ]}
-                  onPress={() => setSearchQuery("")}
+                  onPress={handleBuildTap}
+                  hitSlop={12}
+                  style={{ alignItems: "center", paddingVertical: 18, marginBottom: 12 }}
                 >
-                  <Text style={[styles.modernEmptyClearBtnText, { color: colors.coral }]}>
-                    {tr("Clear Query")}
+                  <Text style={{ fontSize: 12, color: isDark ? "#F1F1F1" : colors.textSecondary, fontWeight: "500" }}>
+                    BunkMates v3.4.1 (Build 4108)
                   </Text>
+                  {isDeveloper && (
+                    <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4, gap: 5 }}>
+                      <Ionicons name="code-slash" size={12} color="#00e6b0" />
+                      <Text style={{ fontSize: 11, color: "#00e6b0", fontWeight: "700" }}>
+                        Developer Mode Active
+                      </Text>
+                    </View>
+                  )}
                 </Pressable>
-              </View>
+              </>
             )}
-          </View>
-        ) : (
-          <>
-            {/* **@** User Profile Card with Avatar, Name, Email, and Edit Profile Pen Icon */}
-            <Pressable
-              style={({ pressed }) => [
-                styles.modernProfileCard,
-                { backgroundColor: colors.card, borderColor: colors.cardBorder },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => smoothNavigate("/ProfileEdit")}
-              accessibilityRole="button"
-              accessibilityLabel="Edit Profile"
-            >
-              <Image
-                source={{ uri: userData?.photoURL || profile.photoURL || user?.photoURL || backgroundImage }}
-                style={styles.modernProfileAvatar}
-              />
-              <View style={styles.modernProfileDetails}>
-                <Text
-                  style={[
-                    styles.modernProfileName,
-                    { color: colors.textPrimary, fontSize: Math.round(18 * dynamicFontScale) },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {userData?.name || userData?.displayName || profile.name || user?.displayName || "Sasha Miller"}
-                </Text>
-                <Text
-                  style={[
-                    styles.modernProfileEmail,
-                    { color: colors.textSecondary, fontSize: Math.round(13.5 * dynamicFontScale) },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {userData?.email ||
-                    profile.email ||
-                    user?.email ||
-                    (userData?.username || profile.username
-                      ? `${(userData?.username || profile.username).toLowerCase()}@bunkmates.com`
-                      : "sasha.explorer@bunkmates.com")}
-                </Text>
-              </View>
-
-              {/* **@** Edit Profile Pen Icon Button with greyish-white icon */}
-              <View style={[styles.modernProfileEditBtn, { backgroundColor: colors.iconBoxBg }]}>
-                <Feather name="edit-3" size={19} color={colors.greyishWhite} />
-              </View>
-            </Pressable>
-
-        {/* =====================================================
-            1. ACCOUNT
-        ====================================================== */}
-        <Text
-          style={[
-            styles.modernSectionHeading,
-            { color: colors.sectionHeader, fontSize: Math.round(12 * dynamicFontScale) },
-          ]}
-        >
-          {tr("account_section", "ACCOUNT")}
-        </Text>
-        <View
-          style={[
-            styles.modernCardGroup,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
-          ]}
-        >
-          {/* **@** Edit Profile option removed from ACCOUNT as requested (accessible via the pen icon above) */}
-          <SettingRow
-            icon="shield-checkmark-outline"
-            title={tr("accounts_security", "Account & Security")}
-            subtitle={tr("Password, Two-factor auth & security")}
-            onPress={() => smoothNavigate("/settings/accounts")}
-          />
-          <SettingRow
-            icon="lock-closed-outline"
-            title={tr("Privacy & Data")}
-            subtitle={tr("Profile visibility, location logs")}
-            onPress={() => smoothNavigate("/settings/privacy")}
-          />
-          <SettingRow
-            icon="devices"
-            iconFamily="material"
-            title={tr("linked_devices", "Linked Devices")}
-            subtitle={tr("Active sessions, phones & computers")}
-            isLast
-            onPress={() => smoothNavigate("/settings/linked-devices")}
-          />
-        </View>
-
-        {/* =====================================================
-            2. APP SETTINGS (Includes photo items + existing v2 items)
-        ====================================================== */}
-        <Text
-          style={[
-            styles.modernSectionHeading,
-            { color: colors.sectionHeader },
-          ]}
-        >
-          {tr("app_settings_section", "APP SETTINGS")}
-        </Text>
-        <View
-          style={[
-            styles.modernCardGroup,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
-          ]}
-        >
-          <SettingRow
-            icon="color-filter-outline"
-            title={tr("appearance", "Appearance")}
-            rightText={
-              themeMode === "system"
-                ? tr("System (Auto)")
-                : themeMode === "dark"
-                ? tr("Dark Mode")
-                : tr("Light Mode")
-            }
-            onPress={() => smoothNavigate("/settings/appearance")}
-          />
-          <SettingRow
-            icon="globe-outline"
-            title={tr("language_region_title", "Language & Region")}
-            rightText={activeLanguage || selectedLanguage}
-            onPress={() => smoothNavigate("/settings/language-region")}
-          />
-          <SettingRow
-            icon="accessibility-outline"
-            title={tr("accessibility", "Accessibility")}
-            subtitle={tr("Vision support, high contrast, motion & haptics")}
-            onPress={() => smoothNavigate("/settings/accessibility")}
-          />
-          {/* Preserved v2 feature: Chats */}
-          <SettingRow
-            icon="chatbubble-ellipses-outline"
-            title={tr("chats", "Chats")}
-            subtitle={tr("Theme, Wallpapers, and Chat Settings")}
-            onPress={() => smoothNavigate("/settings/chat-settings")}
-          />
-
-          {/* Preserved v2 feature: AI Features with greyish-white icon */}
-          <SettingRow
-            icon="sparkles"
-            title={tr("ai_features", "AI Features")}
-            subtitle={tr("Configure Groq API Key & AI settings")}
-            isLast
-            onPress={() => smoothNavigate("/settings/ai-settings")}
-          />
-        </View>
-
-        {/* =====================================================
-            3. TRIP EXPERIENCE
-        ====================================================== */}
-        <Text
-          style={[
-            styles.modernSectionHeading,
-            { color: colors.sectionHeader },
-          ]}
-        >
-          {tr("trip_experience_section", "TRIP EXPERIENCE")}
-        </Text>
-        <View
-          style={[
-            styles.modernCardGroup,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
-          ]}
-        >
-          <SettingRow
-            icon="notifications-outline"
-            title={tr("notifications", "Notifications")}
-            subtitle={tr("Trip updates, chat pings, alerts")}
-            onPress={() => smoothNavigate("/settings/notification")}
-          />
-          <SettingRow
-            icon="compass-outline"
-            title={tr("trip_preferences", "Trip Preferences")}
-            subtitle={tr("Dietary rules, accommodation styles, travel pace")}
-            onPress={() => smoothNavigate("/settings/trip-preference")}
-          />
-          <SettingRow
-            icon="cash-outline"
-            title={tr("currency_expenses", "Currency & Expenses")}
-            subtitle={tr("Default Split bills, home currency USD")}
-            onPress={() => smoothNavigate("/settings/currency-expenses")}
-          />
-          <SettingRow
-            icon="cloud-download-outline"
-            title={tr("offline_downloads", "Offline & Downloads")}
-            subtitle={tr("Storage management, offline maps")}
-            onPress={() => smoothNavigate("/settings/offline-downloads")}
-          />
-          <SettingRow
-            icon="location-outline"
-            title={tr("maps_navigation", "Maps & Navigation")}
-            subtitle={tr("Offline cache, route preferences")}
-            onPress={() => smoothNavigate("/settings/maps-navigation")}
-          />
-          <SettingRow
-            icon="partly-sunny-outline"
-            title={tr("weather", "Weather")}
-            subtitle={tr("Local weather forecasts & rain warnings")}
-            isLast
-            onPress={() => smoothNavigate("/settings/weather")}
-          />
-        </View>
-
-        {/* =====================================================
-            4. SUPPORT (Includes photo items + existing v2 items)
-        ====================================================== */}
-        <Text
-          style={[
-            styles.modernSectionHeading,
-            { color: colors.sectionHeader },
-          ]}
-        >
-          {tr("support_section", "SUPPORT")}
-        </Text>
-        <View
-          style={[
-            styles.modernCardGroup,
-            { backgroundColor: colors.card, borderColor: colors.cardBorder },
-          ]}
-        >
-          <SettingRow
-            icon="help-circle-outline"
-            title={tr("help_support", "Help & Support")}
-            subtitle={tr("Guides, FAQs, 24/7 BunkMates bot")}
-            onPress={() => smoothNavigate("/settings/help")}
-          />
-          <SettingRow
-            icon="megaphone-outline"
-            title={tr("send_feedback", "Send Feedback")}
-            subtitle={tr("Feature requests, report bugs")}
-            onPress={() => smoothNavigate("/settings/feedback")}
-          />
-          <SettingRow
-            icon="ribbon-outline"
-            title={tr("Rate BunkMates")}
-            subtitle={tr("Show us some love on the store")}
-            onPress={handleRateApp}
-          />
-          {/* Preserved v2 feature: Licenses */}
-          <SettingRow
-            icon="license"
-            iconFamily="material"
-            title={tr("Third-Party Licenses")}
-            subtitle={tr("Open source software & dependencies")}
-            onPress={() => smoothNavigate("/settings/licenses")}
-          />
-          {/* Preserved v2 feature: Invite Friend */}
-          <SettingRow
-            icon="person-add-outline"
-            title={tr("invite_friend", "Invite a Friend")}
-            subtitle={tr("Share BunkMates with travel companions")}
-            onPress={() => smoothNavigate("/inviteFriend")}
-          />
-          {/* Preserved v2 feature: Developer tools if unlocked */}
-          {isDeveloper && (
-            <SettingRow
-              icon="code-slash-outline"
-              iconBg="rgba(0, 230, 176, 0.15)"
-              iconColor="#00e6b0"
-              title={tr("Developer Tools & Sandbox")}
-              subtitle={tr("Access internal tools, sandboxes, and developer routes")}
-              badge="DEV"
-              onPress={() => smoothNavigate("/settings/developers")}
-            />
-          )}
-          {/* About BunkMates placed at the very end of Settings */}
-          <SettingRow
-            icon="information-circle-outline"
-            title={tr("about_app", "About BunkMates")}
-            subtitle={tr("App version, team credits & legal")}
-            isLast
-            onPress={() => smoothNavigate("/settings/about")}
-          />
-        </View>
-
-
-
-        {/* BunkMates App Version Footer with Developer Tap Easter Egg */}
-        <Pressable
-          onPress={handleBuildTap}
-          hitSlop={12}
-          style={{ alignItems: "center", paddingVertical: 18, marginBottom: 12 }}
-        >
-          <Text style={{ fontSize: 12, color: colors.textSecondary, fontWeight: "500" }}>
-            BunkMates v3.4.1 (Build 4108)
-          </Text>
-          {isDeveloper && (
-            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4, gap: 5 }}>
-              <Ionicons name="code-slash" size={12} color="#00e6b0" />
-              <Text style={{ fontSize: 11, color: "#00e6b0", fontWeight: "700" }}>
-                Developer Mode Active
-              </Text>
-            </View>
-          )}
-        </Pressable>
-          </>
-        )}
+          </Animated.View>
         </Animated.ScrollView>
       </SettingsRowContext.Provider>
+
+      {/* ── BOTTOM DISSOLVE GRADIENT MASK (Exact match of SettingsHeaderGradientMask) ── */}
+      <SettingsHeaderGradientMask
+        position="bottom"
+        backgroundColor={colors.bg + 20}
+        height={searchBottomOffset + 200}
+        zIndex={20}
+      />
+
+      {/* ── COMPACT FLOATING BOTTOM SEARCH BUTTON / ACTIVE SEARCH INPUT ── */}
+      <Animated.View
+        style={[
+          styles.modernBottomSearchWrapper,
+          {
+            bottom: searchBottomOffset,
+            transform: [{ translateY: keyboardLift }],
+          },
+        ]}
+        pointerEvents="box-none"
+      >
+        <Animated.View
+          style={[
+            styles.modernBottomSearchPill,
+            {
+              width: animatedSearchPillWidth,
+              maxWidth: EXPANDED_PILL_WIDTH,
+              backgroundColor: isDark ? "rgba(14, 14, 14, 1)" : "rgba(234, 234, 234, 1)",
+              boxShadow: isDark ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)" : "inset 0 1px 1px rgba(255, 255, 255, 0.86), inset 0 -1px 3px rgba(0, 0, 0, 0.08)"
+            },
+          ]}
+        >
+          {isSearchActive ? (
+            <View style={styles.modernSearchActiveInputRow}>
+              <Ionicons
+                name="search-outline"
+                size={18}
+                color="#A1A1AA"
+                style={{ marginRight: 8, marginLeft: 2 }}
+              />
+              <TextInput
+                ref={searchInputRef}
+                style={[styles.modernSearchActiveInput, { color: "#FFFFFF" }]}
+                placeholder={tr("Search settings...")}
+                placeholderTextColor="#8E8E93"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                returnKeyType="search"
+                autoCapitalize="none"
+                autoCorrect={false}
+                clearButtonMode="while-editing"
+              />
+              {searchQuery.length > 0 && (
+                <Pressable
+                  onPress={() => setSearchQuery("")}
+                  hitSlop={8}
+                  style={styles.modernSearchClearBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel={tr("Clear")}
+                >
+                  <Ionicons name="close-circle" size={18} color="#8E8E93" />
+                </Pressable>
+              )}
+            </View>
+          ) : (
+            <Pressable
+              style={({ pressed }) => [
+                styles.modernBottomSearchPressable,
+                pressed && { opacity: 0.85 },
+              ]}
+              onPress={handleOpenSearch}
+              accessibilityRole="button"
+              accessibilityLabel={tr("Search Settings")}
+            >
+              <Ionicons
+                name="search-outline"
+                size={18}
+                color="#A1A1AA"
+                style={{ marginRight: 10 }}
+              />
+              <Text
+                style={[
+                  styles.modernBottomSearchPlaceholderText,
+                  { color: "#8E8E93" },
+                ]}
+              >
+                {tr("Search settings...")}
+              </Text>
+            </Pressable>
+          )}
+        </Animated.View>
+      </Animated.View>
+
       {showDevDialog && renderDeveloperPasskeyModal()}
     </View>
   );
@@ -1811,14 +1795,14 @@ function DevToolSandboxView({
         themeContext.mode === "dark" ||
         (themeContext.mode === "system" && Appearance.getColorScheme() === "dark");
     }
-  } catch (e) {}
+  } catch (e) { }
 
   const colors = useMemo(
     () => ({
       card: isDark ? "#141418" : "#FFFFFF",
       cardBorder: "transparent",
       textPrimary: isDark ? "#FFFFFF" : "#11141A",
-      textSecondary: isDark ? "#8E95A2" : "#7E8590",
+      textSecondary: isDark ? "#F1F1F1" : "#7E8590",
     }),
     [isDark]
   );
@@ -1875,10 +1859,16 @@ function DevToolSandboxView({
   // Error simulation state
   const [simulatedError, setSimulatedError] = useState(false);
 
+  // Trigger Toast Helper
+  const triggerToast = (msg: string) => {
+    setActiveToast(msg);
+    setTimeout(() => setActiveToast(null), 3000);
+  };
+
   // Handle Add Note
   const handleAddNote = () => {
     if (!newNoteTitle.trim()) {
-      Alert.alert("Required", "Please enter a note title.");
+      triggerToast("Please enter a note title.");
       return;
     }
     const item = {
@@ -1907,16 +1897,10 @@ function DevToolSandboxView({
       setQueryDocs(list.slice(0, 5));
     } catch (e: any) {
       console.log("Firestore query error:", e);
-      Alert.alert("Query Error", e.message || "Failed to query Firestore");
+      triggerToast(e.message || "Failed to query Firestore");
     } finally {
       setFetchingCol(false);
     }
-  };
-
-  // Trigger Toast Helper
-  const triggerToast = (msg: string) => {
-    setActiveToast(msg);
-    setTimeout(() => setActiveToast(null), 3000);
   };
 
   const getToolTitle = () => {
@@ -2177,7 +2161,7 @@ function DevToolSandboxView({
 
               <Pressable
                 onPress={() => {
-                  Alert.alert("OTP Verified", "✅ Successfully authenticated via Phone OTP!");
+                  triggerToast("✅ Successfully authenticated via Phone OTP!");
                 }}
                 style={[styles.sandboxPrimaryBtn, { backgroundColor: "#00e6b0" }]}
               >
@@ -3890,7 +3874,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: -3,
     right: -3,
-    backgroundColor: "#FF5A5F",
+    backgroundColor: "#EF4444",
     borderRadius: 9,
     minWidth: 18,
     height: 18,
@@ -3987,7 +3971,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingLeft: 16,
-    minHeight: 64,
+    paddingVertical: 16,
+    minHeight: 0,
+  },
+
+  modernDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
   },
 
   modernIconBox: {
@@ -4005,7 +3995,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingRight: 16,
-    paddingVertical: 14,
+    paddingVertical: 0,
   },
 
   modernRowTextGroup: {
@@ -4057,25 +4047,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
-  modernLogoutBtn: {
-    height: 52,
-    borderRadius: 26,
-    borderWidth: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginHorizontal: 20,
-    marginTop: 28,
-    marginBottom: 44,
-  },
-
-  modernLogoutText: {
-    color: "#FF5A5F",
-    fontWeight: "700",
-    fontSize: 15,
-    marginLeft: 8,
-  },
-
   // **@** In-Settings Search Styles
   modernSearchHeader: {
     position: "absolute",
@@ -4106,21 +4077,43 @@ const styles = StyleSheet.create({
     height: "100%",
   },
 
+  modernBottomSearchWrapper: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    paddingHorizontal: 12,
+    zIndex: 30,
+  },
+
+  modernBottomSearchPill: {
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 0,
+    backgroundColor: "#1C1C1E",
+    boxShadow:
+      "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)",
+    overflow: "hidden",
+  },
+
+  modernBottomSearchPressable: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+  },
+
+  modernBottomSearchPlaceholderText: {
+    fontSize: 14.5,
+    fontWeight: "500",
+  },
+
   modernSearchClearBtn: {
     padding: 4,
     justifyContent: "center",
     alignItems: "center",
-  },
-
-  modernSearchCancelBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-    justifyContent: "center",
-  },
-
-  modernSearchCancelText: {
-    fontSize: 15,
-    fontWeight: "600",
   },
 
   modernCategoryBadge: {
@@ -4137,7 +4130,17 @@ const styles = StyleSheet.create({
   },
 
   modernSearchResultsContainer: {
-    paddingTop: 6,
+    paddingTop: 0,
+    marginTop: -6,
+  },
+
+  modernSuggestedHeading: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    marginTop: 24,
+    marginBottom: 8,
+    marginHorizontal: 22,
   },
 
   modernSearchTip: {
@@ -4151,43 +4154,185 @@ const styles = StyleSheet.create({
   modernEmptySearchWrap: {
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 56,
+    paddingTop: 68,
+    paddingBottom: 36,
     paddingHorizontal: 28,
   },
 
-  modernEmptySearchIconBox: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 0,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-
   modernEmptySearchTitle: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: "700",
     letterSpacing: -0.3,
     marginBottom: 6,
+    textAlign: "center",
   },
 
   modernEmptySearchSubtitle: {
     fontSize: 13.5,
     textAlign: "center",
     lineHeight: 20,
+  },
+
+  // ── IN-PLACE SEARCH STYLES ──
+  searchViewContainer: {
+    flex: 1,
+  },
+  searchChipsContainer: {
+    paddingBottom: 8,
+  },
+  searchChipsScroll: {
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  searchChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  searchChipText: {
+    fontSize: 12.5,
+  },
+  searchScrollArea: {
+    flex: 1,
+  },
+  searchScrollContent: {
+    paddingTop: 4,
+  },
+  searchSectionHeading: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    marginTop: 8,
+    marginBottom: 10,
+    marginHorizontal: 22,
+  },
+  searchResultRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    minHeight: 64,
+  },
+  searchResultIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+  searchResultContent: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  searchResultTextGroup: {
+    flex: 1,
+    marginRight: 10,
+    justifyContent: "center",
+  },
+  searchResultTitleWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  searchResultTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    letterSpacing: -0.2,
+  },
+  searchCategoryBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  searchCategoryBadgeText: {
+    fontSize: 9.5,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+  },
+  devBadge: {
+    backgroundColor: "rgba(0, 230, 176, 0.15)",
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+    marginLeft: 6,
+  },
+  devBadgeText: {
+    color: "#00E6B0",
+    fontSize: 9.5,
+    fontWeight: "700",
+  },
+  searchResultSubtitle: {
+    fontSize: 12.5,
+    marginTop: 3,
+    lineHeight: 16,
+  },
+  searchResultRightGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 6,
+  },
+  searchResultRightText: {
+    fontSize: 13,
+    marginRight: 6,
+    fontWeight: "500",
+  },
+  searchResultDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
+  },
+  searchEmptyContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 56,
+    paddingHorizontal: 28,
+  },
+  emptyIconBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  emptySearchTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  emptySearchSubtitle: {
+    fontSize: 13.5,
+    textAlign: "center",
+    lineHeight: 20,
     marginBottom: 20,
   },
-
-  modernEmptyClearBtn: {
+  emptyClearBtn: {
     paddingHorizontal: 18,
-    paddingVertical: 9,
-    borderRadius: 18,
-    borderWidth: 0,
+    paddingVertical: 10,
+    borderRadius: 20,
   },
-
-  modernEmptyClearBtnText: {
-    fontSize: 13,
-    fontWeight: "700",
+  emptyClearBtnText: {
+    fontSize: 13.5,
+    fontWeight: "600",
+  },
+  modernSearchActiveInputRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    height: "100%",
+  },
+  modernSearchActiveInput: {
+    flex: 1,
+    fontSize: 14.5,
+    paddingVertical: 0,
+    height: "100%",
+    fontWeight: "500",
   },
 });

@@ -7,14 +7,16 @@ import {
   Pressable,
   ScrollView,
   Platform,
-  Switch,
-  Modal,
+    Modal,
   TextInput,
   StatusBar,
   Appearance,
   Animated,
 } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
@@ -162,7 +164,7 @@ export default function CurrencyExpenses() {
       bg: dynamicThemeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
       card: dynamicThemeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"), // Solid dynamic surface
       cardBorder: "transparent",
-      divider: "transparent",
+      divider: dynamicThemeColors?.divider ?? (isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)"),
       textPrimary: dynamicThemeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
       textSecondary: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       sectionHeader: dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
@@ -336,16 +338,27 @@ export default function CurrencyExpenses() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       {/* ── Top Header: Circular button matching Settings page (modernHeaderBtn) ── */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={8}
           accessibilityLabel="Go back"
@@ -366,7 +379,7 @@ export default function CurrencyExpenses() {
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("Base Currency", "BASE CURRENCY")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           <Pressable
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.row, ]}
             onPress={() => {
               setCurrencySearch("");
               setCurrencyModalVisible(true);
@@ -399,7 +412,12 @@ export default function CurrencyExpenses() {
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("CURRENCY DISPLAY", "DISPLAY OPTIONS")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Show Currency Symbol */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleShowSymbol(!showSymbol)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: showSymbol }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="cash-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -409,19 +427,23 @@ export default function CurrencyExpenses() {
                 Display {baseCurrency.symbol}300 instead of 300 {baseCurrency.code}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={showSymbol}
               onValueChange={handleToggleShowSymbol}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle Show Currency Symbol"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Auto Round Off */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleAutoRoundOff(!autoRoundOff)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: autoRoundOff }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="options-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -431,14 +453,13 @@ export default function CurrencyExpenses() {
                 {t("Round up fractional amounts to the nearest whole number", "Round tiny fractional cents to nearest unit")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={autoRoundOff}
               onValueChange={handleToggleAutoRoundOff}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle Auto Round Off"
             />
-          </View>
+          </Pressable>
         </View>
 
         {/* ── 3. EXPENSE SPLITTING ── */}
@@ -468,7 +489,12 @@ export default function CurrencyExpenses() {
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Auto-Categorize Expenses */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleAutoCategorize(!autoCategorize)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: autoCategorize }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="sparkles-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -478,35 +504,38 @@ export default function CurrencyExpenses() {
                 {t("Automatically categorize shared expenses into food, stay, transport", "Identify flights, hostel stays & meals via AI")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={autoCategorize}
               onValueChange={handleToggleAutoCategorize}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle Auto-Categorize Expenses"
             />
-          </View>
+          </Pressable>
         </View>
 
         {/* ── 4. BUDGET TRACKING ── */}
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader }]}>{t("BUDGET & SAVINGS", "BUDGET TRACKING")}</Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           {/* Monthly Travel Savings Goal Toggle */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleSavingsGoal(!savingsGoalEnabled)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: savingsGoalEnabled }}
+          >
             <View style={styles.rowMid}>
               <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{t("Monthly Travel Savings Goal")}</Text>
               <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
                 {t("We'll help you stash travel funds monthly", "We'll help you stash travel funds monthly")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={savingsGoalEnabled}
               onValueChange={handleToggleSavingsGoal}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle Monthly Travel Savings Goal"
             />
-          </View>
+          </Pressable>
 
           {/* Inset Goal Amount Box (exact reference look) */}
           {savingsGoalEnabled && (
@@ -563,6 +592,7 @@ export default function CurrencyExpenses() {
         visible={currencyModalVisible}
         onClose={() => setCurrencyModalVisible(false)}
         sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
+        avoidKeyboard
       >
         <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>{t("Select Base Currency")}</Text>
         <Text style={[styles.modalDesc, { color: colors.textSecondary }]}>
@@ -587,7 +617,11 @@ export default function CurrencyExpenses() {
           )}
         </View>
 
-        <ScrollView style={styles.currencyList} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.currencyList}
+          contentContainerStyle={{ paddingBottom: 12 }}
+          showsVerticalScrollIndicator={false}
+        >
           {filteredCurrencies.map((c) => {
             const isSelected = baseCurrency.code === c.code;
             return (
@@ -698,6 +732,7 @@ export default function CurrencyExpenses() {
         visible={goalModalVisible}
         onClose={() => setGoalModalVisible(false)}
         sheetStyle={[styles.modalCard, { backgroundColor: colors.card }]}
+        avoidKeyboard
       >
         <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg, width: 44, height: 44, borderRadius: 22, marginBottom: 10, marginRight: 0 }]}>
           <Ionicons name="wallet-outline" size={22} color={colors.greyishWhite} />
@@ -907,7 +942,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   divider: {
-    height: 0,
+    height: StyleSheet.hairlineWidth,
     marginHorizontal: 16,
   },
 

@@ -120,11 +120,16 @@ export const useUserChats = (userId: string | null) => {
           (snap) => {
             if (!snap.empty) {
               const mData: any = snap.docs[0].data();
-              const txt =
-                mData.text ||
-                (mData.imageUrl || mData.dataUri ? "📷 Photo" : "Attachment");
+              const isExpired =
+                mData.expiresAt &&
+                typeof mData.expiresAt === "number" &&
+                mData.expiresAt < Date.now();
+              const txt = isExpired
+                ? ""
+                : mData.text ||
+                  (mData.imageUrl || mData.dataUri ? "📷 Photo" : "Attachment");
               const ts = getTimestampMs(mData.timestamp || mData.createdAt || Date.now());
-              const isUnread = mData.senderId !== userId && !mData.isRead;
+              const isUnread = !isExpired && mData.senderId !== userId && !mData.isRead;
 
               const currentTs = latestMetaRef.current[otherUserId]?.lastTimestamp || 0;
               if (ts >= currentTs || !latestMetaRef.current[otherUserId]) {

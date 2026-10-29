@@ -14,6 +14,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Appearance,
+  AppState,
+  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -23,9 +25,10 @@ import { useThemeToggle } from "../contexts/ThemeContext"; // **@** Dynamic them
 import { useLanguage } from "../contexts/LanguageContext";
 import { auth, db } from "../lib/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { updateProfile } from "firebase/auth";
+import { updateProfile, sendEmailVerification } from "firebase/auth";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
+import { SwipeableDrawer } from "./settings/_components/SwipeableDrawer";
 
 export default function EditProfile() {
   const router = useRouter();
@@ -34,6 +37,15 @@ export default function EditProfile() {
 
   const [loading, setLoading] = useState(!user);
   const [saving, setSaving] = useState(false);
+  const [isEmailVerified, setIsEmailVerified] = useState<boolean>(false);
+  const [verificationSent, setVerificationSent] = useState(false);
+  const [checkingVerification, setCheckingVerification] = useState(false);
+  const [sendingVerification, setSendingVerification] = useState(false);
+  const [verifyDrawerVisible, setVerifyDrawerVisible] = useState(false);
+  const [verificationFeedback, setVerificationFeedback] = useState<{
+    type: "info" | "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
 
   // **@** Comprehensive profile state supporting both new UI fields and preserved v2 fields
   const [data, setData] = useState({
@@ -128,6 +140,10 @@ export default function EditProfile() {
       warningText: isDark ? "#FCD34D" : "#9A3412",
       warningIcon: isDark ? "#F59E0B" : "#EA580C",
       placeholder: isDark ? "#555860" : "#9CA3AF",
+      verifiedBg: isDark ? "rgba(16, 185, 129, 0.15)" : "rgba(16, 185, 129, 0.12)",
+      verifiedText: "#10B981",
+      verifyBtnBg: dynamicThemeColors?.accentBg ?? (isWhiteAccent ? (isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.08)") : (isDark ? "rgba(255, 90, 95, 0.15)" : "rgba(255, 90, 95, 0.10)")),
+      verifyBtnText: dynamicThemeColors?.accentText ?? (isWhiteAccent ? (isDark ? "#FFFFFF" : "#11141A") : dynamicAccent),
     };
   }, [isDark, dynamicThemeColors, dynamicAccent, onAccentTextColor, isWhiteAccent, isBrightAccent]);
 
@@ -141,6 +157,9 @@ export default function EditProfile() {
 
         if (snap.exists()) {
           const fData = snap.data();
+          if (fData.emailVerifiedByUser === true) {
+            setIsEmailVerified(true);
+          }
 
           // **@** Parse existing fullName into first & last name if not explicitly set
           const rawName = fData.name || user.displayName || "";
@@ -203,6 +222,136 @@ export default function EditProfile() {
       console.log("pickImage error:", err);
     }
   };
+
+  // **@** Verification Drawer Handlers & Flow (Zero Alert.alert)
+  const handleOpenVerifyDrawer = () => {
+    setVerificationFeedback(null);
+    setVerifyDrawerVisible(true);
+  };
+
+  // Step 2 Action: Send Verification Email
+  const handleSendVerificationEmail = async () => {
+    if (!auth.currentUser) {
+      setVerificationFeedback({
+        type: "error",
+        message: "No authenticated user session found.",
+      });
+      return;
+    }
+
+    setSendingVerification(true);
+    setVerificationFeedback(null);
+    try {
+      await sendEmailVerification(auth.currentUser);
+      setVerificationSent(true);
+      setVerificationFeedback({
+        type: "info",
+        message: `Verification link sent to ${data.email || auth.currentUser.email}. Check your inbox and tap the link!`,
+      });
+    } catch (e: any) {
+      console.log("sendEmailVerification error:", e);
+      if (e?.code === "auth/too-many-requests") {
+        setVerificationFeedback({
+          type: "warning",
+          message: "Too many requests. Please wait a few moments before requesting another link.",
+        });
+      } else {
+        setVerificationFeedback({
+          type: "error",
+          message: e?.message || "Failed to send verification email. Please try again.",
+        });
+      }
+    } finally {
+      setSendingVerification(false);
+    }
+  };
+
+  // Step 4 & 5 Action: Reload auth state and update verification badge in Firestore
+  const handleCheckVerificationStatus = async () => {
+    if (!auth.currentUser) return;
+
+    setCheckingVerification(true);
+    setVerificationFeedback(null);
+    try {
+      await auth.currentUser.reload();
+      if (auth.currentUser.emailVerified) {
+        setIsEmailVerified(true);
+        setVerificationSent(false);
+        setVerificationFeedback({
+          type: "success",
+          message: "Email verified successfully! Green Verified ✓ badge is now active on your profile.",
+        });
+        await updateDoc(doc(db, "users", auth.currentUser.uid), {
+          emailVerifiedByUser: true,
+          emailVerified: true,
+        }).catch(() => {});
+      } else {
+        setVerificationFeedback({
+          type: "warning",
+          message: "Link not verified yet. Please open the email sent to your inbox and tap 'Verify My Email'.",
+        });
+      }
+    } catch (e: any) {
+      console.log("Check verification error:", e);
+      setVerificationFeedback({
+        type: "error",
+        message: e?.message || "Failed to check verification status. Please try again.",
+      });
+    } finally {
+      setCheckingVerification(false);
+    }
+  };
+
+  // Open user's default email app
+  const handleOpenMailApp = async () => {
+    try {
+      const emailUrl = Platform.OS === "ios" ? "message:" : "mailto:";
+      const canOpen = await Linking.canOpenURL(emailUrl);
+      if (canOpen) {
+        await Linking.openURL(emailUrl);
+      } else {
+        await Linking.openURL(`mailto:${data.email || auth.currentUser?.email || ""}`);
+      }
+    } catch (err) {
+      try {
+        await Linking.openURL(`mailto:${data.email || auth.currentUser?.email || ""}`);
+      } catch (e) {
+        setVerificationFeedback({
+          type: "info",
+          message: "Please open your email application manually to find the link.",
+        });
+      }
+    }
+  };
+
+  // Automatic app resume detection: when user clicks verification link in email app and returns
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", async (nextAppState) => {
+      if (nextAppState === "active" && !isEmailVerified && auth.currentUser) {
+        try {
+          await auth.currentUser.reload();
+          if (auth.currentUser.emailVerified) {
+            setIsEmailVerified(true);
+            setVerificationSent(false);
+            setVerificationFeedback({
+              type: "success",
+              message: "Email verified successfully! Green Verified ✓ badge is now active on your profile.",
+            });
+            await updateDoc(doc(db, "users", auth.currentUser.uid), {
+              emailVerifiedByUser: true,
+              emailVerified: true,
+            }).catch(() => {});
+          }
+        } catch (e) {
+          console.log("AppState verification reload error:", e);
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isEmailVerified]);
 
   // **@** Comprehensive save handler updating Firestore directly with photoURL string (No Firebase Storage)
   const handleSave = async () => {
@@ -378,34 +527,35 @@ export default function EditProfile() {
 
           {/* **@** Form Container Card: Clean rounded container enclosing all personal fields */}
           <View style={[styles.formCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            {/* First Name */}
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("First Name")}</Text>
-              <TextInput
-                value={data.firstName}
-                onChangeText={(v) => setData({ ...data, firstName: v })}
-                placeholder="First name"
-                placeholderTextColor={colors.placeholder}
-                style={[
-                  styles.textInput,
-                  { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.textPrimary },
-                ]}
-              />
-            </View>
+            {/* First Name and Last Name in one row */}
+            <View style={styles.nameRow}>
+              <View style={styles.halfFieldGroup}>
+                <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("First Name")}</Text>
+                <TextInput
+                  value={data.firstName}
+                  onChangeText={(v) => setData({ ...data, firstName: v })}
+                  placeholder="First name"
+                  placeholderTextColor={colors.placeholder}
+                  style={[
+                    styles.textInput,
+                    { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.textPrimary },
+                  ]}
+                />
+              </View>
 
-            {/* Last Name */}
-            <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Last Name")}</Text>
-              <TextInput
-                value={data.lastName}
-                onChangeText={(v) => setData({ ...data, lastName: v })}
-                placeholder="Last name"
-                placeholderTextColor={colors.placeholder}
-                style={[
-                  styles.textInput,
-                  { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.textPrimary },
-                ]}
-              />
+              <View style={styles.halfFieldGroup}>
+                <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Last Name")}</Text>
+                <TextInput
+                  value={data.lastName}
+                  onChangeText={(v) => setData({ ...data, lastName: v })}
+                  placeholder="Last name"
+                  placeholderTextColor={colors.placeholder}
+                  style={[
+                    styles.textInput,
+                    { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.textPrimary },
+                  ]}
+                />
+              </View>
             </View>
 
             {/* Display Name with Subtitle */}
@@ -447,9 +597,22 @@ export default function EditProfile() {
               </View>
             </View>
 
-            {/* Email with Icon (Read-only as in reference) */}
+            {/* Email with Icon & Verification Status */}
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textPrimary }]}>{t("Email")}</Text>
+              <View style={styles.fieldLabelRow}>
+                <Text style={[styles.fieldLabel, { color: colors.textPrimary, marginBottom: 0 }]}>{t("Email")}</Text>
+                {isEmailVerified && (
+                  <Pressable
+                    onPress={handleOpenVerifyDrawer}
+                    style={[styles.verifiedPill, { backgroundColor: colors.verifiedBg }]}
+                    hitSlop={6}
+                  >
+                    <Ionicons name="checkmark-circle" size={13} color={colors.verifiedText} style={{ marginRight: 3 }} />
+                    <Text style={[styles.verifiedPillText, { color: colors.verifiedText }]}>{t("Verified")}</Text>
+                  </Pressable>
+                )}
+              </View>
+
               <View
                 style={[
                   styles.inputWithIconWrapper,
@@ -464,6 +627,44 @@ export default function EditProfile() {
                   placeholderTextColor={colors.placeholder}
                   style={[styles.textInputWithIcon, { color: colors.textPrimary, opacity: 0.85 }]}
                 />
+
+                {isEmailVerified ? (
+                  <Pressable
+                    onPress={handleOpenVerifyDrawer}
+                    style={styles.verifiedRightBadge}
+                    hitSlop={6}
+                    accessibilityLabel="Email verified"
+                  >
+                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    onPress={handleOpenVerifyDrawer}
+                    disabled={checkingVerification || sendingVerification}
+                    style={({ pressed }) => [
+                      styles.verifyActionBtn,
+                      {
+                        backgroundColor: verificationSent ? colors.iconBoxBg : colors.verifyBtnBg,
+                      },
+                      pressed && { opacity: 0.75 },
+                    ]}
+                    hitSlop={6}
+                    accessibilityLabel="Verify email"
+                  >
+                    {checkingVerification || sendingVerification ? (
+                      <ActivityIndicator size="small" color={verificationSent ? colors.textPrimary : colors.verifyBtnText} />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.verifyActionBtnText,
+                          { color: verificationSent ? colors.textPrimary : colors.verifyBtnText },
+                        ]}
+                      >
+                        {verificationSent ? t("Check Status") : t("Verify")}
+                      </Text>
+                    )}
+                  </Pressable>
+                )}
               </View>
             </View>
 
@@ -545,6 +746,402 @@ export default function EditProfile() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* ── EMAIL VERIFICATION SWIPEABLE DRAWER ── */}
+      <SwipeableDrawer
+        visible={verifyDrawerVisible}
+        onClose={() => setVerifyDrawerVisible(false)}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
+        maxHeight="92%"
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+          contentContainerStyle={styles.drawerScrollContent}
+        >
+          {/* Header */}
+          <View style={styles.drawerHeaderBox}>
+            <View
+              style={[
+                styles.drawerIconCircle,
+                {
+                  backgroundColor: isEmailVerified
+                    ? "rgba(16, 185, 129, 0.15)"
+                    : isDark
+                    ? "#222226"
+                    : "#EEF2FF",
+                },
+              ]}
+            >
+              {isEmailVerified ? (
+                <Ionicons name="shield-checkmark" size={32} color="#10B981" />
+              ) : (
+                <Feather name="mail" size={28} color={dynamicAccent || "#6366F1"} />
+              )}
+            </View>
+
+            <Text style={[styles.drawerTitle, { color: colors.textPrimary }]}>
+              {isEmailVerified ? t("Email Verified") : t("Verify Your Email")}
+            </Text>
+            <Text style={[styles.drawerSubtitle, { color: colors.textSecondary }]}>
+              {isEmailVerified
+                ? t("Your email is confirmed and your profile is protected.")
+                : t("Complete the verification flow to earn your Verified badge and protect your account.")}
+            </Text>
+          </View>
+
+          {/* User Email Pill Card */}
+          <View style={[styles.drawerEmailCard, { backgroundColor: colors.iconBoxBg }]}>
+            <View style={styles.drawerEmailLeft}>
+              <Feather name="at-sign" size={16} color={colors.textSecondary} style={{ marginRight: 8 }} />
+              <Text
+                style={[styles.drawerEmailText, { color: colors.textPrimary }]}
+                numberOfLines={1}
+              >
+                {data.email || auth.currentUser?.email || "No email provided"}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.drawerStatusBadge,
+                {
+                  backgroundColor: isEmailVerified
+                    ? "rgba(16, 185, 129, 0.16)"
+                    : verificationSent
+                    ? "rgba(59, 130, 246, 0.16)"
+                    : "rgba(245, 158, 11, 0.16)",
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.drawerStatusBadgeText,
+                  {
+                    color: isEmailVerified
+                      ? "#10B981"
+                      : verificationSent
+                      ? "#3B82F6"
+                      : "#F59E0B",
+                  },
+                ]}
+              >
+                {isEmailVerified
+                  ? t("Verified ✓")
+                  : verificationSent
+                  ? t("Link Sent")
+                  : t("Unverified")}
+              </Text>
+            </View>
+          </View>
+
+          {/* 5-Step Journey Stepper (Matching User Specification) */}
+          <View style={[styles.stepperContainer, { backgroundColor: colors.iconBoxBg }]}>
+            <Text style={[styles.stepperHeading, { color: colors.textSecondary }]}>
+              {t("VERIFICATION PROCESS")}
+            </Text>
+
+            {/* Step 1: User Signup */}
+            <View style={styles.stepItem}>
+              <View style={[styles.stepIndicator, styles.stepCompleted]}>
+                <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+              </View>
+              <View style={styles.stepItemContent}>
+                <Text style={[styles.stepItemTitle, { color: colors.textPrimary }]}>
+                  {t("Step 1 — User Signup")}
+                </Text>
+                <Text style={[styles.stepItemDesc, { color: colors.textSecondary }]}>
+                  {t("Account created with email & password")}
+                </Text>
+              </View>
+            </View>
+            <View style={[styles.stepLine, { backgroundColor: isDark ? "#2E3036" : "#E2E8F0" }]} />
+
+            {/* Step 2: Send Verification Email */}
+            <View style={styles.stepItem}>
+              <View
+                style={[
+                  styles.stepIndicator,
+                  isEmailVerified || verificationSent
+                    ? styles.stepCompleted
+                    : [styles.stepActive, { backgroundColor: dynamicAccent || "#6366F1" }],
+                ]}
+              >
+                {isEmailVerified || verificationSent ? (
+                  <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.stepNumberText}>2</Text>
+                )}
+              </View>
+              <View style={styles.stepItemContent}>
+                <Text style={[styles.stepItemTitle, { color: colors.textPrimary }]}>
+                  {t("Step 2 — Send Verification Email")}
+                </Text>
+                <Text style={[styles.stepItemDesc, { color: colors.textSecondary }]}>
+                  {verificationSent
+                    ? t("Verification email dispatched to inbox")
+                    : t("Tap button below to dispatch verification email")}
+                </Text>
+              </View>
+            </View>
+            <View style={[styles.stepLine, { backgroundColor: isDark ? "#2E3036" : "#E2E8F0" }]} />
+
+            {/* Step 3: User Opens Email */}
+            <View style={styles.stepItem}>
+              <View
+                style={[
+                  styles.stepIndicator,
+                  isEmailVerified
+                    ? styles.stepCompleted
+                    : verificationSent
+                    ? [styles.stepActive, { backgroundColor: dynamicAccent || "#6366F1" }]
+                    : styles.stepPending,
+                ]}
+              >
+                {isEmailVerified ? (
+                  <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                ) : (
+                  <Text style={[styles.stepNumberText, !verificationSent && { color: colors.textSecondary }]}>
+                    3
+                  </Text>
+                )}
+              </View>
+              <View style={styles.stepItemContent}>
+                <Text style={[styles.stepItemTitle, { color: colors.textPrimary }]}>
+                  {t("Step 3 — User Opens Email")}
+                </Text>
+                <Text style={[styles.stepItemDesc, { color: colors.textSecondary }]}>
+                  {t("Inbox receives 'Verify My Email' link")}
+                </Text>
+              </View>
+            </View>
+            <View style={[styles.stepLine, { backgroundColor: isDark ? "#2E3036" : "#E2E8F0" }]} />
+
+            {/* Step 4: Verify Link */}
+            <View style={styles.stepItem}>
+              <View
+                style={[
+                  styles.stepIndicator,
+                  isEmailVerified
+                    ? styles.stepCompleted
+                    : verificationSent
+                    ? [styles.stepActive, { backgroundColor: dynamicAccent || "#6366F1" }]
+                    : styles.stepPending,
+                ]}
+              >
+                {isEmailVerified ? (
+                  <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                ) : (
+                  <Text style={[styles.stepNumberText, !verificationSent && { color: colors.textSecondary }]}>
+                    4
+                  </Text>
+                )}
+              </View>
+              <View style={styles.stepItemContent}>
+                <Text style={[styles.stepItemTitle, { color: colors.textPrimary }]}>
+                  {t("Step 4 — Verify Link")}
+                </Text>
+                <Text style={[styles.stepItemDesc, { color: colors.textSecondary }]}>
+                  {t("Authentication service confirms link token")}
+                </Text>
+              </View>
+            </View>
+            <View style={[styles.stepLine, { backgroundColor: isDark ? "#2E3036" : "#E2E8F0" }]} />
+
+            {/* Step 5: Profile Updated */}
+            <View style={styles.stepItem}>
+              <View
+                style={[
+                  styles.stepIndicator,
+                  isEmailVerified ? styles.stepCompleted : styles.stepPending,
+                ]}
+              >
+                {isEmailVerified ? (
+                  <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                ) : (
+                  <Text style={[styles.stepNumberText, { color: colors.textSecondary }]}>5</Text>
+                )}
+              </View>
+              <View style={styles.stepItemContent}>
+                <Text style={[styles.stepItemTitle, { color: colors.textPrimary }]}>
+                  {t("Step 5 — Profile Updated")}
+                </Text>
+                <Text style={[styles.stepItemDesc, { color: colors.textSecondary }]}>
+                  {isEmailVerified
+                    ? t("Profile verified! Green Verified ✓ badge active")
+                    : t("Fresh status fetched & Green Verified ✓ badge shown")}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* In-Drawer Feedback Alert / Status Banner */}
+          {verificationFeedback && (
+            <View
+              style={[
+                styles.feedbackBox,
+                verificationFeedback.type === "success" && styles.feedbackSuccess,
+                verificationFeedback.type === "warning" && styles.feedbackWarning,
+                verificationFeedback.type === "error" && styles.feedbackError,
+                verificationFeedback.type === "info" && styles.feedbackInfo,
+              ]}
+            >
+              <Ionicons
+                name={
+                  verificationFeedback.type === "success"
+                    ? "checkmark-circle"
+                    : verificationFeedback.type === "warning"
+                    ? "alert-circle"
+                    : verificationFeedback.type === "error"
+                    ? "close-circle"
+                    : "information-circle"
+                }
+                size={18}
+                color={
+                  verificationFeedback.type === "success"
+                    ? "#10B981"
+                    : verificationFeedback.type === "warning"
+                    ? "#F59E0B"
+                    : verificationFeedback.type === "error"
+                    ? "#EF4444"
+                    : "#3B82F6"
+                }
+                style={{ marginRight: 8, marginTop: 1 }}
+              />
+              <Text
+                style={[
+                  styles.feedbackText,
+                  {
+                    color:
+                      verificationFeedback.type === "success"
+                        ? "#10B981"
+                        : verificationFeedback.type === "warning"
+                        ? "#F59E0B"
+                        : verificationFeedback.type === "error"
+                        ? "#EF4444"
+                        : "#3B82F6",
+                  },
+                ]}
+              >
+                {verificationFeedback.message}
+              </Text>
+            </View>
+          )}
+
+          {/* Action Buttons inside Drawer */}
+          <View style={styles.drawerActionsContainer}>
+            {isEmailVerified ? (
+              <Pressable
+                style={[styles.drawerPrimBtn, { backgroundColor: "#10B981" }]}
+                onPress={() => setVerifyDrawerVisible(false)}
+              >
+                <Ionicons name="checkmark-done" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                <Text style={styles.drawerPrimBtnText}>{t("Done")}</Text>
+              </Pressable>
+            ) : !verificationSent ? (
+              <>
+                <Pressable
+                  style={[
+                    styles.drawerPrimBtn,
+                    {
+                      backgroundColor: colors.saveBtnBg,
+                      borderWidth: colors.saveBtnBorderWidth,
+                      borderColor: colors.saveBtnBorder,
+                    },
+                  ]}
+                  onPress={handleSendVerificationEmail}
+                  disabled={sendingVerification}
+                >
+                  {sendingVerification ? (
+                    <ActivityIndicator size="small" color={colors.saveBtnText} />
+                  ) : (
+                    <>
+                      <Feather name="send" size={17} color={colors.saveBtnText} style={{ marginRight: 8 }} />
+                      <Text style={[styles.drawerPrimBtnText, { color: colors.saveBtnText }]}>
+                        {t("Send Verification Email")}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+
+                <Pressable
+                  style={[styles.drawerSecBtn, { borderColor: isDark ? "#2A2A2E" : "#E2E8F0" }]}
+                  onPress={() => setVerifyDrawerVisible(false)}
+                >
+                  <Text style={[styles.drawerSecBtnText, { color: colors.textPrimary }]}>
+                    {t("Cancel")}
+                  </Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                {/* When email was already sent */}
+                <Pressable
+                  style={[
+                    styles.drawerPrimBtn,
+                    {
+                      backgroundColor: colors.saveBtnBg,
+                      borderWidth: colors.saveBtnBorderWidth,
+                      borderColor: colors.saveBtnBorder,
+                    },
+                  ]}
+                  onPress={handleCheckVerificationStatus}
+                  disabled={checkingVerification}
+                >
+                  {checkingVerification ? (
+                    <ActivityIndicator size="small" color={colors.saveBtnText} />
+                  ) : (
+                    <>
+                      <Ionicons name="refresh-circle-outline" size={20} color={colors.saveBtnText} style={{ marginRight: 8 }} />
+                      <Text style={[styles.drawerPrimBtnText, { color: colors.saveBtnText }]}>
+                        {t("Check Verification Status")}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+
+                <View style={styles.drawerRowBtns}>
+                  <Pressable
+                    style={[styles.drawerHalfBtn, { backgroundColor: colors.iconBoxBg }]}
+                    onPress={handleOpenMailApp}
+                  >
+                    <Feather name="mail" size={16} color={colors.textPrimary} style={{ marginRight: 6 }} />
+                    <Text style={[styles.drawerHalfBtnText, { color: colors.textPrimary }]}>
+                      {t("Open Mail App")}
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[styles.drawerHalfBtn, { backgroundColor: colors.iconBoxBg }]}
+                    onPress={handleSendVerificationEmail}
+                    disabled={sendingVerification}
+                  >
+                    {sendingVerification ? (
+                      <ActivityIndicator size="small" color={colors.textPrimary} />
+                    ) : (
+                      <>
+                        <Feather name="refresh-cw" size={14} color={colors.textPrimary} style={{ marginRight: 6 }} />
+                        <Text style={[styles.drawerHalfBtnText, { color: colors.textPrimary }]}>
+                          {t("Resend Email")}
+                        </Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
+
+                <Pressable
+                  style={[styles.drawerSecBtn, { borderColor: isDark ? "#2A2A2E" : "#E2E8F0" }]}
+                  onPress={() => setVerifyDrawerVisible(false)}
+                >
+                  <Text style={[styles.drawerSecBtnText, { color: colors.textPrimary }]}>
+                    {t("Cancel")}
+                  </Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+        </ScrollView>
+      </SwipeableDrawer>
     </SafeAreaView>
   );
 }
@@ -667,6 +1264,48 @@ const styles = StyleSheet.create({
   fieldGroup: {
     marginBottom: 18,
   },
+  fieldLabelRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  verifiedPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  verifiedPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  verifiedRightBadge: {
+    marginLeft: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  verifyActionBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    marginLeft: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  verifyActionBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  nameRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 18,
+  },
+  halfFieldGroup: {
+    flex: 1,
+  },
   fieldLabel: {
     fontSize: 13,
     fontWeight: "600",
@@ -731,5 +1370,199 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12.5,
     lineHeight: 18,
+  },
+
+  // Drawer Sheet & Content styles
+  drawerSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 8,
+  },
+  drawerScrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: Platform.OS === "ios" ? 40 : 28,
+  },
+  drawerHeaderBox: {
+    alignItems: "center",
+    paddingTop: 10,
+    paddingBottom: 16,
+  },
+  drawerIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  drawerTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: 6,
+    textAlign: "center",
+    letterSpacing: -0.3,
+  },
+  drawerSubtitle: {
+    fontSize: 13.5,
+    textAlign: "center",
+    lineHeight: 19,
+    paddingHorizontal: 12,
+  },
+  drawerEmailCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    marginBottom: 16,
+  },
+  drawerEmailLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    marginRight: 8,
+  },
+  drawerEmailText: {
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  drawerStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  drawerStatusBadgeText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+  },
+  stepperContainer: {
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
+  },
+  stepperHeading: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    marginBottom: 14,
+  },
+  stepItem: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  stepIndicator: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  stepCompleted: {
+    backgroundColor: "#10B981",
+  },
+  stepActive: {
+    backgroundColor: "#6366F1",
+  },
+  stepPending: {
+    backgroundColor: "rgba(128, 128, 128, 0.2)",
+  },
+  stepNumberText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  stepItemContent: {
+    flex: 1,
+  },
+  stepItemTitle: {
+    fontSize: 13.5,
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  stepItemDesc: {
+    fontSize: 11.5,
+    lineHeight: 16,
+  },
+  stepLine: {
+    width: 2,
+    height: 12,
+    marginLeft: 12,
+    marginVertical: 2,
+  },
+  feedbackBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    padding: 12,
+    borderRadius: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+  },
+  feedbackSuccess: {
+    backgroundColor: "rgba(16, 185, 129, 0.12)",
+    borderColor: "rgba(16, 185, 129, 0.3)",
+  },
+  feedbackWarning: {
+    backgroundColor: "rgba(245, 158, 11, 0.12)",
+    borderColor: "rgba(245, 158, 11, 0.3)",
+  },
+  feedbackError: {
+    backgroundColor: "rgba(239, 68, 68, 0.12)",
+    borderColor: "rgba(239, 68, 68, 0.3)",
+  },
+  feedbackInfo: {
+    backgroundColor: "rgba(59, 130, 246, 0.12)",
+    borderColor: "rgba(59, 130, 246, 0.3)",
+  },
+  feedbackText: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    flex: 1,
+    fontWeight: "500",
+  },
+  drawerActionsContainer: {
+    gap: 10,
+    marginTop: 4,
+  },
+  drawerPrimBtn: {
+    height: 48,
+    borderRadius: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  drawerPrimBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+  },
+  drawerSecBtn: {
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  drawerSecBtnText: {
+    fontSize: 14.5,
+    fontWeight: "600",
+  },
+  drawerRowBtns: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  drawerHalfBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 22,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  drawerHalfBtnText: {
+    fontSize: 13.5,
+    fontWeight: "600",
   },
 });

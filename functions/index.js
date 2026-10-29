@@ -19,9 +19,14 @@ const {
   getFirestore,
 } = require("firebase-admin/firestore");
 
+const {
+  getAuth,
+} = require("firebase-admin/auth");
+
 initializeApp();
 
 const db = getFirestore();
+const authAdmin = getAuth();
 const oneSignalApiKey = defineSecret("ONESIGNAL_REST_API_KEY");
 const groqApiKey = defineSecret("GROQ_API_KEY");
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
@@ -118,156 +123,98 @@ async function sendExpoNotification({
  *
  * notifications/{notificationId}
  */
-exports.sendNotificationPush =
-  onDocumentCreated(
-    "notifications/{notificationId}",
-    async (event) => {
-
-      const snapshot =
-        event.data;
-
-      if (!snapshot) {
-        console.log(
-          "No notification document."
-        );
-
-        return;
-      }
-
-      const notification =
-        snapshot.data();
-
-      // Skip duplicate Expo push for notifications already sent via OneSignal
-      if (
-        notification.skipExpoPush ||
-        notification.viaOneSignal ||
-        notification.pushSent ||
-        notification.type === "chat" ||
-        notification.type === "group_chat" ||
-        notification.type === "call" ||
-        notification.type === "group_call" ||
-        notification.type === "missed_call"
-      ) {
-        console.log(
-          "Notification handled via OneSignal, skipping duplicate Expo push:",
-          event.params.notificationId
-        );
-        return;
-      }
-
-      const notificationId =
-        event.params.notificationId;
-
-      console.log(
-        "New notification:",
-        notificationId
-      );
-
-      /**
-       * Receiver UID
-       */
-      const uid =
-        notification.uid;
-
-      if (!uid) {
-        console.log(
-          "Notification has no uid."
-        );
-
-        return;
-      }
-
-      /**
-       * Get receiver's user document.
-       *
-       * users/{uid}
-       */
-      const userSnapshot =
-        await db
-          .collection("users")
-          .doc(uid)
-          .get();
-
-      if (
-        !userSnapshot.exists
-      ) {
-        console.log(
-          "User does not exist:",
-          uid
-        );
-
-        return;
-      }
-
-      const user =
-        userSnapshot.data();
-
-      /**
-       * Expo Push Token
-       */
-      const expoPushToken =
-        user.expoPushToken;
-
-      if (!expoPushToken) {
-        console.log(
-          "No Expo Push Token for user:",
-          uid
-        );
-
-        return;
-      }
-
-      /**
-       * Notification title
-       */
-      const title =
-        notification.title ||
-        getDefaultTitle(
-          notification.type
-        );
-
-      /**
-       * Notification body
-       */
-      const body =
-        notification.content ||
-        notification.message ||
-        getDefaultBody(
-          notification.type
-        );
-
-      /**
-       * Send push notification
-       */
-      await sendExpoNotification({
-        token:
-          expoPushToken,
-
-        title,
-
-        body,
-
-        data: {
-          notificationId,
-
-          type:
-            notification.type ||
-            "general",
-
-          senderId:
-            notification.senderId ||
-            "",
-
-          uid,
-        },
-      });
-
-      console.log(
-        "Push notification sent successfully:",
-        notificationId
-      );
+exports.sendNotificationPush = onDocumentCreated(
+  {
+    document: "notifications/{notificationId}",
+    secrets: [oneSignalApiKey],
+  },
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) {
+      return;
     }
-  );
+
+    const notification = snapshot.data();
+
+    // Skip notifications already handled directly via OneSignal
+    if (
+      notification.viaOneSignal ||
+      notification.pushSent ||
+      notification.type === "chat" ||
+      notification.type === "group_chat" ||
+      notification.type === "call" ||
+      notification.type === "group_call" ||
+      notification.type === "missed_call"
+    ) {
+      return;
+    }
+
+    const notificationId = event.params.notificationId;
+    const uid = notification.uid;
+    if (!uid) return;
+
+    const title = notification.title || getDefaultTitle(notification.type);
+    const body = notification.content || notification.message || getDefaultBody(notification.type);
+
+    // 1. Dispatch push via OneSignal (External User ID = uid)
+    try {
+      const key = oneSignalApiKey.value();
+      if (key) {
+        await fetch("https://api.onesignal.com/notifications", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Key ${key}`,
+          },
+          body: JSON.stringify({
+            app_id: "263ae218-7fa0-49cf-9503-d7d0fab26d60",
+            include_aliases: { external_id: [uid] },
+            target_channel: "push",
+            headings: { en: title },
+            contents: { en: body },
+            data: {
+              notificationId,
+              type: notification.type || "general",
+              senderId: notification.senderId || "",
+              uid,
+              route: notification.route || "/notifications",
+            },
+            priority: 8,
+            android_sound: "default",
+            ios_sound: "default",
+            existing_android_channel_id: "bunkmates_default_channel_v1",
+          }),
+        });
+        console.log("OneSignal push dispatched for notification:", notificationId);
+      }
+    } catch (err) {
+      console.warn("OneSignal background push error:", err);
+    }
+
+    // 2. Legacy Expo Push fallback (if user has expoPushToken registered)
+    try {
+      const userSnapshot = await db.collection("users").doc(uid).get();
+      if (userSnapshot.exists) {
+        const user = userSnapshot.data();
+        if (user?.expoPushToken) {
+          await sendExpoNotification({
+            token: user.expoPushToken,
+            title,
+            body,
+            data: {
+              notificationId,
+              type: notification.type || "general",
+              senderId: notification.senderId || "",
+              uid,
+            },
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("Expo push fallback error:", err);
+    }
+  }
+);
 
 
 /**
@@ -443,6 +390,19 @@ async function authorizeOneSignalTargets(uid, targetIds, data) {
     ) {
       throw new HttpsError("permission-denied", "Caller cannot notify these call participants.");
     }
+    return;
+  }
+
+  if (
+    data.type === "friend_request" ||
+    data.type === "friend_accepted" ||
+    data.type === "trip" ||
+    data.type === "tripUpdates" ||
+    data.type === "feedback" ||
+    data.type === "like" ||
+    data.type === "system" ||
+    data.type === "general"
+  ) {
     return;
   }
 
@@ -907,3 +867,239 @@ Output strictly raw JSON without markdown code fences.`;
     };
   }
 );
+
+/**
+ * QR Login: Approve desktop login request
+ * Validates authenticated mobile user, checks expiration & status,
+ * mints Firebase custom token for desktop authentication,
+ * and updates session status to approved.
+ */
+exports.approveQrLogin = onCall(async (request) => {
+  if (!request.auth || !request.auth.uid) {
+    throw new HttpsError(
+      "unauthenticated",
+      "User must be authenticated on mobile to approve desktop login."
+    );
+  }
+
+  const approverUid = request.auth.uid;
+  const data = request.data || {};
+  const sessionId = typeof data.sessionId === "string" ? data.sessionId.trim() : "";
+  const requestedCollection = typeof data.collectionName === "string" ? data.collectionName.trim() : "device_pairings";
+
+  if (!sessionId) {
+    throw new HttpsError("invalid-argument", "Missing session ID.");
+  }
+
+  // Multi-collection support
+  const collectionsToTry = [
+    requestedCollection,
+    "device_pairings",
+    "qr_login_sessions",
+    "qr_logins",
+    "qr_sessions",
+  ];
+
+  let targetDocRef = null;
+  for (const coll of collectionsToTry) {
+    const candidateRef = db.collection(coll).doc(sessionId);
+    const candidateSnap = await candidateRef.get();
+    if (candidateSnap.exists) {
+      targetDocRef = candidateRef;
+      break;
+    }
+  }
+
+  if (!targetDocRef) {
+    targetDocRef = db.collection("device_pairings").doc(sessionId);
+  }
+
+  const now = Date.now();
+
+  // Fetch full user profile and auth record for exact phone identity transfer
+  let userDocData = {};
+  try {
+    const userSnap = await db.collection("users").doc(approverUid).get();
+    if (userSnap.exists) {
+      userDocData = userSnap.data() || {};
+    }
+  } catch (err) {
+    console.warn("Could not fetch user document:", err.message);
+  }
+
+  let userAuthRecord = null;
+  try {
+    userAuthRecord = await authAdmin.getUser(approverUid);
+  } catch (err) {
+    console.warn("Could not fetch user auth record:", err.message);
+  }
+
+  const userEmail = userAuthRecord?.email || userDocData?.email || data.email || "";
+  const userDisplayName =
+    userAuthRecord?.displayName ||
+    userDocData?.displayName ||
+    userDocData?.name ||
+    data.displayName ||
+    "BunkMates User";
+  const userPhotoURL =
+    userAuthRecord?.photoURL ||
+    userDocData?.photoURL ||
+    userDocData?.profileImage ||
+    userDocData?.avatar ||
+    data.photoURL ||
+    "";
+  const userPhoneNumber = userAuthRecord?.phoneNumber || userDocData?.phoneNumber || data.phoneNumber || "";
+
+  const userObject = {
+    uid: approverUid,
+    email: userEmail,
+    displayName: userDisplayName,
+    photoURL: userPhotoURL,
+    phoneNumber: userPhoneNumber,
+  };
+
+  return await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(targetDocRef);
+    if (!snap.exists) {
+      throw new HttpsError("not-found", "Pairing session not found or has expired.");
+    }
+
+    const sessionData = snap.data();
+
+    // Check expiration safely with timestamp normalization & 5-minute clock-skew buffer
+    const rawCreatedAt = typeof sessionData.createdAt === "number" ? (sessionData.createdAt < 100000000000 ? sessionData.createdAt * 1000 : sessionData.createdAt) : 0;
+    const rawExpiresAt = typeof sessionData.expiresAt === "number" ? (sessionData.expiresAt < 100000000000 ? sessionData.expiresAt * 1000 : sessionData.expiresAt) : 0;
+
+    const isExpired = sessionData.status === "expired" || (rawExpiresAt > 0 && now > rawExpiresAt + 5 * 60 * 1000 && Math.abs(now - rawCreatedAt) > 15 * 60 * 1000);
+    if (isExpired) {
+      transaction.update(targetDocRef, { status: "expired" });
+      throw new HttpsError("failed-precondition", "QR login session has expired.");
+    }
+
+    // Check status
+    if (sessionData.status === "approved" || sessionData.status === "consumed") {
+      throw new HttpsError("already-exists", "This session has already been approved.");
+    }
+
+    if (sessionData.status === "rejected") {
+      throw new HttpsError("failed-precondition", "This session was previously declined.");
+    }
+
+    // Mint custom token for desktop to sign in with signInWithCustomToken()
+    let customToken = null;
+    try {
+      customToken = await authAdmin.createCustomToken(approverUid);
+    } catch (tokenErr) {
+      console.warn("Failed to create custom token:", tokenErr.message);
+    }
+
+    const secondaryDeviceId = `dev_${now}_${Math.random().toString(36).substring(2, 8)}`;
+    const linkedDeviceData = {
+      id: secondaryDeviceId,
+      sessionId,
+      pairingId: sessionId,
+      deviceName: sessionData.requesterMetadata?.deviceName || "Desktop Computer",
+      deviceType: sessionData.requesterMetadata?.deviceType || "desktop",
+      browser: sessionData.requesterMetadata?.browser || "",
+      os: sessionData.requesterMetadata?.os || "Desktop OS",
+      location: sessionData.requesterMetadata?.location || "Nearby",
+      ipAddress: sessionData.requesterMetadata?.ip || "",
+      lastActive: "Just now",
+      lastActiveTimestamp: now,
+      linkedAt: now,
+      isActive: true,
+      isCurrentDevice: false,
+      pairingMethod: "qr",
+    };
+
+    // Update session document with FULL authenticated identity payload
+    const sessionAuthPayload = {
+      status: "approved",
+      approverUid,
+      userId: approverUid,
+      uid: approverUid,
+      userUid: approverUid,
+      email: userEmail,
+      displayName: userDisplayName,
+      photoURL: userPhotoURL,
+      phoneNumber: userPhoneNumber,
+      user: userObject,
+      userData: userDocData,
+      userProfile: userDocData,
+      customToken: customToken || null,
+      idToken: data.idToken || null,
+      token: customToken || data.idToken || null,
+      authToken: customToken || data.idToken || null,
+      approverDeviceId: data.approverDeviceId || "",
+      approvedAt: now,
+      approvedDevice: linkedDeviceData,
+    };
+
+    transaction.update(targetDocRef, sessionAuthPayload);
+
+    // Register secondary device under users/{approverUid}/devices/{deviceId}
+    const userDeviceRef = db
+      .collection("users")
+      .doc(approverUid)
+      .collection("devices")
+      .doc(secondaryDeviceId);
+    transaction.set(userDeviceRef, linkedDeviceData);
+
+    return {
+      success: true,
+      message: "Desktop login approved successfully.",
+      deviceId: secondaryDeviceId,
+      customToken: customToken || null,
+      uid: approverUid,
+    };
+  });
+});
+
+/**
+ * QR Login: Reject desktop login request
+ */
+exports.rejectQrLogin = onCall(async (request) => {
+  if (!request.auth || !request.auth.uid) {
+    throw new HttpsError("unauthenticated", "User must be authenticated.");
+  }
+
+  const data = request.data || {};
+  const sessionId = typeof data.sessionId === "string" ? data.sessionId.trim() : "";
+  const reason = typeof data.reason === "string" ? data.reason : "Declined by user";
+
+  if (!sessionId) {
+    throw new HttpsError("invalid-argument", "Missing session ID.");
+  }
+
+  const sessionDocRef = db.collection("device_pairings").doc(sessionId);
+  await sessionDocRef.update({
+    status: "rejected",
+    rejectionReason: reason,
+    rejectedAt: Date.now(),
+  });
+
+  return { success: true };
+});
+
+/**
+ * QR Login: Mark session as scanned
+ */
+exports.markQrLoginScanned = onCall(async (request) => {
+  const data = request.data || {};
+  const sessionId = typeof data.sessionId === "string" ? data.sessionId.trim() : "";
+
+  if (!sessionId) {
+    throw new HttpsError("invalid-argument", "Missing session ID.");
+  }
+
+  const sessionDocRef = db.collection("device_pairings").doc(sessionId);
+  const snap = await sessionDocRef.get();
+  if (snap.exists && snap.data().status === "pending") {
+    await sessionDocRef.update({
+      status: "scanned",
+      scannedAt: Date.now(),
+    });
+  }
+
+  return { success: true };
+});

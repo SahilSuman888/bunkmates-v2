@@ -183,7 +183,7 @@ export default function TripDetails() {
   const uid = user?.uid || null;
   const insets = useSafeAreaInsets();
   const { themeColors, isDark, background } = useThemeToggle();
-  const { formatTemperature } = useAppSettings();
+  const { formatTemperature, openMapDirections } = useAppSettings();
   const { groups = [] } = useUserGroups(uid) || {};
 
   /* ─── DATA STATE ─── */
@@ -829,7 +829,7 @@ Return strictly raw JSON format without reasoning or explanation:
                 <Text style={styles.routeText}>{routeText}</Text>
                 <TouchableOpacity
                   style={styles.navSquareBtn}
-                  onPress={() => Linking.openURL(mapsUrl)}
+                  onPress={() => openMapDirections(trip?.from || "", trip?.to || trip?.location || "")}
                 >
                   <Ionicons name="navigate" size={18} color="#ffffff" />
                 </TouchableOpacity>

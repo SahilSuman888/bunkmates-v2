@@ -286,3 +286,183 @@ export async function sendMissedCallPushAndFirestoreNotification({
     console.warn("[Notification] Firestore missed call notification error:", err);
   }
 }
+
+/**
+ * Send push notification and write Firestore in-app notification for Friend Request
+ */
+export async function sendFriendRequestNotification({
+  receiverId,
+  senderId,
+  senderName,
+  senderAvatar,
+}: {
+  receiverId: string;
+  senderId: string;
+  senderName: string;
+  senderAvatar?: string;
+}) {
+  if (!receiverId || receiverId === senderId) return;
+
+  const title = "New Friend Request";
+  const body = `${senderName} sent you a friend request.`;
+
+  // 1. OneSignal Push
+  sendOneSignalPush({
+    externalUserIds: [receiverId],
+    headings: { en: title },
+    contents: { en: body },
+    largeIcon: senderAvatar || "https://i.pravatar.cc/150",
+    priority: 10,
+    data: {
+      type: "friend_request",
+      senderId,
+      displayName: senderName,
+      photoURL: senderAvatar || "",
+    },
+  }).catch((err) => console.warn("[Notification] OneSignal friend request push error:", err));
+
+  // 2. Firestore In-App Notification
+  try {
+    await addDoc(collection(db, "notifications"), {
+      uid: receiverId,
+      type: "friend_request",
+      title,
+      content: body,
+      message: body,
+      senderId,
+      senderName,
+      pic: senderAvatar || "https://i.pravatar.cc/150",
+      seen: false,
+      read: false,
+      status: "pending",
+      timestamp: serverTimestamp(),
+      route: "/notifications",
+      skipExpoPush: true,
+      viaOneSignal: true,
+      pushSent: true,
+    });
+  } catch (err) {
+    console.warn("[Notification] Firestore friend request notification error:", err);
+  }
+}
+
+/**
+ * Send push notification and write Firestore in-app notification for Accepted Friend Request
+ */
+export async function sendFriendAcceptedNotification({
+  receiverId,
+  senderId,
+  senderName,
+  senderAvatar,
+}: {
+  receiverId: string;
+  senderId: string;
+  senderName: string;
+  senderAvatar?: string;
+}) {
+  if (!receiverId || receiverId === senderId) return;
+
+  const title = "Friend Request Accepted";
+  const body = `${senderName} accepted your friend request.`;
+
+  // 1. OneSignal Push
+  sendOneSignalPush({
+    externalUserIds: [receiverId],
+    headings: { en: title },
+    contents: { en: body },
+    largeIcon: senderAvatar || "https://i.pravatar.cc/150",
+    priority: 10,
+    data: {
+      type: "friend_accepted",
+      senderId,
+      displayName: senderName,
+      photoURL: senderAvatar || "",
+    },
+  }).catch((err) => console.warn("[Notification] OneSignal friend accepted push error:", err));
+
+  // 2. Firestore In-App Notification
+  try {
+    await addDoc(collection(db, "notifications"), {
+      uid: receiverId,
+      type: "friend_accepted",
+      title,
+      content: body,
+      message: body,
+      senderId,
+      senderName,
+      pic: senderAvatar || "https://i.pravatar.cc/150",
+      seen: false,
+      read: false,
+      status: "accepted",
+      timestamp: serverTimestamp(),
+      route: `/chat/${senderId}`,
+      skipExpoPush: true,
+      viaOneSignal: true,
+      pushSent: true,
+    });
+  } catch (err) {
+    console.warn("[Notification] Firestore friend accepted notification error:", err);
+  }
+}
+
+/**
+ * Send general application push and Firestore notification (Trips, Reminders, System, Feedback)
+ */
+export async function sendGeneralNotification({
+  receiverId,
+  title,
+  message,
+  type = "system",
+  route = "/notifications",
+  senderName = "BunkMates",
+  senderAvatar,
+  data,
+}: {
+  receiverId: string;
+  title: string;
+  message: string;
+  type?: string;
+  route?: string;
+  senderName?: string;
+  senderAvatar?: string;
+  data?: Record<string, any>;
+}) {
+  if (!receiverId) return;
+
+  // 1. OneSignal Push
+  sendOneSignalPush({
+    externalUserIds: [receiverId],
+    headings: { en: title },
+    contents: { en: message },
+    largeIcon: senderAvatar || "https://i.pravatar.cc/150",
+    priority: 8,
+    data: {
+      type,
+      route,
+      ...data,
+    },
+  }).catch((err) => console.warn("[Notification] OneSignal general push error:", err));
+
+  // 2. Firestore In-App Notification
+  try {
+    await addDoc(collection(db, "notifications"), {
+      uid: receiverId,
+      type,
+      title,
+      content: message,
+      message,
+      senderName,
+      pic: senderAvatar || "https://i.pravatar.cc/150",
+      seen: false,
+      read: false,
+      timestamp: serverTimestamp(),
+      route,
+      skipExpoPush: true,
+      viaOneSignal: true,
+      pushSent: true,
+      metadata: data || {},
+    });
+  } catch (err) {
+    console.warn("[Notification] Firestore general notification error:", err);
+  }
+}

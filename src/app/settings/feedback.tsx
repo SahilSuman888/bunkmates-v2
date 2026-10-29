@@ -22,6 +22,8 @@ import {
   Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -38,6 +40,7 @@ import { auth, db } from "../../lib/firebase";
 import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../../theme/theme";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 type FeedbackType = "Bug Report" | "Request Feature" | "General";
 
@@ -70,6 +73,8 @@ export default function SendFeedbackScreen() {
 
   const [loading, setLoading] = useState(false);
   const [historyModalVisible, setHistoryModalVisible] = useState(false);
+  const [successDrawerVisible, setSuccessDrawerVisible] = useState(false);
+  const [submittedInfo, setSubmittedInfo] = useState<{ id: string; type: string } | null>(null);
   const [feedbackHistory, setFeedbackHistory] = useState<LocalFeedbackItem[]>([]);
 
   // Animated toast state
@@ -237,11 +242,7 @@ export default function SendFeedbackScreen() {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert(
-          "Permission Required",
-          "Photo library access is needed to attach screenshots. Please enable it in Settings.",
-          [{ text: "OK" }]
-        );
+        triggerToast("Photo library access is needed to attach screenshots.");
         return;
       }
 
@@ -256,7 +257,7 @@ export default function SendFeedbackScreen() {
 
         // 5MB Limit check
         if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) {
-          Alert.alert("File Too Large", "Please select an image smaller than 5MB.");
+          triggerToast("Please select an image smaller than 5MB.");
           return;
         }
 
@@ -271,7 +272,7 @@ export default function SendFeedbackScreen() {
       }
     } catch (e) {
       console.log("Error selecting attachment:", e);
-      Alert.alert("Error", "Could not load image. Please try again.");
+      triggerToast("Could not load image. Please try again.");
     }
   };
 
@@ -285,7 +286,7 @@ export default function SendFeedbackScreen() {
   const handleSubmitFeedback = async () => {
     const trimmed = details.trim();
     if (!trimmed) {
-      Alert.alert("Details Required", "Please explain clearly what we could do better.");
+      triggerToast("Please explain clearly what we could do better.");
       return;
     }
 
@@ -352,20 +353,8 @@ export default function SendFeedbackScreen() {
       triggerToast("Feedback submitted! Thank you.");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
 
-      Alert.alert(
-        "Thank You!",
-        `Your ${feedbackType.toLowerCase()} (#${feedbackId}) has been successfully sent to the BunkMates team. We appreciate your help in making the app better!`,
-        [
-          {
-            text: "Done",
-            onPress: () => router.back(),
-          },
-          {
-            text: "Send Another",
-            style: "cancel",
-          },
-        ]
-      );
+      setSubmittedInfo({ id: feedbackId, type: feedbackType });
+      setSuccessDrawerVisible(true);
     } catch (error) {
       console.log("Error submitting feedback:", error);
       setLoading(false);
@@ -386,11 +375,8 @@ export default function SendFeedbackScreen() {
       setDetails("");
       setAttachment(null);
       triggerToast("Saved locally (offline mode).");
-      Alert.alert(
-        "Feedback Recorded",
-        "Your feedback has been saved locally and will sync when you're back online.",
-        [{ text: "OK", onPress: () => router.back() }]
-      );
+      setSubmittedInfo({ id: feedbackId, type: feedbackType });
+      setSuccessDrawerVisible(true);
     }
   };
 
@@ -416,7 +402,13 @@ export default function SendFeedbackScreen() {
       )}
 
       {/* Header with Circular Back Button */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => {
             if (router.canGoBack()) router.back();
@@ -425,9 +417,11 @@ export default function SendFeedbackScreen() {
           style={({ pressed }) => [
             styles.modernHeaderBtn,
             {
-              backgroundColor: colors.card,
-              borderColor: colors.cardBorder,
-              opacity: pressed ? 0.7 : 1,
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
             },
           ]}
           accessibilityLabel={t("back", "Back")}
@@ -446,9 +440,11 @@ export default function SendFeedbackScreen() {
           style={({ pressed }) => [
             styles.modernHeaderBtn,
             {
-              backgroundColor: colors.card,
-              borderColor: colors.cardBorder,
-              opacity: pressed ? 0.7 : 1,
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
             },
           ]}
           accessibilityLabel="Feedback History"
@@ -629,73 +625,115 @@ export default function SendFeedbackScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* ========================================================
-          SUBMISSION HISTORY MODAL
-      ========================================================= */}
-      <Modal
+      {/* ── SUBMISSION HISTORY SWIPEABLE DRAWER ── */}
+      <SwipeableDrawer
         visible={historyModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setHistoryModalVisible(false)}
+        onClose={() => setHistoryModalVisible(false)}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
+        maxHeight="85%"
       >
-        <View style={styles.modalOverlay}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setHistoryModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>My Feedback History</Text>
-              <Pressable
-                onPress={() => setHistoryModalVisible(false)}
-                style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
-                hitSlop={8}
-              >
-                <Ionicons name="close" size={22} color={colors.textPrimary} />
-              </Pressable>
-            </View>
+        <View style={styles.drawerInner}>
+          <View style={styles.sheetHeader}>
+            <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>My Feedback History</Text>
+            <Pressable
+              onPress={() => setHistoryModalVisible(false)}
+              style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
+              hitSlop={8}
+            >
+              <Ionicons name="close" size={22} color={colors.textPrimary} />
+            </Pressable>
+          </View>
 
-            {feedbackHistory.length === 0 ? (
-              <View style={styles.emptyHistoryBox}>
-                <Ionicons name="chatbox-ellipses-outline" size={38} color={colors.textSecondary} style={{ marginBottom: 10 }} />
-                <Text style={[styles.emptyHistoryTitle, { color: colors.textPrimary }]}>No feedback sent yet</Text>
-                <Text style={[styles.emptyHistorySub, { color: colors.textSecondary }]}>
-                  Your submitted bug reports, suggestions, and feedback will be logged here.
-                </Text>
-              </View>
-            ) : (
-              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
-                {feedbackHistory.map((item) => (
-                  <View
-                    key={item.id}
-                    style={[
-                      styles.historyCard,
-                      { backgroundColor: colors.activePillBg, borderColor: colors.cardBorder },
-                    ]}
-                  >
-                    <View style={styles.historyCardHeader}>
-                      <Text style={[styles.historyIdText, { color: colors.activeText }]}>#{item.id}</Text>
-                      <View style={[styles.historyBadge, { backgroundColor: colors.badgeBg }]}>
-                        <Text style={[styles.historyBadgeText, { color: colors.badgeText }]}>{item.type}</Text>
-                      </View>
-                    </View>
-                    <Text style={[styles.historyMessage, { color: colors.textPrimary }]} numberOfLines={3}>
-                      {item.message}
-                    </Text>
-                    <View style={styles.historyFooter}>
-                      <Text style={[styles.historyDate, { color: colors.textSecondary }]}>{item.createdAt}</Text>
-                      {item.hasAttachment && (
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                          <Ionicons name="image-outline" size={13} color={colors.textSecondary} />
-                          <Text style={[styles.historyDate, { color: colors.textSecondary }]}>Screenshot</Text>
-                        </View>
-                      )}
+          {feedbackHistory.length === 0 ? (
+            <View style={styles.emptyHistoryBox}>
+              <Ionicons name="chatbox-ellipses-outline" size={38} color={colors.textSecondary} style={{ marginBottom: 10 }} />
+              <Text style={[styles.emptyHistoryTitle, { color: colors.textPrimary }]}>No feedback sent yet</Text>
+              <Text style={[styles.emptyHistorySub, { color: colors.textSecondary }]}>
+                Your submitted bug reports, suggestions, and feedback will be logged here.
+              </Text>
+            </View>
+          ) : (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ maxHeight: 420 }}
+              contentContainerStyle={{ paddingBottom: 20 }}
+            >
+              {feedbackHistory.map((item) => (
+                <View
+                  key={item.id}
+                  style={[
+                    styles.historyCard,
+                    { backgroundColor: colors.activePillBg, borderColor: colors.cardBorder },
+                  ]}
+                >
+                  <View style={styles.historyCardHeader}>
+                    <Text style={[styles.historyIdText, { color: colors.activeText }]}>#{item.id}</Text>
+                    <View style={[styles.historyBadge, { backgroundColor: colors.badgeBg }]}>
+                      <Text style={[styles.historyBadgeText, { color: colors.badgeText }]}>{item.type}</Text>
                     </View>
                   </View>
-                ))}
-              </ScrollView>
-            )}
+                  <Text style={[styles.historyMessage, { color: colors.textPrimary }]} numberOfLines={3}>
+                    {item.message}
+                  </Text>
+                  <View style={styles.historyFooter}>
+                    <Text style={[styles.historyDate, { color: colors.textSecondary }]}>{item.createdAt}</Text>
+                    {item.hasAttachment && (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                        <Ionicons name="image-outline" size={13} color={colors.textSecondary} />
+                        <Text style={[styles.historyDate, { color: colors.textSecondary }]}>Screenshot</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      </SwipeableDrawer>
+
+      {/* ── SUBMISSION SUCCESS SWIPEABLE DRAWER ── */}
+      <SwipeableDrawer
+        visible={successDrawerVisible}
+        onClose={() => setSuccessDrawerVisible(false)}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
+      >
+        <View style={styles.drawerInner}>
+          <View
+            style={[
+              styles.successIconBox,
+              { backgroundColor: isDark ? "rgba(16, 185, 129, 0.16)" : "#ECFDF5" },
+            ]}
+          >
+            <Ionicons name="checkmark-circle" size={38} color="#10B981" />
+          </View>
+          <Text style={[styles.drawerTitle, { color: colors.textPrimary, textAlign: "center" }]}>
+            {t("Thank You!")}
+          </Text>
+          <Text style={[styles.drawerSubtitle, { color: colors.textSecondary, textAlign: "center", marginBottom: 20 }]}>
+            Your {submittedInfo?.type?.toLowerCase() || "feedback"} (#{submittedInfo?.id}) has been successfully sent to the BunkMates team. We appreciate your help in making the app better!
+          </Text>
+
+          <View style={{ width: "100%", gap: 10 }}>
+            <Pressable
+              style={[styles.modalPrimBtn, { backgroundColor: colors.btnPrimaryBg }]}
+              onPress={() => {
+                setSuccessDrawerVisible(false);
+                router.back();
+              }}
+            >
+              <Text style={[styles.modalPrimBtnText, { color: colors.btnPrimaryText }]}>Done</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.modalSecBtn, { borderColor: colors.cardBorder }]}
+              onPress={() => setSuccessDrawerVisible(false)}
+            >
+              <Text style={[styles.modalSecBtnText, { color: colors.textPrimary }]}>Send Another</Text>
+            </Pressable>
           </View>
         </View>
-      </Modal>
+      </SwipeableDrawer>
     </SafeAreaView>
   );
 }
@@ -993,5 +1031,57 @@ const styles = StyleSheet.create({
   },
   historyDate: {
     fontSize: 11,
+  },
+  drawerSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 8,
+  },
+  drawerInner: {
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+    paddingTop: 8,
+  },
+  drawerTitle: {
+    fontSize: 19,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+    marginBottom: 4,
+  },
+  drawerSubtitle: {
+    fontSize: 13.5,
+    lineHeight: 19,
+  },
+  successIconBox: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    justifyContent: "center",
+    alignItems: "center",
+    alignSelf: "center",
+    marginBottom: 14,
+  },
+  modalPrimBtn: {
+    height: 48,
+    borderRadius: 24,
+    justifyContent: "center",
+    alignItems: "center",
+    width: "100%",
+  },
+  modalPrimBtnText: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  modalSecBtn: {
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    width: "100%",
+  },
+  modalSecBtnText: {
+    fontSize: 14.5,
+    fontWeight: "600",
   },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   View,
   Pressable,
@@ -17,8 +17,6 @@ import { useRouter, usePathname } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUser } from "../contexts/UserContext";
 import { useThemeToggle } from "../contexts/ThemeContext";
-import { db } from "../lib/firebase";
-import { doc, onSnapshot } from "firebase/firestore";
 import * as Haptics from "expo-haptics";
 
 import { useAppSettings } from "../contexts/AppSettingsContext";
@@ -31,9 +29,41 @@ export default function BottomNav() {
   const insets = useSafeAreaInsets();
   const { user, userData } = useUser();
   const { isDark, accentColor, accent } = useThemeToggle();
-  const [profile, setProfile] = useState<any>(null);
-  const [profileLoading, setProfileLoading] = useState(true);
+  const { hapticFeedback } = useAppSettings();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  const avatarScaleAnim = useRef(new Animated.Value(1)).current;
+  const lastSettingsPress = useRef(0);
+
+  const handleSettingsPress = useCallback(() => {
+    if (pathname === "/settings" || pathname.startsWith("/settings")) return;
+
+    const now = Date.now();
+    if (now - lastSettingsPress.current < 200) return;
+    lastSettingsPress.current = now;
+
+    if (hapticFeedback) {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (e) {}
+    }
+
+    Animated.sequence([
+      Animated.timing(avatarScaleAnim, {
+        toValue: 0.92,
+        duration: 60,
+        useNativeDriver: true,
+      }),
+      Animated.spring(avatarScaleAnim, {
+        toValue: 1,
+        friction: 6,
+        tension: 120,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    router.push("/settings" as any);
+  }, [router, pathname, hapticFeedback, avatarScaleAnim]);
 
   // Keyboard listener for responsive floating above keyboard (Image 3)
   useEffect(() => {
@@ -52,26 +82,6 @@ export default function BottomNav() {
       hideSub.remove();
     };
   }, []);
-
-  // Sync profile data in real time
-  useEffect(() => {
-    if (!user?.uid) {
-      setProfile(null);
-      setProfileLoading(false);
-      return;
-    }
-    setProfileLoading(true);
-    const ref = doc(db, "users", user.uid);
-    const unsub = onSnapshot(ref, (snap) => {
-      if (snap.exists()) {
-        setProfile(snap.data());
-      } else {
-        setProfile(null);
-      }
-      setProfileLoading(false);
-    });
-    return () => unsub();
-  }, [user]);
 
   // Hide bottom navigation on full-screen chats
   if (pathname.includes("group-chatroom") || pathname.includes("chat/")) {
@@ -130,15 +140,23 @@ export default function BottomNav() {
       router.push(path as any);
     };
 
-    const activePillColor =
-      accent === "white" || !accent || accent === "default"
-        ? (isDark ? "#e5e7eb" : "#111827")
-        : accentColor;
+    const isWhiteAccent =
+      accent === "white" ||
+      accent === "navWhite" ||
+      accentColor === "#FFFFFF" ||
+      accentColor === "#ffffff" ||
+      accentColor?.toLowerCase() === "#ffffff";
+
+    const activePillColor = isWhiteAccent
+      ? "#FFFFFF"
+      : accentColor || "#FF5A5F";
+
     const isBrightPill =
-      activePillColor === "#e5e7eb" ||
+      isWhiteAccent ||
       activePillColor === "#ffffff" ||
       activePillColor === "#FFFFFF" ||
-      activePillColor === "#fbc02d";
+      activePillColor === "#fbc02d" ||
+      activePillColor === "#afb42b";
     const activeIconColor = isBrightPill ? "#000000" : "#FFFFFF";
 
     const routeLabel = route.replace("/(tabs)", "").replace("/", "");
@@ -181,8 +199,6 @@ export default function BottomNav() {
       : Math.max(insets.bottom, 10) + 8;
 
   const userInitial = (
-    profile?.name ||
-    profile?.displayName ||
     userData?.name ||
     userData?.displayName ||
     user?.displayName ||
@@ -191,7 +207,6 @@ export default function BottomNav() {
 
   const userPhoto =
     userData?.photoURL ||
-    profile?.photoURL ||
     user?.photoURL ||
     null;
 
@@ -217,32 +232,30 @@ export default function BottomNav() {
         </View>
 
         {/* Standalone Circular Profile Pod */}
-        <Pressable
-          style={styles.avatarGlassWrapper}
-          onPress={() => {
-            try {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            } catch (e) {}
-            router.push("/settings" as any);
-          }}
-          hitSlop={10}
-          accessible={true}
-          accessibilityRole="button"
-          accessibilityLabel="Settings and Profile"
-          accessibilityHint="Double tap to open settings and profile"
-        >
-          <BlurView intensity={70} tint="dark" style={styles.avatarPillContainer}>
-            {profileLoading ? (
-              <ActivityIndicator color="#ffffff" size="small" />
-            ) : userPhoto ? (
-              <Image source={{ uri: userPhoto }} style={styles.navAvatar} />
-            ) : (
-              <View style={[styles.navAvatar, styles.initialAvatar]}>
-                <Text style={styles.initialText}>{userInitial}</Text>
-              </View>
-            )}
-          </BlurView>
-        </Pressable>
+        <Animated.View style={{ transform: [{ scale: avatarScaleAnim }] }}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.avatarGlassWrapper,
+              pressed && Platform.OS === "ios" && { opacity: 0.88 },
+            ]}
+            onPress={handleSettingsPress}
+            hitSlop={10}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel="Settings and Profile"
+            accessibilityHint="Double tap to open settings and profile"
+          >
+            <BlurView intensity={70} tint="dark" style={styles.avatarPillContainer}>
+              {userPhoto ? (
+                <Image source={{ uri: userPhoto }} style={styles.navAvatar} />
+              ) : (
+                <View style={[styles.navAvatar, styles.initialAvatar]}>
+                  <Text style={styles.initialText}>{userInitial}</Text>
+                </View>
+              )}
+            </BlurView>
+          </Pressable>
+        </Animated.View>
       </View>
     </View>
   );

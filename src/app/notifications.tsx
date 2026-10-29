@@ -1,49 +1,76 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Haptics from "expo-haptics";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { onAuthStateChanged } from "firebase/auth";
+import {
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  limit,
+  onSnapshot,
+  query,
+  setDoc,
+  updateDoc,
+  where,
+} from "firebase/firestore";
+import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   Image,
-  Modal,
+  LayoutAnimation,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
+  UIManager,
   View,
-  Platform,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  Ionicons,
-  Feather,
-  MaterialCommunityIcons,
-} from "@expo/vector-icons";
-import {
-  arrayUnion,
-  collection,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-  setDoc,
-  updateDoc,
-  where,
-  writeBatch,
-} from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth, db } from "../lib/firebase";
-import { useThemeToggle } from "../contexts/ThemeContext";
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { useLanguage } from "../contexts/LanguageContext";
-import { haptic } from "../constants/authTheme";
-import { SwipeableDrawer } from "../components/ui/SwipeableDrawer";
+import { useThemeToggle } from "../contexts/ThemeContext";
+import { useUserChats } from "../hooks/useUserChats";
+import { useUserGroups } from "../hooks/useUserGroups";
+import { auth, db } from "../lib/firebase";
+import { sendFriendAcceptedNotification } from "../lib/sendAppNotification";
+import SettingsHeaderGradientMask from "./settings/_components/SettingsHeaderGradientMask";
+import { LinearGradient } from "expo-linear-gradient";
+
+// Enable experimental layout animations on Android (only on legacy architecture; Fabric natively supports it)
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  const isFabric = Boolean(
+    (globalThis as any).nativeFabricUIManager || (globalThis as any)._IS_FABRIC,
+  );
+  if (!isFabric) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  }
+}
+
+const NOTIFICATIONS_CACHE_KEY = "@bunkmates_notifications_cache";
 
 /* ============================================================
-   TYPES
+   TYPES & DATA SPECIFICATION
 ============================================================ */
 
 export type NotificationType =
@@ -59,37 +86,59 @@ export type NotificationType =
   | "system"
   | string;
 
-export interface NotificationItem {
+export interface AppNotification {
   id: string;
+  recipientId?: string;
   uid?: string;
-  type?: NotificationType;
-  title?: string;
-  content?: string;
-  message?: string;
   senderId?: string;
   senderName?: string;
+  senderAvatar?: string;
   pic?: string;
+  type?: NotificationType;
+  title?: string;
+  body?: string;
+  content?: string;
+  message?: string;
+  timestamp?: any;
+  isRead?: boolean;
   seen?: boolean;
   read?: boolean;
   status?: string;
-  timestamp?: any;
-  route?: string;
-  chatId?: string;
+  stackId?: string;
   groupId?: string;
   groupName?: string;
+  chatId?: string;
   callId?: string;
   callType?: "audio" | "video";
   tripId?: string;
+  metadata?: Record<string, any>;
   [key: string]: any;
 }
 
+// Module-level in-memory cache for instant 0ms mount render
+let memoryNotificationsCache: AppNotification[] = [];
+
 export type FilterCategory =
   | "all"
-  | "unread"
-  | "messages"
+  | "unreads"
+  | "chat"
+  | "group_chat"
   | "calls"
-  | "requests"
-  | "system";
+  | "feedback";
+
+interface NotificationStackGroup {
+  groupKey: string;
+  categoryLabel: string;
+  masterItem: AppNotification;
+  items: AppNotification[];
+}
+
+interface DateSectionGroup {
+  key: string;
+  title: string;
+  sortTimestamp: number;
+  stackGroups: NotificationStackGroup[];
+}
 
 /* ============================================================
    HELPERS & DATE FORMATTERS
@@ -107,57 +156,94 @@ function toDate(timestamp: any): Date | null {
   return null;
 }
 
-function formatRelativeTime(timestamp: any): string {
+function formatCardTime(timestamp: any): string {
   const date = toDate(timestamp);
-  if (!date) return "--";
-
-  const now = new Date();
-  const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000);
-
-  if (diffSec < 45) return "Just now";
-  if (diffSec < 3600) return `${Math.max(1, Math.floor(diffSec / 60))}m ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-  if (diffSec < 172800) return "Yesterday";
-  if (diffSec < 604800) return `${Math.floor(diffSec / 86400)}d ago`;
-
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function formatExactDateTime(timestamp: any): string {
-  const date = toDate(timestamp);
-  if (!date) return "Unknown time";
-
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
+  if (!date) return "";
+  return date.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   });
 }
 
-function getDateSection(timestamp: any): string {
+function formatStackedTime(timestamp: any): string {
   const date = toDate(timestamp);
-  if (!date) return "Earlier";
+  if (!date) return "";
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const itemDate = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  );
+  const diffTime = today.getTime() - itemDate.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+  const time = date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  if (diffDays === 0) return `Today • ${time}`;
+  if (diffDays === 1) return `Yesterday • ${time}`;
+  const weekday = date.toLocaleDateString("en-US", { weekday: "long" });
+  return `${weekday} • ${time}`;
+}
+
+function getDateSectionInfo(timestamp: any): {
+  key: string;
+  title: string;
+  sortTimestamp: number;
+} {
+  const date = toDate(timestamp);
+  if (!date) {
+    return { key: "earlier", title: "EARLIER", sortTimestamp: 0 };
+  }
 
   const now = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const itemDate = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  );
+  const diffTime = today.getTime() - itemDate.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-  const isSameDay = (d1: Date, d2: Date) =>
-    d1.getFullYear() === d2.getFullYear() &&
-    d1.getMonth() === d2.getMonth() &&
-    d1.getDate() === d2.getDate();
+  if (diffDays === 0) {
+    return { key: "today", title: "TODAY", sortTimestamp: itemDate.getTime() };
+  }
+  if (diffDays === 1) {
+    return {
+      key: "yesterday",
+      title: "YESTERDAY",
+      sortTimestamp: itemDate.getTime(),
+    };
+  }
+  if (diffDays >= 2 && diffDays < 7) {
+    const dayName = date
+      .toLocaleDateString("en-US", { weekday: "long" })
+      .toUpperCase();
+    return {
+      key: `day_${itemDate.getTime()}`,
+      title: dayName,
+      sortTimestamp: itemDate.getTime(),
+    };
+  }
 
-  if (isSameDay(date, now)) return "Today";
-  if (isSameDay(date, yesterday)) return "Yesterday";
-
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  if (date > sevenDaysAgo) return "This Week";
-
-  return "Earlier";
+  const formatted = date
+    .toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })
+    .toUpperCase();
+  return {
+    key: `date_${itemDate.getTime()}`,
+    title: formatted,
+    sortTimestamp: itemDate.getTime(),
+  };
 }
 
 function stripHtml(value?: string): string {
@@ -169,88 +255,480 @@ function stripHtml(value?: string): string {
     .trim();
 }
 
+function getAvatarInitialBg(name: string): string {
+  const palette = [
+    "#204E4A", // Slate Teal (like 'R' for Ratan devi)
+    "#0F766E", // Deep Teal (like 'M' for Bunk1)
+    "#1E3A5F", // Muted Navy
+    "#3B2D54", // Muted Plum
+    "#4A3224", // Muted Bronze
+    "#2B3A4A", // Charcoal Slate
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return palette[Math.abs(hash) % palette.length];
+}
+
 /* ============================================================
-   TYPE METADATA (ICONS, COLORS & BADGES)
+   GROUP DETECTION & EXTRACTION HELPERS
+============================================================ */
+
+function extractGroupId(item: AppNotification): string | null {
+  if (!item) return null;
+  if (item.groupId && typeof item.groupId === "string" && item.groupId.trim())
+    return item.groupId.trim();
+  if (
+    item.metadata?.groupId &&
+    typeof item.metadata.groupId === "string" &&
+    item.metadata.groupId.trim()
+  )
+    return item.metadata.groupId.trim();
+  if (
+    item.data?.groupId &&
+    typeof item.data.groupId === "string" &&
+    item.data.groupId.trim()
+  )
+    return item.data.groupId.trim();
+
+  // From route string, e.g. "/group-chatroom/xyz" or "/(tabs)/group-chatroom/xyz"
+  const routeStr = typeof item.route === "string" ? item.route : "";
+  if (routeStr.includes("group-chatroom/")) {
+    const parts = routeStr.split("group-chatroom/");
+    if (parts[1]) {
+      const extracted = parts[1].split("?")[0].replace(/^\//, "").trim();
+      if (extracted) return extracted;
+    }
+  }
+
+  // If item.type is group_chat or group, chatId is often the groupId
+  if (
+    item.type === "group_chat" ||
+    item.type === "group" ||
+    item.category === "group_chat"
+  ) {
+    if (
+      item.chatId &&
+      typeof item.chatId === "string" &&
+      item.chatId.trim() &&
+      !item.chatId.includes("_")
+    ) {
+      return item.chatId.trim();
+    }
+    if ((item as any).groupId && typeof (item as any).groupId === "string") {
+      return (item as any).groupId.trim();
+    }
+  }
+
+  return null;
+}
+
+function isGroupNotification(item: AppNotification): boolean {
+  if (!item) return false;
+  if (
+    item.type === "group_chat" ||
+    item.type === "group" ||
+    item.category === "group_chat"
+  )
+    return true;
+  if (Boolean(extractGroupId(item))) return true;
+  if (typeof item.route === "string" && item.route.includes("group-chatroom"))
+    return true;
+  if (Boolean(item.groupName)) return true;
+  return false;
+}
+
+function getTargetFriendId(
+  item: AppNotification,
+  myUid?: string,
+): string | null {
+  if (!item) return null;
+
+  // 1. Check item.route e.g. "/chat/friendId" or "/chat/uidA_uidB"
+  if (typeof item.route === "string" && item.route.includes("/chat/")) {
+    const rawTarget = item.route
+      .split("/chat/")[1]
+      ?.split("?")[0]
+      ?.replace(/^\//, "")
+      .trim();
+    if (rawTarget) {
+      if (rawTarget.includes("_") && myUid) {
+        const other = rawTarget.split("_").find((p) => p !== myUid);
+        if (other) return other;
+      } else if (rawTarget !== myUid) {
+        return rawTarget;
+      }
+    }
+  }
+
+  // 2. Check item.senderId (other party who sent the message)
+  if (item.senderId && item.senderId !== myUid) {
+    return item.senderId;
+  }
+
+  // 3. Check item.recipientId (if user was sender and viewing notification)
+  if (item.recipientId && item.recipientId !== myUid) {
+    return item.recipientId;
+  }
+
+  // 4. Check item.chatId composite "uidA_uidB"
+  if (item.chatId && myUid && item.chatId.includes("_")) {
+    const parts = item.chatId.split("_");
+    const other = parts.find((p) => p !== myUid);
+    if (other) return other;
+  }
+
+  // 5. Check metadata & data
+  const metaSender =
+    item.metadata?.senderId ||
+    item.data?.senderId ||
+    item.metadata?.friendId ||
+    item.data?.friendId;
+  if (metaSender && metaSender !== myUid) {
+    return metaSender;
+  }
+
+  // 6. Direct chatId without underscore (if not myUid)
+  if (item.chatId && !item.chatId.includes("_") && item.chatId !== myUid) {
+    return item.chatId;
+  }
+
+  return null;
+}
+
+interface NotificationDestination {
+  type: "group" | "chat" | "call" | "trip" | "generic";
+  path: string;
+}
+
+function resolveNotificationDestination(
+  item: AppNotification,
+  currentUid: string | undefined,
+  chats: any[] = [],
+  groups: any[] = [],
+): NotificationDestination | null {
+  if (!item) return null;
+
+  // 1. Friend requests have inline action buttons
+  if (item.type === "friend_request") return null;
+
+  // 2. Expandable detail notifications (Feedback, Accepted info): stay in-place, do not navigate
+  if (isExpandableDetailNotification(item)) return null;
+
+  // 3. Created Group Chat detection (Redirects to group chatroom if notification belongs to any created group)
+  const isGroup = isGroupNotification(item);
+  let resolvedGroupId = extractGroupId(item);
+
+  // If notification belongs to any created group in user's groups list, resolve its exact ID
+  if (groups.length > 0) {
+    const matchedGroup = groups.find((g: any) => {
+      if (!g || !g.id) return false;
+      if (item.groupId && g.id === item.groupId) return true;
+      if (item.chatId && g.id === item.chatId) return true;
+      const gName = (g.name || "").toLowerCase().trim();
+      const gTripName = (g.tripName || "").toLowerCase().trim();
+      const titleLower = (item.title || "").toLowerCase().trim();
+      const groupNameLower = (item.groupName || "").toLowerCase().trim();
+      return (
+        (groupNameLower &&
+          (gName === groupNameLower || gTripName === groupNameLower)) ||
+        (titleLower && (gName === titleLower || gTripName === titleLower))
+      );
+    });
+    if (matchedGroup && matchedGroup.id) {
+      resolvedGroupId = matchedGroup.id;
+    }
+  }
+
+  // If this notification belongs to any created group, ALWAYS redirect to that group chatroom!
+  if (resolvedGroupId) {
+    return {
+      type: "group",
+      path: `/(tabs)/group-chatroom/${resolvedGroupId}`,
+    };
+  }
+
+  // 4. Trip notification
+  if (item.tripId) {
+    return {
+      type: "trip",
+      path: `/trips/${item.tripId}`,
+    };
+  }
+
+  // 5. 1-on-1 Chat Friend ID resolution
+  let friendId = getTargetFriendId(item, currentUid);
+
+  // Match against user chats list by peer name or ID
+  if (!friendId && chats.length > 0) {
+    const rawSender = (item.senderName || item.title || "")
+      .toLowerCase()
+      .trim();
+    if (rawSender) {
+      const match = chats.find((c: any) => {
+        if (!c) return false;
+        const cName = (c.name || c.displayName || "").toLowerCase().trim();
+        return (
+          cName === rawSender || c.uid === item.senderId || c.id === item.chatId
+        );
+      });
+      if (match) {
+        friendId =
+          match.uid ||
+          (match.id?.includes("_") && currentUid
+            ? match.id.split("_").find((p: string) => p !== currentUid)
+            : match.id) ||
+          null;
+      }
+    }
+  }
+
+  // Strict safeguard against self-chat
+  if (friendId === currentUid) {
+    friendId = null;
+  }
+
+  // 6. Call or Missed call
+  if (item.type === "call" || item.type === "missed_call" || item.callId) {
+    if (resolvedGroupId) {
+      return {
+        type: "group",
+        path: `/(tabs)/group-chatroom/${resolvedGroupId}`,
+      };
+    }
+    if (friendId) {
+      return {
+        type: "call",
+        path: `/chat/${friendId}`,
+      };
+    }
+  }
+
+  // 7. Route 1-on-1 Chat
+  if (friendId) {
+    return {
+      type: "chat",
+      path: `/chat/${friendId}`,
+    };
+  }
+
+  // 8. Generic route fallback
+  if (
+    item.route &&
+    typeof item.route === "string" &&
+    item.route !== "/notifications"
+  ) {
+    if (item.route.includes("group-chatroom")) {
+      const gId = extractGroupId(item) || resolvedGroupId;
+      if (gId) {
+        return {
+          type: "group",
+          path: `/(tabs)/group-chatroom/${gId}`,
+        };
+      }
+    }
+    if (item.route.includes("/chat/")) {
+      const parts = item.route.split("/chat/");
+      if (parts[1]) {
+        const rawFId = parts[1].split("?")[0].replace(/^\//, "").trim();
+        if (rawFId && rawFId !== currentUid) {
+          const cleanFId =
+            rawFId.includes("_") && currentUid
+              ? rawFId.split("_").find((p) => p !== currentUid) || rawFId
+              : rawFId;
+          return {
+            type: "chat",
+            path: `/chat/${cleanFId}`,
+          };
+        }
+      }
+    }
+    return {
+      type: "generic",
+      path: item.route,
+    };
+  }
+
+  return null;
+}
+
+function isFeedbackOrGeneralNotification(item: AppNotification): boolean {
+  if (!item) return false;
+  const t = (item.type || "").toLowerCase().trim();
+  if (
+    t === "feedback" ||
+    t === "feedback_received" ||
+    t === "general" ||
+    t === "general_received" ||
+    t === "ticket" ||
+    t === "support" ||
+    t === "system" ||
+    t === "announcement" ||
+    Boolean(item.feedbackId) ||
+    Boolean(item.ticketId)
+  ) {
+    return true;
+  }
+  const title = (item.title || "").toLowerCase();
+  if (
+    title.includes("feedback") ||
+    title.includes("received") ||
+    title.includes("general") ||
+    title.includes("#fb-") ||
+    title.includes("ticket") ||
+    title.includes("support") ||
+    title.includes("notice") ||
+    title.includes("announcement")
+  ) {
+    return true;
+  }
+  if (
+    item.metadata?.feedbackId ||
+    item.data?.feedbackId ||
+    item.metadata?.ticketId ||
+    item.data?.ticketId
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isAcceptedNotification(item: AppNotification): boolean {
+  if (!item) return false;
+  const t = (item.type || "").toLowerCase().trim();
+  const s = (item.status || "").toLowerCase().trim();
+  const title = (item.title || "").toLowerCase();
+
+  return (
+    t === "friend_accepted" ||
+    t === "trip_accepted" ||
+    t.includes("accepted") ||
+    s === "accepted" ||
+    title.includes("accepted")
+  );
+}
+
+function isExpandableDetailNotification(item: AppNotification): boolean {
+  if (!item) return false;
+
+  // Pending friend requests have inline Accept/Decline action buttons (do not expand)
+  if (item.type === "friend_request" && item.status !== "accepted") {
+    return false;
+  }
+
+  // Chats, calls, missed calls, and groups have dedicated navigation (do not expand)
+  if (
+    item.type === "chat" ||
+    item.type === "call" ||
+    item.type === "missed_call" ||
+    Boolean(item.callId) ||
+    Boolean(item.callType) ||
+    isGroupNotification(item)
+  ) {
+    return false;
+  }
+
+  // Feedback / General / System tickets are expandable detail items
+  if (isFeedbackOrGeneralNotification(item)) {
+    return true;
+  }
+
+  // Accepted notifications with info are expandable detail items
+  if (isAcceptedNotification(item)) {
+    return true;
+  }
+
+  return false;
+}
+
+/* ============================================================
+   TYPE BADGES (Overlayed at bottom-right of Avatar)
 ============================================================ */
 
 interface TypeConfig {
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
-  badgeBg: string;
+  bgColor: string;
   label: string;
 }
 
-function getTypeConfig(type?: string, accent?: string): TypeConfig {
-  const dynamicAccent = accent || "#f9971f";
+function getTypeConfig(
+  type?: string,
+  isGroup?: boolean,
+  title?: string,
+): TypeConfig {
+  if (isGroup || type === "group_chat" || type === "group") {
+    return {
+      icon: "chatbubbles",
+      color: "#FFFFFF",
+      bgColor: "#06B6D4", // Cyan / Teal
+      label: "Group Chat",
+    };
+  }
+  const normTitle = (title || "").toLowerCase();
+  const normType = (type || "").toLowerCase();
+  if (
+    normType === "feedback" ||
+    normType === "feedback_received" ||
+    normType === "general" ||
+    normType === "general_received" ||
+    normType === "ticket" ||
+    normType === "support" ||
+    normTitle.includes("feedback") ||
+    normTitle.includes("received") ||
+    normTitle.includes("general") ||
+    normTitle.includes("#fb-")
+  ) {
+    return {
+      icon: "chatbubble",
+      color: "#FFFFFF",
+      bgColor: "#F59E0B", // Warm Amber (matches feedback screenshot badge)
+      label: "Feedback",
+    };
+  }
   switch (type) {
     case "chat":
       return {
-        icon: "chatbubble-ellipses",
-        color: "#38bdf8", // Sky blue
-        badgeBg: "rgba(56, 189, 248, 0.15)",
+        icon: "chatbubble",
+        color: "#FFFFFF",
+        bgColor: "#3B82F6", // Sky / Royal Blue
         label: "Chat",
-      };
-    case "group_chat":
-      return {
-        icon: "chatbubbles",
-        color: "#a855f7", // Purple
-        badgeBg: "rgba(168, 85, 247, 0.15)",
-        label: "Group Chat",
       };
     case "call":
       return {
         icon: "call",
-        color: "#10b981", // Emerald call accent
-        badgeBg: "rgba(16, 185, 129, 0.15)",
-        label: "Incoming Call",
+        color: "#FFFFFF",
+        bgColor: "#10B981", // Emerald Green
+        label: "Call",
       };
     case "missed_call":
       return {
-        icon: "call-outline",
-        color: "#ef4444", // Red
-        badgeBg: "rgba(239, 68, 68, 0.15)",
+        icon: "call",
+        color: "#FFFFFF",
+        bgColor: "#FF5A5F", // Brand Coral (Zero-Red Rule)
         label: "Missed Call",
       };
     case "friend_request":
-      return {
-        icon: "person-add",
-        color: dynamicAccent,
-        badgeBg: "rgba(255, 255, 255, 0.14)",
-        label: "Friend Request",
-      };
     case "friend_accepted":
       return {
         icon: "people",
-        color: dynamicAccent,
-        badgeBg: "rgba(255, 255, 255, 0.14)",
-        label: "New Friend",
+        color: "#FFFFFF",
+        bgColor: "#8B5CF6", // Purple
+        label: "Friend",
       };
     case "trip":
       return {
         icon: "airplane",
-        color: "#f59e0b", // Amber
-        badgeBg: "rgba(245, 158, 11, 0.15)",
+        color: "#FFFFFF",
+        bgColor: "#F59E0B", // Amber
         label: "Trip",
-      };
-    case "like":
-      return {
-        icon: "heart",
-        color: "#f43f5e", // Rose
-        badgeBg: "rgba(244, 63, 94, 0.15)",
-        label: "Like",
-      };
-    case "feedback":
-      return {
-        icon: "bulb",
-        color: "#eab308", // Yellow
-        badgeBg: "rgba(234, 179, 8, 0.15)",
-        label: "Feedback",
       };
     default:
       return {
         icon: "notifications",
-        color: dynamicAccent,
-        badgeBg: "rgba(249, 151, 31, 0.15)",
+        color: "#FFFFFF",
+        bgColor: "#F59E0B", // Amber
         label: "Alert",
       };
   }
@@ -263,26 +741,51 @@ function getTypeConfig(type?: string, accent?: string): TypeConfig {
 export default function Notifications() {
   const router = useRouter();
   const params = useLocalSearchParams<{ notificationId?: string }>();
-  const { themeColors, accentColor, onAccentTextColor, isDark, scaleFont } = useThemeToggle();
+  const { isDark, scaleFont, themeColors, accentColor } = useThemeToggle();
+  const colors = useMemo(
+    () => ({
+      bg: themeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
+      textPrimary: themeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
+    }),
+    [themeColors, isDark],
+  );
   const { t } = useLanguage();
+  const insets = useSafeAreaInsets();
+  const topInset =
+    insets.top > 0
+      ? insets.top
+      : Platform.OS === "android"
+        ? StatusBar.currentHeight || 24
+        : 44;
 
-  // State
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(() => auth.currentUser);
+  const { chats = [] } = useUserChats(
+    currentUser?.uid || auth.currentUser?.uid || null,
+  );
+  const { groups = [] } = useUserGroups(
+    currentUser?.uid || auth.currentUser?.uid || null,
+  );
+
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+
+  const [notifications, setNotifications] = useState<AppNotification[]>(
+    () => memoryNotificationsCache,
+  );
+  const [loading, setLoading] = useState(
+    () => memoryNotificationsCache.length === 0,
+  );
   const [refreshing, setRefreshing] = useState(false);
 
-  // Filters & Search
+  // Active Category Filter
   const [activeCategory, setActiveCategory] = useState<FilterCategory>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
 
-  // Modals & Selection
-  const [selectedNotification, setSelectedNotification] = useState<NotificationItem | null>(null);
-  const [showOptionsModal, setShowOptionsModal] = useState(false);
-  const [clearing, setClearing] = useState(false);
+  // Inline Accordion Stack Expansion State (Single active stack to prevent multi-expansion bug)
+  const [expandedStackId, setExpandedStackId] = useState<string | null>(null);
 
-  // Auth Listener
+  // 1. Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
@@ -290,7 +793,32 @@ export default function Notifications() {
     return unsubscribe;
   }, []);
 
-  // Firestore Realtime Listener
+  // 2. Instant Offline Hydration from AsyncStorage
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const cached = await AsyncStorage.getItem(NOTIFICATIONS_CACHE_KEY);
+        if (cached && isMounted) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            if (memoryNotificationsCache.length === 0) {
+              memoryNotificationsCache = parsed;
+              setNotifications(parsed);
+              setLoading(false);
+            }
+          }
+        }
+      } catch (err) {
+        AsyncStorage.removeItem(NOTIFICATIONS_CACHE_KEY).catch(() => { });
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // 3. Realtime Firestore Sync with 50-limit and batched updates
   useEffect(() => {
     if (!currentUser) {
       setNotifications([]);
@@ -298,1498 +826,2530 @@ export default function Notifications() {
       return;
     }
 
-    setLoading(true);
-    const q = query(
+    const currentUid = currentUser.uid;
+    let unsubUid: (() => void) | null = null;
+    let unsubRecipient: (() => void) | null = null;
+    let updateTimer: ReturnType<typeof setTimeout> | null = null;
+    const docMap = new Map<string, AppNotification>();
+
+    const updateAndCache = () => {
+      const mergedList = Array.from(docMap.values()).sort((a, b) => {
+        const tA = a.timestamp?.toMillis
+          ? a.timestamp.toMillis()
+          : a.timestamp
+            ? new Date(a.timestamp).getTime()
+            : 0;
+        const tB = b.timestamp?.toMillis
+          ? b.timestamp.toMillis()
+          : b.timestamp
+            ? new Date(b.timestamp).getTime()
+            : 0;
+        return tB - tA;
+      });
+
+      memoryNotificationsCache = mergedList;
+      setNotifications(mergedList);
+      setLoading(false);
+      setRefreshing(false);
+
+      // Async Cache to AsyncStorage: save only latest 40 items with sanitized fields
+      const sanitizedCache = mergedList.slice(0, 40).map((item) => ({
+        id: item.id,
+        uid: item.uid,
+        title: item.title,
+        body: item.body || item.content || item.message,
+        type: item.type,
+        timestamp: item.timestamp?.toMillis
+          ? item.timestamp.toMillis()
+          : item.timestamp,
+        seen: item.seen,
+        isRead: item.isRead,
+        read: item.read,
+        groupId: item.groupId,
+        chatId: item.chatId,
+        route: item.route,
+        senderName: item.senderName,
+        pic: item.pic && !item.pic.startsWith("data:") ? item.pic : undefined,
+      }));
+
+      AsyncStorage.setItem(
+        NOTIFICATIONS_CACHE_KEY,
+        JSON.stringify(sanitizedCache),
+      ).catch(() => { });
+    };
+
+    const scheduleUpdate = () => {
+      if (updateTimer) clearTimeout(updateTimer);
+      updateTimer = setTimeout(() => {
+        updateAndCache();
+      }, 35);
+    };
+
+    // Query 1: where uid == currentUid (capped at latest 50 for instantaneous response)
+    const qUid = query(
       collection(db, "notifications"),
-      where("uid", "==", currentUser.uid),
-      orderBy("timestamp", "desc")
+      where("uid", "==", currentUid),
+      limit(50),
     );
-
-    const unsubscribe = onSnapshot(
-      q,
+    unsubUid = onSnapshot(
+      qUid,
       (snapshot) => {
-        const data = snapshot.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data(),
-        })) as NotificationItem[];
-
-        setNotifications(data);
+        snapshot.docs.forEach((docSnap) => {
+          docMap.set(docSnap.id, {
+            id: docSnap.id,
+            ...docSnap.data(),
+          } as AppNotification);
+        });
+        scheduleUpdate();
+      },
+      (error) => {
+        console.warn("[notifications] Firestore uid listener error:", error);
         setLoading(false);
         setRefreshing(false);
       },
-      (error) => {
-        console.error("Notifications Firestore error:", error);
-        setNotifications([]);
-        setLoading(false);
-        setRefreshing(false);
-      }
     );
 
-    return unsubscribe;
+    // Query 2: where recipientId == currentUid (capped at latest 50)
+    const qRecipient = query(
+      collection(db, "notifications"),
+      where("recipientId", "==", currentUid),
+      limit(50),
+    );
+    unsubRecipient = onSnapshot(
+      qRecipient,
+      (snapshot) => {
+        snapshot.docs.forEach((docSnap) => {
+          docMap.set(docSnap.id, {
+            id: docSnap.id,
+            ...docSnap.data(),
+          } as AppNotification);
+        });
+        scheduleUpdate();
+      },
+      (error) => {
+        // Ignored if index or recipientId isn't populated
+      },
+    );
+
+    return () => {
+      if (updateTimer) clearTimeout(updateTimer);
+      if (unsubUid) unsubUid();
+      if (unsubRecipient) unsubRecipient();
+    };
   }, [currentUser]);
 
-  // Deep Link / Param Listener
-  useEffect(() => {
-    if (!params.notificationId || notifications.length === 0) return;
-    const target = notifications.find((item) => item.id === params.notificationId);
-    if (target) {
-      setSelectedNotification(target);
-      markAsRead(target);
-    }
-  }, [params.notificationId, notifications]);
-
-  // Manual Refresh
+  // 4. Manual Refresh
   const handleRefresh = useCallback(() => {
-    haptic("light");
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch { }
     setRefreshing(true);
     setTimeout(() => setRefreshing(false), 800);
   }, []);
 
-  /* ============================================================
-     ACTIONS: READ, DELETE, BATCH
-  ============================================================ */
+  // Inline Accordion Toggle Handler with instantaneous response (0ms delay)
+  const toggleStack = useCallback((stackId: string) => {
+    setExpandedStackId((prev) => (prev === stackId ? null : stackId));
+  }, []);
 
-  const markAsRead = async (item: NotificationItem) => {
-    if (item.seen && item.read) return;
+  // 5. Read / Direct Action Handlers
+  const markAsRead = useCallback(async (item: AppNotification) => {
+    if (item.isRead || item.seen || item.read) return;
+
+    // Optimistic local update
+    setNotifications((prev) =>
+      prev.map((n) =>
+        n.id === item.id ? { ...n, isRead: true, seen: true, read: true } : n,
+      ),
+    );
+
     try {
       await updateDoc(doc(db, "notifications", item.id), {
+        isRead: true,
         seen: true,
         read: true,
       });
     } catch (err) {
       console.warn("Failed to mark notification as read:", err);
     }
-  };
+  }, []);
 
-  const toggleReadStatus = async (item: NotificationItem) => {
-    haptic("light");
-    const nextStatus = !item.seen;
-    try {
-      await updateDoc(doc(db, "notifications", item.id), {
-        seen: nextStatus,
-        read: nextStatus,
-      });
-    } catch (err) {
-      console.warn("Failed to toggle read status:", err);
-    }
-  };
+  // Slide-to-action: Toggle read/unread status on notification(s)
+  const handleToggleRead = useCallback(
+    async (target: AppNotification | AppNotification[]) => {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch { }
+      const items = Array.isArray(target) ? target : [target];
+      if (items.length === 0) return;
 
-  const markAllAsRead = async () => {
-    const unreadItems = notifications.filter((n) => !n.seen);
-    if (unreadItems.length === 0) return;
+      const anyUnread = items.some((n) => !n.isRead && !n.seen && !n.read);
+      const newStatus = anyUnread ? true : false;
+      const ids = items.map((n) => n.id);
 
-    haptic("medium");
-    try {
-      const batch = writeBatch(db);
-      unreadItems.forEach((n) => {
-        batch.update(doc(db, "notifications", n.id), {
-          seen: true,
-          read: true,
-        });
-      });
-      await batch.commit();
-    } catch (err) {
-      console.error("Failed to mark all as read:", err);
-      Alert.alert("Error", "Could not mark all notifications as read.");
-    }
-  };
-
-  const deleteSingleNotification = async (id: string) => {
-    haptic("light");
-    try {
-      await deleteDoc(doc(db, "notifications", id));
-      if (selectedNotification?.id === id) {
-        setSelectedNotification(null);
-      }
-    } catch (err) {
-      console.error("Failed to delete notification:", err);
-    }
-  };
-
-  const clearAllReadNotifications = async () => {
-    const readItems = notifications.filter((n) => n.seen);
-    if (readItems.length === 0) {
-      Alert.alert("No read notifications", "You don't have any read notifications to clear.");
-      return;
-    }
-
-    Alert.alert(
-      "Clear Read Notifications",
-      `Are you sure you want to remove ${readItems.length} read notification(s)?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Clear",
-          style: "destructive",
-          onPress: async () => {
-            haptic("heavy");
-            setClearing(true);
-            try {
-              const batch = writeBatch(db);
-              readItems.forEach((item) => {
-                batch.delete(doc(db, "notifications", item.id));
-              });
-              await batch.commit();
-              setShowOptionsModal(false);
-            } catch (err) {
-              console.error("Failed to clear read notifications:", err);
-              Alert.alert("Error", "Failed to clear read notifications.");
-            } finally {
-              setClearing(false);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  /* ============================================================
-     ACTIONS: FRIEND REQUESTS
-  ============================================================ */
-
-  const handleAcceptFriendRequest = async (item: NotificationItem) => {
-    const currentUid = auth.currentUser?.uid;
-    if (!currentUid || !item.senderId) return;
-
-    haptic("heavy");
-    try {
-      await updateDoc(doc(db, "notifications", item.id), {
-        status: "accepted",
-        seen: true,
-        read: true,
-        message: "You are now friends! 🎉",
-        content: "You are now friends! 🎉",
-      });
-
-      await Promise.all([
-        updateDoc(doc(db, "users", currentUid), {
-          friends: arrayUnion(item.senderId),
-        }),
-        updateDoc(doc(db, "users", item.senderId), {
-          friends: arrayUnion(currentUid),
-        }),
-      ]);
-
-      await setDoc(
-        doc(db, "notifications", `${item.senderId}_${currentUid}_friend_accepted_${Date.now()}`),
-        {
-          type: "friend_accepted",
-          senderId: currentUid,
-          uid: item.senderId,
-          title: "Friend Request Accepted",
-          content: `${auth.currentUser?.displayName || "A user"} accepted your friend request.`,
-          message: `${auth.currentUser?.displayName || "A user"} accepted your friend request.`,
-          pic: auth.currentUser?.photoURL || "",
-          seen: false,
-          read: false,
-          timestamp: new Date(),
-        }
+      setNotifications((prev) =>
+        prev.map((n) =>
+          ids.includes(n.id)
+            ? { ...n, isRead: newStatus, seen: newStatus, read: newStatus }
+            : n,
+        ),
       );
 
-      Alert.alert("Connected! 🎉", "You are now friends on BunkMates.");
-    } catch (err) {
-      console.error("Error accepting friend request:", err);
-      Alert.alert("Error", "Could not accept friend request.");
-    }
-  };
-
-  const handleRejectFriendRequest = async (item: NotificationItem) => {
-    haptic("medium");
-    try {
-      await updateDoc(doc(db, "notifications", item.id), {
-        status: "rejected",
-        seen: true,
-        read: true,
-        message: "Friend request declined.",
-        content: "Friend request declined.",
-      });
-    } catch (err) {
-      console.error("Error rejecting friend request:", err);
-    }
-  };
-
-  /* ============================================================
-     ACTIONS: DIRECT NAVIGATION
-  ============================================================ */
-
-  const handleNotificationPress = (item: NotificationItem) => {
-    haptic("light");
-    markAsRead(item);
-
-    // If item has a direct target route or type:
-    if (item.type === "chat" && item.senderId) {
-      router.push({
-        pathname: `/chat/${item.senderId}` as any,
-        params: {
-          displayName: item.title || item.senderName || "Chat",
-          photoURL: item.pic || "",
-        },
-      });
-      return;
-    }
-
-    if (item.type === "group_chat" && item.groupId) {
-      router.push({
-        pathname: `/chat/${item.groupId}` as any,
-        params: {
-          displayName: item.title || item.groupName || "Group Chat",
-          isGroup: "true",
-        },
-      });
-      return;
-    }
-
-    if (item.type === "missed_call" && item.senderId) {
-      // Prompt callback or open detail
-      setSelectedNotification(item);
-      return;
-    }
-
-    if (item.type === "friend_request") {
-      setSelectedNotification(item);
-      return;
-    }
-
-    // Default: open the full detail sheet
-    setSelectedNotification(item);
-  };
-
-  /* ============================================================
-     FILTERING & GROUPING
-  ============================================================ */
-
-  const unreadCount = useMemo(
-    () => notifications.filter((n) => !n.seen).length,
-    [notifications]
+      try {
+        await Promise.all(
+          ids.map((id) =>
+            updateDoc(doc(db, "notifications", id), {
+              isRead: newStatus,
+              seen: newStatus,
+              read: newStatus,
+            }).catch(() => { }),
+          ),
+        );
+      } catch (err) {
+        console.warn("Failed to update notification read status:", err);
+      }
+    },
+    [],
   );
+
+  // Slide-to-action: Delete notification(s)
+  const handleDeleteNotification = useCallback(
+    async (target: AppNotification | AppNotification[]) => {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } catch { }
+      const items = Array.isArray(target) ? target : [target];
+      if (items.length === 0) return;
+
+      const ids = items.map((n) => n.id);
+      setNotifications((prev) => prev.filter((n) => !ids.includes(n.id)));
+
+      try {
+        await Promise.all(
+          ids.map((id) =>
+            deleteDoc(doc(db, "notifications", id)).catch(() => { }),
+          ),
+        );
+      } catch (err) {
+        console.warn("Failed to delete notification(s):", err);
+      }
+    },
+    [],
+  );
+
+  const handleNotificationPress = useCallback(
+    (item: AppNotification) => {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch { }
+      markAsRead(item);
+
+      const currentUid = auth.currentUser?.uid || currentUser?.uid;
+
+      // 1. If pending friend request, inline buttons are used (Accept / Decline)
+      if (item.type === "friend_request" && item.status !== "accepted") {
+        return;
+      }
+
+      // 1.5. If expandable detail notification (Feedback or Accepted info), do not navigate away
+      if (isExpandableDetailNotification(item)) {
+        return;
+      }
+
+      // 2. High-precision destination resolver (uses real Firestore groups and chats data)
+      const destination = resolveNotificationDestination(
+        item,
+        currentUid,
+        chatsRef.current,
+        groupsRef.current,
+      );
+      if (destination && destination.path) {
+        router.push(destination.path as any);
+        return;
+      }
+
+      // 3. Fallback: Trip navigation
+      if (item.tripId) {
+        router.push(`/trips/${item.tripId}` as any);
+        return;
+      }
+
+      // 4. Fallback: 1-on-1 Chat with friend
+      const friendId = getTargetFriendId(item, currentUid);
+      if (friendId && friendId !== currentUid) {
+        router.push(`/chat/${friendId}` as any);
+        return;
+      }
+
+      // 5. Fallback: Generic route
+      if (
+        item.route &&
+        typeof item.route === "string" &&
+        item.route !== "/notifications"
+      ) {
+        router.push(item.route as any);
+        return;
+      }
+    },
+    [router, markAsRead, currentUser?.uid],
+  );
+
+  // 6. Inline Friend Request Accept / Decline Handlers (Optimistic + Firestore)
+  const handleAcceptFriendRequest = useCallback(
+    async (item: AppNotification) => {
+      const currentUid = auth.currentUser?.uid;
+      const targetSenderId = item.senderId;
+      if (!currentUid || !targetSenderId) return;
+
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } catch { }
+
+      // Instant local optimistic UI update
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.id === item.id
+            ? {
+              ...n,
+              status: "accepted",
+              isRead: true,
+              seen: true,
+              read: true,
+              content: "You are now friends! 🎉",
+              message: "You are now friends! 🎉",
+              body: "You are now friends! 🎉",
+            }
+            : n,
+        ),
+      );
+
+      try {
+        await updateDoc(doc(db, "notifications", item.id), {
+          status: "accepted",
+          isRead: true,
+          seen: true,
+          read: true,
+          content: "You are now friends! 🎉",
+          message: "You are now friends! 🎉",
+          body: "You are now friends! 🎉",
+        });
+
+        await Promise.all([
+          updateDoc(doc(db, "users", currentUid), {
+            friends: arrayUnion(targetSenderId),
+          }),
+          updateDoc(doc(db, "users", targetSenderId), {
+            friends: arrayUnion(currentUid),
+          }),
+        ]);
+
+        await setDoc(
+          doc(
+            db,
+            "notifications",
+            `${targetSenderId}_${currentUid}_friend_accepted_${Date.now()}`,
+          ),
+          {
+            type: "friend_accepted",
+            senderId: currentUid,
+            uid: targetSenderId,
+            recipientId: targetSenderId,
+            title: "Friend Request Accepted",
+            content: `${auth.currentUser?.displayName || "A user"} accepted your friend request.`,
+            message: `${auth.currentUser?.displayName || "A user"} accepted your friend request.`,
+            body: `${auth.currentUser?.displayName || "A user"} accepted your friend request.`,
+            pic: auth.currentUser?.photoURL || "",
+            senderAvatar: auth.currentUser?.photoURL || "",
+            isRead: false,
+            seen: false,
+            read: false,
+            timestamp: new Date(),
+            viaOneSignal: true,
+            pushSent: true,
+          },
+        );
+
+        sendFriendAcceptedNotification({
+          receiverId: targetSenderId,
+          senderId: currentUid,
+          senderName: auth.currentUser?.displayName || "A BunkMate",
+          senderAvatar: auth.currentUser?.photoURL || "",
+        }).catch((err) =>
+          console.warn(
+            "[notifications] sendFriendAcceptedNotification error:",
+            err,
+          ),
+        );
+      } catch (err) {
+        console.error("Error accepting friend request:", err);
+        Alert.alert("Error", "Could not accept friend request.");
+      }
+    },
+    [],
+  );
+
+  const handleRejectFriendRequest = useCallback(
+    async (item: AppNotification) => {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch { }
+
+      // Instant local optimistic UI update
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.id === item.id
+            ? {
+              ...n,
+              status: "rejected",
+              isRead: true,
+              seen: true,
+              read: true,
+              content: "Friend request declined.",
+              message: "Friend request declined.",
+              body: "Friend request declined.",
+            }
+            : n,
+        ),
+      );
+
+      try {
+        await updateDoc(doc(db, "notifications", item.id), {
+          status: "rejected",
+          isRead: true,
+          seen: true,
+          read: true,
+          content: "Friend request declined.",
+          message: "Friend request declined.",
+          body: "Friend request declined.",
+        });
+      } catch (err) {
+        console.error("Error rejecting friend request:", err);
+      }
+    },
+    [],
+  );
+
+  const handleSelectCategory = useCallback((cat: FilterCategory) => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch { }
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setActiveCategory(cat);
+  }, []);
+
+  /* ============================================================
+     FILTERING & CHRONOLOGICAL TIMELINE GROUPING
+  ============================================================ */
 
   const filteredNotifications = useMemo(() => {
     let result = notifications;
 
-    // 1. Category Filter
-    if (activeCategory === "unread") {
-      result = result.filter((n) => !n.seen);
-    } else if (activeCategory === "messages") {
-      result = result.filter((n) => n.type === "chat" || n.type === "group_chat");
-    } else if (activeCategory === "calls") {
-      result = result.filter((n) => n.type === "call" || n.type === "missed_call");
-    } else if (activeCategory === "requests") {
-      result = result.filter((n) => n.type === "friend_request" || n.type === "friend_accepted");
-    } else if (activeCategory === "system") {
-      result = result.filter((n) =>
-        ["system", "feedback", "like", "trip"].includes(n.type || "")
+    if (activeCategory === "unreads") {
+      result = result.filter((n) => !n.isRead && !n.seen && !n.read);
+    } else if (activeCategory === "chat") {
+      result = result.filter(
+        (n) =>
+          !isGroupNotification(n) &&
+          !isFeedbackOrGeneralNotification(n) &&
+          (n.type === "chat" ||
+            (!n.groupId &&
+              (n.chatId ||
+                (n.senderId &&
+                  n.type !== "call" &&
+                  n.type !== "missed_call" &&
+                  n.type !== "friend_request" &&
+                  n.type !== "friend_accepted" &&
+                  n.type !== "trip" &&
+                  n.type !== "like")))),
       );
-    }
-
-    // 2. Search Query Filter
-    if (searchQuery.trim().length > 0) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter((n) => {
-        const title = (n.title || "").toLowerCase();
-        const content = (n.content || n.message || "").toLowerCase();
-        const sender = (n.senderName || "").toLowerCase();
-        return title.includes(q) || content.includes(q) || sender.includes(q);
-      });
+    } else if (activeCategory === "group_chat") {
+      result = result.filter(isGroupNotification);
+    } else if (activeCategory === "calls") {
+      result = result.filter(
+        (n) =>
+          n.type === "call" ||
+          n.type === "missed_call" ||
+          Boolean(n.callId) ||
+          Boolean(n.callType),
+      );
+    } else if (activeCategory === "feedback") {
+      result = result.filter(isFeedbackOrGeneralNotification);
     }
 
     return result;
-  }, [notifications, activeCategory, searchQuery]);
+  }, [notifications, activeCategory]);
 
-  // Group by Date sections ("Today", "Yesterday", "This Week", "Earlier")
-  const groupedSections = useMemo(() => {
-    const sections: { title: string; data: NotificationItem[] }[] = [];
-    const sectionMap = new Map<string, NotificationItem[]>();
-
-    const order = ["Today", "Yesterday", "This Week", "Earlier"];
-    order.forEach((sec) => sectionMap.set(sec, []));
+  const groupedDateSections = useMemo(() => {
+    const sectionMap = new Map<
+      string,
+      { title: string; sortTimestamp: number; items: AppNotification[] }
+    >();
 
     filteredNotifications.forEach((item) => {
-      const sec = getDateSection(item.timestamp);
-      if (!sectionMap.has(sec)) sectionMap.set(sec, []);
-      sectionMap.get(sec)!.push(item);
-    });
-
-    order.forEach((title) => {
-      const items = sectionMap.get(title) || [];
-      if (items.length > 0) {
-        sections.push({ title, data: items });
+      const sec = getDateSectionInfo(item.timestamp);
+      if (!sectionMap.has(sec.key)) {
+        sectionMap.set(sec.key, {
+          title: sec.title,
+          sortTimestamp: sec.sortTimestamp,
+          items: [],
+        });
       }
+      sectionMap.get(sec.key)!.items.push(item);
     });
 
-    return sections;
+    const sortedSections: DateSectionGroup[] = [];
+
+    sectionMap.forEach((val, key) => {
+      const stackGroups: NotificationStackGroup[] = [];
+      const groupMap = new Map<string, AppNotification[]>();
+      const groupCategoryMap = new Map<string, string>();
+
+      val.items.forEach((item) => {
+        let groupKey = item.stackId || `single_${item.id}`;
+        let catLabel = "Alerts";
+
+        const grpId = extractGroupId(item);
+        const isGroup = isGroupNotification(item);
+
+        if (!item.stackId) {
+          if (isFeedbackOrGeneralNotification(item)) {
+            // General / Feedback / System tickets: single expandable detail item per notification
+            groupKey = `feedback_${item.id}`;
+            catLabel = "Feedback";
+          } else if (isAcceptedNotification(item)) {
+            // Accepted info: single expandable detail item per notification
+            groupKey = `accepted_${item.id}`;
+            catLabel = "Accepted";
+          } else if (
+            item.type === "call" ||
+            item.type === "missed_call" ||
+            item.callId
+          ) {
+            const sender = grpId
+              ? `group_${grpId}`
+              : item.senderId || item.senderName || item.title || "calls";
+            groupKey = `calls_${sender}`;
+            catLabel = "Calls";
+          } else if (isGroup || grpId) {
+            const grp = grpId || item.groupName || item.title || "group";
+            groupKey = `group_${grp}`;
+            catLabel = "Group Chat";
+          } else if (
+            item.type === "chat" ||
+            item.chatId ||
+            (item.senderId &&
+              item.type !== "friend_request" &&
+              item.type !== "friend_accepted" &&
+              item.type !== "trip" &&
+              item.type !== "like")
+          ) {
+            const sender =
+              item.chatId ||
+              item.senderId ||
+              item.senderName ||
+              item.title ||
+              "chat";
+            groupKey = `chat_${sender}`;
+            catLabel = "Chat";
+          }
+        }
+
+        if (!groupMap.has(groupKey)) {
+          groupMap.set(groupKey, []);
+          groupCategoryMap.set(groupKey, catLabel);
+        }
+        groupMap.get(groupKey)!.push(item);
+      });
+
+      const seenKeys = new Set<string>();
+      val.items.forEach((item) => {
+        let groupKey = item.stackId || `single_${item.id}`;
+        const grpId = extractGroupId(item);
+        const isGroup = isGroupNotification(item);
+
+        if (!item.stackId) {
+          if (isFeedbackOrGeneralNotification(item)) {
+            groupKey = `feedback_${item.id}`;
+          } else if (isAcceptedNotification(item)) {
+            groupKey = `accepted_${item.id}`;
+          } else if (
+            item.type === "call" ||
+            item.type === "missed_call" ||
+            item.callId
+          ) {
+            const sender = grpId
+              ? `group_${grpId}`
+              : item.senderId || item.senderName || item.title || "calls";
+            groupKey = `calls_${sender}`;
+          } else if (isGroup || grpId) {
+            const grp = grpId || item.groupName || item.title || "group";
+            groupKey = `group_${grp}`;
+          } else if (
+            item.type === "chat" ||
+            item.chatId ||
+            (item.senderId &&
+              item.type !== "friend_request" &&
+              item.type !== "friend_accepted" &&
+              item.type !== "trip" &&
+              item.type !== "like")
+          ) {
+            const sender =
+              item.chatId ||
+              item.senderId ||
+              item.senderName ||
+              item.title ||
+              "chat";
+            groupKey = `chat_${sender}`;
+          }
+        }
+
+        if (!seenKeys.has(groupKey)) {
+          seenKeys.add(groupKey);
+          const items = groupMap.get(groupKey) || [item];
+          // Strictly unique & stable stack identifier per date section and group
+          const uniqueStackKey = `${key}_${groupKey}`;
+
+          stackGroups.push({
+            groupKey: uniqueStackKey,
+            categoryLabel: groupCategoryMap.get(groupKey) || "Alerts",
+            masterItem: items[0],
+            items,
+          });
+        }
+      });
+
+      sortedSections.push({
+        key,
+        title: val.title,
+        sortTimestamp: val.sortTimestamp,
+        stackGroups,
+      });
+    });
+
+    sortedSections.sort((a, b) => b.sortTimestamp - a.sortTimestamp);
+    return sortedSections;
   }, [filteredNotifications]);
 
   /* ============================================================
      RENDER
   ============================================================ */
 
-  /* ============================================================
-     RENDER
-  ============================================================ */
-
-  const activeAccent = accentColor || (isDark ? "#ffffff" : "#111827");
-  const onAccentColor = onAccentTextColor || (isDark ? "#000000" : "#ffffff");
-
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: themeColors.background }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={themeColors.background} />
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.bg }]}
+      edges={["top", "left", "right"]}
+    >
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask matching Settings */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        height={topInset + (Platform.OS === "android" ? 6 : 4) + 88 + 128 + 42}
+        zIndex={15}
+      />
 
-      {/* 1. TOP HEADER BAR */}
-      <View style={[styles.header, { borderBottomColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.06)" }]}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity
-            onPress={() => {
-              haptic("light");
-              router.back();
-            }}
-            style={[
-              styles.circleIconButton,
-              {
-                backgroundColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
-                borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
-              },
-            ]}
-            activeOpacity={0.7}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Feather name="arrow-left" size={20} color={themeColors.text} />
-          </TouchableOpacity>
+      {/* 1. TOP APP BAR — Exact circular back button matching Settings page */}
+      <View style={[styles.header, { zIndex: 20 }]}>
+        <Pressable
+          onPress={() => {
+            try {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            } catch { }
+            if (router.canGoBack()) router.back();
+            else router.replace("/(tabs)/chats" as any);
+          }}
+          style={({ pressed }) => [
+            styles.modernHeaderBtn,
+            {
+              backgroundColor: isDark ? "#161616" : "#e6e6e6",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
+            pressed && styles.pressed,
+          ]}
+          hitSlop={8}
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="arrow-back" size={21} color={colors.textPrimary} />
+        </Pressable>
 
-          <View style={styles.headerTitleRow}>
-            <Text style={[styles.headerTitle, { color: themeColors.text, fontSize: scaleFont(20) }]}>{t("notifications", "Notifications")}</Text>
-            {unreadCount > 0 && (
-              <View style={[styles.unreadCountPill, { backgroundColor: activeAccent }]}>
-                <Text style={[styles.unreadCountText, { color: onAccentColor, fontSize: scaleFont(11) }]}>{unreadCount}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        <View style={styles.headerRight}>
-          <TouchableOpacity
-            onPress={() => {
-              haptic("light");
-              setSearchOpen(!searchOpen);
-              if (searchOpen) setSearchQuery("");
-            }}
-            style={[
-              styles.circleIconButton,
-              {
-                backgroundColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
-                borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
-              },
-              searchOpen && {
-                backgroundColor: isDark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.08)",
-                borderColor: activeAccent,
-              },
-            ]}
-            activeOpacity={0.7}
-          >
-            <Ionicons name={searchOpen ? "close" : "search"} size={18} color={themeColors.text} />
-          </TouchableOpacity>
-
-          {unreadCount > 0 && (
-            <TouchableOpacity
-              onPress={markAllAsRead}
-              style={[
-                styles.actionPillButton,
-                {
-                  borderColor: isDark ? "rgba(255, 255, 255, 0.25)" : "rgba(0, 0, 0, 0.15)",
-                  backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
-                },
-              ]}
-              activeOpacity={0.75}
-            >
-              <Ionicons name="checkmark-done" size={15} color={activeAccent} style={{ marginRight: 4 }} />
-              <Text style={[styles.actionPillText, { color: themeColors.text, fontSize: scaleFont(12) }]}>{t("read_all", "Read All")}</Text>
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity
-            onPress={() => {
-              haptic("light");
-              setShowOptionsModal(true);
-            }}
-            style={[
-              styles.circleIconButton,
-              {
-                backgroundColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
-                borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)",
-              },
-            ]}
-            activeOpacity={0.7}
-          >
-            <Feather name="more-horizontal" size={20} color={themeColors.text} />
-          </TouchableOpacity>
-        </View>
+        <Text
+          style={[
+            styles.headerTitle,
+            { color: colors.textPrimary, fontSize: scaleFont(22) },
+          ]}
+          numberOfLines={1}
+        >
+          {t("notifications", "Notifications")}
+        </Text>
       </View>
 
-      {/* 2. EXPANDABLE SEARCH BAR */}
-      {searchOpen && (
-        <View style={styles.searchBarWrapper}>
-          <View
-            style={[
-              styles.searchBarInner,
-              {
-                backgroundColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
-                borderColor: isDark ? "rgba(255, 255, 255, 0.09)" : "rgba(0, 0, 0, 0.08)",
-              },
-            ]}
-          >
-            <Ionicons name="search" size={16} color={themeColors.textSecondary} style={{ marginRight: 8 }} />
-            <TextInput
-              placeholder={t("search_notifications", "Search notifications or senders...")}
-              placeholderTextColor={themeColors.textSecondary}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              style={[styles.searchInput, { color: themeColors.text, fontSize: scaleFont(14) }]}
-              autoFocus
-              autoCapitalize="none"
-              clearButtonMode="while-editing"
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchQuery("")} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Ionicons name="close-circle" size={16} color={themeColors.textSecondary} />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      )}
-
-      {/* 3. CATEGORY PILL FILTER CHIPS */}
+      {/* 2. FILTER PILLS (Horizontal Scrollable - Screenshot 3) */}
       <View style={styles.filtersWrapper}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filtersScrollContent}
         >
-          <CategoryChip
-            label={t("all", "All")}
-            icon="layers-outline"
-            count={notifications.length}
+          <FilterPill
+            label="All"
             active={activeCategory === "all"}
-            accent={activeAccent}
-            onAccentTextColor={onAccentColor}
             isDark={isDark}
-            themeColors={themeColors}
             scaleFont={scaleFont}
-            onPress={() => {
-              haptic("light");
-              setActiveCategory("all");
-            }}
+            onPress={() => handleSelectCategory("all")}
           />
-          <CategoryChip
-            label={t("unread", "Unread")}
-            icon="ellipse"
-            count={unreadCount}
-            active={activeCategory === "unread"}
-            accent={activeAccent}
-            onAccentTextColor={onAccentColor}
+          <FilterPill
+            label="Unreads"
+            active={activeCategory === "unreads"}
             isDark={isDark}
-            themeColors={themeColors}
             scaleFont={scaleFont}
-            highlight={unreadCount > 0}
-            onPress={() => {
-              haptic("light");
-              setActiveCategory("unread");
-            }}
+            onPress={() => handleSelectCategory("unreads")}
           />
-          <CategoryChip
-            label={t("messages", "Messages")}
-            icon="chatbubbles-outline"
-            active={activeCategory === "messages"}
-            accent={activeAccent}
-            onAccentTextColor={onAccentColor}
+          <FilterPill
+            label="Chat"
+            active={activeCategory === "chat"}
             isDark={isDark}
-            themeColors={themeColors}
             scaleFont={scaleFont}
-            onPress={() => {
-              haptic("light");
-              setActiveCategory("messages");
-            }}
+            onPress={() => handleSelectCategory("chat")}
           />
-          <CategoryChip
-            label={t("calls", "Calls")}
-            icon="call-outline"
+          <FilterPill
+            label="Group Chat"
+            active={activeCategory === "group_chat"}
+            isDark={isDark}
+            scaleFont={scaleFont}
+            onPress={() => handleSelectCategory("group_chat")}
+          />
+          <FilterPill
+            label="Calls"
             active={activeCategory === "calls"}
-            accent={activeAccent}
-            onAccentTextColor={onAccentColor}
             isDark={isDark}
-            themeColors={themeColors}
             scaleFont={scaleFont}
-            onPress={() => {
-              haptic("light");
-              setActiveCategory("calls");
-            }}
+            onPress={() => handleSelectCategory("calls")}
           />
-          <CategoryChip
-            label={t("requests", "Requests")}
-            icon="person-add-outline"
-            active={activeCategory === "requests"}
-            accent={activeAccent}
-            onAccentTextColor={onAccentColor}
+          <FilterPill
+            label="Feedback"
+            active={activeCategory === "feedback"}
             isDark={isDark}
-            themeColors={themeColors}
             scaleFont={scaleFont}
-            onPress={() => {
-              haptic("light");
-              setActiveCategory("requests");
-            }}
-          />
-          <CategoryChip
-            label={t("system", "System")}
-            icon="notifications-outline"
-            active={activeCategory === "system"}
-            accent={activeAccent}
-            onAccentTextColor={onAccentColor}
-            isDark={isDark}
-            themeColors={themeColors}
-            scaleFont={scaleFont}
-            onPress={() => {
-              haptic("light");
-              setActiveCategory("system");
-            }}
+            onPress={() => handleSelectCategory("feedback")}
           />
         </ScrollView>
       </View>
 
-      {/* 4. UNREAD STATUS QUICK BANNER */}
-      {unreadCount > 0 && activeCategory !== "unread" && (
-        <View style={styles.unreadBannerContainer}>
-          <View
-            style={[
-              styles.unreadBanner,
-              {
-                backgroundColor: isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.03)",
-                borderColor: isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)",
-              },
-            ]}
-          >
-            <View style={styles.unreadBannerLeft}>
-              <View style={[styles.pulseDot, { backgroundColor: activeAccent }]} />
-              <Text style={[styles.unreadBannerText, { color: themeColors.textSecondary, fontSize: scaleFont(12.5) }]}>
-                <Text style={{ fontWeight: "800", color: themeColors.text }}>{unreadCount} {t("unread", "unread")}</Text> {t("notifications", "notifications")}
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={markAllAsRead}
-              activeOpacity={0.7}
-              style={[styles.bannerActionBtn, { backgroundColor: activeAccent }]}
-            >
-              <Text style={[styles.bannerActionText, { color: onAccentColor, fontSize: scaleFont(11.5) }]}>{t("mark_all_read", "Mark all read")}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* 5. NOTIFICATION LIST CONTENT */}
+      {/* 3. MAIN NOTIFICATION SCROLLVIEW */}
       {loading ? (
         <View style={styles.centerLoading}>
-          <ActivityIndicator size="large" color={activeAccent} />
-          <Text style={[styles.loadingSubtitle, { color: themeColors.textSecondary, fontSize: scaleFont(13) }]}>{t("fetching_alerts", "Fetching your alerts...")}</Text>
+          <ActivityIndicator size="large" color={isDark ? "#FFFFFF" : "#000000"} />
         </View>
       ) : filteredNotifications.length === 0 ? (
         <ScrollView
           contentContainerStyle={styles.emptyContainer}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={activeAccent} />}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={isDark ? "#FFFFFF" : "#000000"}
+            // progressViewOffset={200}
+            />
+          }
         >
-          <View style={[styles.emptyGlowCircle, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.04)", borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.08)" }]}>
-            <Ionicons name="notifications-off-outline" size={38} color={themeColors.textSecondary} />
+          <View
+            style={[
+              styles.emptyGlowCircle,
+              {
+                backgroundColor: isDark
+                  ? "rgba(255, 255, 255, 0.04)"
+                  : "rgba(0, 0, 0, 0.04)",
+                boxShadow: isDark
+                  ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                  : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              },
+            ]}
+          >
+            <Ionicons
+              name="notifications-off-outline"
+              size={38}
+              color={isDark ? "#7E8590" : "#6E7682"}
+            />
           </View>
-          <Text style={[styles.emptyTitle, { color: themeColors.text, fontSize: scaleFont(18) }]}>
-            {searchQuery
-              ? t("no_matching_alerts", "No matching alerts")
-              : activeCategory === "unread"
-              ? t("all_caught_up", "You're all caught up! ✨")
-              : t("no_notifications", "No notifications yet")}
+          <Text
+            style={[
+              styles.emptyTitle,
+              {
+                fontSize: scaleFont(18),
+                color: isDark ? "#FFFFFF" : "#11141A",
+              },
+            ]}
+          >
+            {activeCategory === "unreads"
+              ? "You're all caught up! ✨"
+              : "No notifications yet"}
           </Text>
-          <Text style={[styles.emptyDescription, { color: themeColors.textSecondary, fontSize: scaleFont(13) }]}>
-            {searchQuery
-              ? `${t("no_matching_alerts", "No alerts found for")} "${searchQuery}".`
-              : activeCategory === "unread"
-              ? t("zero_unread_alerts", "Zero unread alerts remaining. New messages, calls, and invites will appear here.")
-              : t("empty_notifications_desc", "When your bunkmates message, call, or invite you to trips, they'll show up right here.")}
+          <Text
+            style={[
+              styles.emptyDescription,
+              {
+                fontSize: scaleFont(13),
+                color: isDark ? "#7E8590" : "#6B7280",
+              },
+            ]}
+          >
+            {activeCategory === "unreads"
+              ? "Zero unread alerts remaining."
+              : "When your friends message, call, or invite you, they'll show up right here."}
           </Text>
-
-          {activeCategory !== "all" && (
-            <TouchableOpacity
-              style={[styles.emptyResetBtn, { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" }]}
-              onPress={() => {
-                haptic("light");
-                setActiveCategory("all");
-                setSearchQuery("");
-              }}
-            >
-              <Text style={[styles.emptyResetText, { color: themeColors.text, fontSize: scaleFont(12.5) }]}>{t("view_all_notifications", "View All Notifications")}</Text>
-            </TouchableOpacity>
-          )}
         </ScrollView>
       ) : (
         <ScrollView
+          style={styles.notificationListOverlay}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews={false}
+          scrollEventThrottle={16}
           contentContainerStyle={styles.listScrollContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={activeAccent} />}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={isDark ? "#FFFFFF" : "#000000"}
+              progressViewOffset={125}
+            />
+          }
         >
-          {groupedSections.map((section) => (
-            <View key={section.title} style={styles.sectionBlock}>
-              <View style={styles.sectionHeaderRow}>
-                <Text style={[styles.sectionTitle, { color: themeColors.textSecondary, fontSize: scaleFont(11) }]}>{section.title.toUpperCase()}</Text>
-                <View style={[styles.sectionDivider, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.05)" }]} />
-              </View>
+          {groupedDateSections.map((section) => (
+            <View key={section.key} style={styles.sectionBlock}>
+              {/* Chronological Timeline Header: e.g. "YESTERDAY", "THURSDAY", "SUNDAY" */}
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  {
+                    fontSize: scaleFont(12),
+                    color: isDark ? "#7E8590" : "#6E7682",
+                  },
+                ]}
+              >
+                {section.title}
+              </Text>
 
-              {section.data.map((item) => (
-                <NotificationCard
-                  key={item.id}
-                  item={item}
-                  accent={activeAccent}
-                  onAccentTextColor={onAccentColor}
-                  isDark={isDark}
-                  themeColors={themeColors}
-                  scaleFont={scaleFont}
-                  onPress={() => handleNotificationPress(item)}
-                  onToggleRead={() => toggleReadStatus(item)}
-                  onDelete={() => deleteSingleNotification(item.id)}
-                  onAccept={() => handleAcceptFriendRequest(item)}
-                  onReject={() => handleRejectFriendRequest(item)}
-                />
-              ))}
+              {section.stackGroups.map((group) => {
+                const isExpanded = expandedStackId === group.groupKey;
+
+                return (
+                  <NotificationStackGroupItem
+                    key={group.groupKey}
+                    group={group}
+                    isExpanded={isExpanded}
+                    isDark={isDark}
+                    scaleFont={scaleFont}
+                    accentColor={accentColor}
+                    onToggleStack={toggleStack}
+                    onPressItem={handleNotificationPress}
+                    onAccept={handleAcceptFriendRequest}
+                    onReject={handleRejectFriendRequest}
+                    onToggleRead={handleToggleRead}
+                    onDelete={handleDeleteNotification}
+                  />
+                );
+              })}
             </View>
           ))}
         </ScrollView>
       )}
-
-      {/* 6. DETAIL BOTTOM SHEET DRAWER */}
-      <SwipeableDrawer
-        visible={Boolean(selectedNotification)}
-        onClose={() => setSelectedNotification(null)}
-        sheetStyle={[styles.detailSheetContainer, { paddingHorizontal: 0, paddingBottom: 0, backgroundColor: themeColors.card, borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)" }]}
-      >
-        {selectedNotification && (
-          <NotificationDetailSheet
-            item={selectedNotification}
-            accent={activeAccent}
-            onAccentTextColor={onAccentColor}
-            isDark={isDark}
-            themeColors={themeColors}
-            scaleFont={scaleFont}
-            onClose={() => setSelectedNotification(null)}
-            onAccept={() => handleAcceptFriendRequest(selectedNotification)}
-            onReject={() => handleRejectFriendRequest(selectedNotification)}
-            onDelete={() => deleteSingleNotification(selectedNotification.id)}
-            onToggleRead={() => toggleReadStatus(selectedNotification)}
-            onOpenTarget={() => {
-              const item = selectedNotification;
-              setSelectedNotification(null);
-              if (item.type === "chat" && item.senderId) {
-                router.push({
-                  pathname: `/chat/${item.senderId}` as any,
-                  params: {
-                    displayName: item.title || item.senderName || "Chat",
-                    photoURL: item.pic || "",
-                  },
-                });
-              } else if (item.type === "group_chat" && item.groupId) {
-                router.push({
-                  pathname: `/chat/${item.groupId}` as any,
-                  params: { displayName: item.title || item.groupName || "Group Chat", isGroup: "true" },
-                });
-              } else if (item.tripId) {
-                router.push(`/trips/${item.tripId}` as any);
-              }
-            }}
-          />
-        )}
-      </SwipeableDrawer>
-
-      {/* 7. MORE OPTIONS / MANAGEMENT DRAWER */}
-      <SwipeableDrawer
-        visible={showOptionsModal}
-        onClose={() => setShowOptionsModal(false)}
-        sheetStyle={[styles.optionsPopup, { backgroundColor: themeColors.card, borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)" }]}
-      >
-        <Text style={[styles.optionsTitle, { color: themeColors.text, fontSize: scaleFont(16) }]}>{t("notification_options", "Notification Options")}</Text>
-
-        <TouchableOpacity
-          style={[styles.optionRow, { borderBottomColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.05)" }]}
-          onPress={() => {
-            setShowOptionsModal(false);
-            markAllAsRead();
-          }}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.optionIconBox, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.06)" }]}>
-            <Ionicons name="checkmark-done" size={20} color={activeAccent} />
-          </View>
-          <View style={styles.optionTextBox}>
-            <Text style={[styles.optionRowTitle, { color: themeColors.text, fontSize: scaleFont(14.5) }]}>{t("mark_all_read", "Mark All as Read")}</Text>
-            <Text style={[styles.optionRowSubtitle, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>{t("mark_all_read_desc", "Clear all unread notification badges")}</Text>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.optionRow, { borderBottomColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.05)" }]}
-          onPress={() => {
-            setShowOptionsModal(false);
-            clearAllReadNotifications();
-          }}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.optionIconBox, { backgroundColor: "rgba(239, 68, 68, 0.15)" }]}>
-            <Ionicons name="trash-outline" size={20} color="#ef4444" />
-          </View>
-          <View style={styles.optionTextBox}>
-            <Text style={[styles.optionRowTitle, { color: themeColors.text, fontSize: scaleFont(14.5) }]}>{t("clear_read_alerts", "Clear Read Alerts")}</Text>
-            <Text style={[styles.optionRowSubtitle, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>{t("clear_read_alerts_desc", "Remove all opened notifications from list")}</Text>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.optionRow, { borderBottomColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.05)" }]}
-          onPress={() => {
-            setShowOptionsModal(false);
-            router.push("/settings/notification" as any);
-          }}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.optionIconBox, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)" }]}>
-            <Ionicons name="settings-outline" size={20} color={themeColors.text} />
-          </View>
-          <View style={styles.optionTextBox}>
-            <Text style={[styles.optionRowTitle, { color: themeColors.text, fontSize: scaleFont(14.5) }]}>{t("alert_sound_settings", "Alert & Sound Settings")}</Text>
-            <Text style={[styles.optionRowSubtitle, { color: themeColors.textSecondary, fontSize: scaleFont(12) }]}>{t("alert_sound_settings_desc", "Configure app ringtone, vibration, and push")}</Text>
-          </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.optionsCloseBtn, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.07)" : "rgba(0, 0, 0, 0.06)" }]}
-          onPress={() => setShowOptionsModal(false)}
-        >
-          <Text style={[styles.optionsCloseText, { color: themeColors.text, fontSize: scaleFont(13.5) }]}>{t("cancel", "Cancel")}</Text>
-        </TouchableOpacity>
-      </SwipeableDrawer>
     </SafeAreaView>
   );
 }
 
 /* ============================================================
-   COMPONENT: CATEGORY CHIP
+   COMPONENT: FILTER PILL (Screenshot 3)
 ============================================================ */
 
-function CategoryChip({
+const FilterPill = React.memo(function FilterPill({
   label,
-  icon,
-  count,
   active,
-  accent,
-  onAccentTextColor,
   isDark,
-  themeColors,
   scaleFont,
-  highlight,
   onPress,
 }: {
   label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  count?: number;
   active: boolean;
-  accent: string;
-  onAccentTextColor: string;
   isDark: boolean;
-  themeColors: any;
   scaleFont: (size: number) => number;
-  highlight?: boolean;
   onPress: () => void;
 }) {
+  const pressScale = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    Animated.spring(pressScale, {
+      toValue: 0.94,
+      useNativeDriver: true,
+      stiffness: 450,
+      damping: 25,
+      mass: 0.7,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(pressScale, {
+      toValue: 1,
+      useNativeDriver: true,
+      stiffness: 350,
+      damping: 20,
+      mass: 0.7,
+    }).start();
+  };
+
   return (
     <Pressable
       onPress={onPress}
-      style={[
-        styles.categoryChip,
-        {
-          backgroundColor: active
-            ? accent
-            : isDark
-            ? "rgba(255, 255, 255, 0.05)"
-            : "rgba(0, 0, 0, 0.04)",
-          borderColor: active
-            ? accent
-            : isDark
-            ? "rgba(255, 255, 255, 0.08)"
-            : "rgba(0, 0, 0, 0.08)",
-        },
-      ]}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
     >
-      <Ionicons
-        name={icon}
-        size={13}
-        color={active ? onAccentTextColor : highlight ? accent : themeColors.textSecondary}
-        style={{ marginRight: 6 }}
-      />
-      <Text
+      <Animated.View
         style={[
-          styles.categoryChipText,
+          styles.filterPill,
           {
-            color: active ? onAccentTextColor : themeColors.textSecondary,
-            fontSize: scaleFont(12),
+            backgroundColor: active
+              ? (isDark ? "#FFFFFF" : "#000000")
+              : (isDark ? "#161616" : "#e6e6e6"),
+            boxShadow: isDark
+              ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+              : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+            transform: [{ scale: pressScale }],
           },
-          active && { fontWeight: "800", color: onAccentTextColor },
         ]}
       >
-        {label}
-      </Text>
-      {typeof count === "number" && count > 0 && (
-        <View
+        <Text
           style={[
-            styles.chipBadge,
+            styles.filterPillText,
             {
-              backgroundColor: active
-                ? onAccentTextColor === "#FFFFFF"
-                  ? "rgba(0, 0, 0, 0.25)"
-                  : "rgba(0, 0, 0, 0.12)"
-                : isDark
-                ? "rgba(255, 255, 255, 0.12)"
-                : "rgba(0, 0, 0, 0.07)",
+              fontSize: scaleFont(13),
+              color: active
+                ? (isDark ? "#000000" : "#FFFFFF")
+                : (isDark ? "#F1F1F1" : "#11141A"),
+              fontWeight: active ? "700" : "600",
             },
           ]}
         >
-          <Text
-            style={[
-              styles.chipBadgeText,
-              {
-                color: active ? onAccentTextColor : themeColors.text,
-                fontSize: scaleFont(10),
-              },
-            ]}
-          >
-            {count > 99 ? "99+" : count}
-          </Text>
-        </View>
-      )}
+          {label}
+        </Text>
+      </Animated.View>
     </Pressable>
   );
-}
+});
 
 /* ============================================================
-   COMPONENT: NOTIFICATION CARD
+   COMPONENT: NOTIFICATION STACK GROUP ITEM (Layered Deck Animation)
 ============================================================ */
 
-function NotificationCard({
+const NotificationStackGroupItem = React.memo(
+  function NotificationStackGroupItem({
+    group,
+    isExpanded,
+    isDark,
+    scaleFont,
+    accentColor,
+    onToggleStack,
+    onPressItem,
+    onAccept,
+    onReject,
+    onToggleRead,
+    onDelete,
+  }: {
+    group: NotificationStackGroup;
+    isExpanded: boolean;
+    isDark: boolean;
+    scaleFont: (size: number) => number;
+    accentColor?: string;
+    onToggleStack: (stackId: string) => void;
+    onPressItem: (item: AppNotification) => void;
+    onAccept: (item: AppNotification) => void;
+    onReject: (item: AppNotification) => void;
+    onToggleRead: (items: AppNotification | AppNotification[]) => void;
+    onDelete: (items: AppNotification | AppNotification[]) => void;
+  }) {
+    const isStacked = group.items.length > 1;
+    const isDetailItem =
+      !isStacked && isExpandableDetailNotification(group.masterItem);
+    const isExpandable = isStacked || isDetailItem;
+
+    const INITIAL_VISIBLE_COUNT = 10;
+    const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_COUNT);
+
+    const heightAnim = useRef(new Animated.Value(isExpanded ? 1 : 0)).current;
+    const cardsAnim = useRef(new Animated.Value(isExpanded ? 1 : 0)).current;
+    const prevExpandedRef = useRef(isExpanded);
+
+    const count = group.items.length;
+
+    // Symmetrical duration for both unstack and stack (relaxed for smoother visual accordion cascade)
+    const animDuration = useMemo(() => {
+      const activeCount = Math.min(count, INITIAL_VISIBLE_COUNT);
+      if (activeCount <= 2) return 380;
+      if (activeCount <= 4) return 460;
+      if (activeCount <= 7) return 540;
+      return 620;
+    }, [count]);
+
+    const renderedItems = useMemo(() => {
+      if (isDetailItem) return group.items.slice(0, 1);
+      return group.items.slice(0, visibleLimit);
+    }, [isDetailItem, group.items, visibleLimit]);
+
+    const hasMore = !isDetailItem && group.items.length > renderedItems.length;
+    const remainingCount = group.items.length - renderedItems.length;
+
+    // Stable pre-computed content height (avoids mid-animation re-renders and layout thrashing for 30+/1000+ items)
+    const contentHeight = useMemo(() => {
+      if (isDetailItem) return 110;
+      return 38 + renderedItems.length * 74 + (hasMore ? 54 : 0);
+    }, [isDetailItem, renderedItems.length, hasMore]);
+
+
+    const runExpandAnimation = useCallback(() => {
+      Animated.parallel([
+        Animated.timing(heightAnim, {
+          toValue: 1,
+          duration: animDuration,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: false,
+        }),
+        Animated.timing(cardsAnim, {
+          toValue: 1,
+          duration: animDuration,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }, [heightAnim, cardsAnim, animDuration]);
+
+    const runCollapseAnimation = useCallback(() => {
+      Animated.parallel([
+        Animated.timing(heightAnim, {
+          toValue: 0,
+          duration: animDuration,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: false,
+        }),
+        Animated.timing(cardsAnim, {
+          toValue: 0,
+          duration: animDuration,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) {
+          setVisibleLimit(INITIAL_VISIBLE_COUNT);
+        }
+      });
+    }, [heightAnim, cardsAnim, animDuration]);
+
+    const handleToggle = useCallback(() => {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch { }
+
+      try {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      } catch { }
+
+      const willExpand = !isExpanded;
+      prevExpandedRef.current = willExpand;
+
+      if (isStacked) {
+        if (willExpand) {
+          runExpandAnimation();
+        } else {
+          runCollapseAnimation();
+        }
+      }
+
+      onToggleStack(group.groupKey);
+    }, [isExpanded, isStacked, runExpandAnimation, runCollapseAnimation, onToggleStack, group.groupKey]);
+
+useEffect(() => {
+  if (prevExpandedRef.current !== isExpanded) {
+    prevExpandedRef.current = isExpanded;
+    if (isExpanded) {
+      runExpandAnimation();
+    } else {
+      runCollapseAnimation();
+    }
+  }
+}, [isExpanded, runExpandAnimation, runCollapseAnimation]);
+
+const handlePressMaster = useCallback(() => {
+  onPressItem(group.masterItem);
+}, [onPressItem, group.masterItem]);
+
+const handlePressChild = useCallback(
+  (subItem: AppNotification) => {
+    if (isDetailItem) {
+      handleToggle();
+    } else {
+      const itemToRoute = { ...subItem };
+      // Deep inheritance from master item for rock-solid routing
+      if (!itemToRoute.groupId && group.masterItem?.groupId) {
+        itemToRoute.groupId = group.masterItem.groupId;
+      }
+      if (!itemToRoute.chatId && group.masterItem?.chatId) {
+        itemToRoute.chatId = group.masterItem.chatId;
+      }
+      if (!itemToRoute.senderId && group.masterItem?.senderId) {
+        itemToRoute.senderId = group.masterItem.senderId;
+      }
+      if (!itemToRoute.groupName && group.masterItem?.groupName) {
+        itemToRoute.groupName = group.masterItem.groupName;
+      }
+      if (!itemToRoute.route && group.masterItem?.route) {
+        itemToRoute.route = group.masterItem.route;
+      }
+      if (!itemToRoute.tripId && group.masterItem?.tripId) {
+        itemToRoute.tripId = group.masterItem.tripId;
+      }
+      if (
+        group.categoryLabel === "Group Chat" &&
+        !extractGroupId(itemToRoute)
+      ) {
+        const fallbackGrp =
+          extractGroupId(group.masterItem) ||
+          (group.groupKey
+            ? group.groupKey.split("_group_")[1] ||
+            group.groupKey.replace(/^.*?group_/, "")
+            : null);
+        if (fallbackGrp) {
+          itemToRoute.groupId = fallbackGrp;
+        }
+      }
+      onPressItem(itemToRoute);
+    }
+  },
+  [isDetailItem, handleToggle, onPressItem, group],
+);
+
+const handleAcceptMaster = useCallback(() => {
+  onAccept(group.masterItem);
+}, [onAccept, group.masterItem]);
+
+const handleRejectMaster = useCallback(() => {
+  onReject(group.masterItem);
+}, [onReject, group.masterItem]);
+
+return (
+  <View
+    style={[
+      styles.groupWrapper,
+      isStacked && !isExpanded && styles.groupWrapperStacked,
+    ]}
+  >
+    {/* 3D Layered Cards behind (Deck of Cards visual when collapsed, smooth fade when unstacking) */}
+    {isStacked && (
+      <>
+        {group.items.length >= 3 && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.stackedPeekLayer2,
+              {
+                backgroundColor: isDark ? "#131315" : "#DADAE0",
+                boxShadow: isDark
+                  ? undefined
+                  : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.05)",
+                opacity: cardsAnim.interpolate({
+                  inputRange: [0, 0.4, 1],
+                  outputRange: [1, 0, 0],
+                }),
+              },
+            ]}
+          />
+        )}
+
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.stackedPeekLayer1,
+            {
+              backgroundColor: isDark ? "#1B1B1D" : "#E5E5E8",
+              boxShadow: isDark
+                ? undefined
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.05)",
+              opacity: cardsAnim.interpolate({
+                inputRange: [0, 0.4, 1],
+                outputRange: [1, 0, 0],
+              }),
+            },
+          ]}
+        />
+      </>
+    )}
+
+    {/* Front / Master notification card: tapping ALWAYS toggles stack/unstack */}
+    <View style={styles.masterCardLayer}>
+      <NotificationMasterCard
+        item={group.masterItem}
+        stackCount={group.items.length}
+        categoryLabel={group.categoryLabel}
+        isExpanded={isExpanded}
+        isDark={isDark}
+        isDetailItem={isDetailItem}
+        expandAnim={cardsAnim}
+        scaleFont={scaleFont}
+        accentColor={accentColor}
+        onPress={() => {
+          if (isExpandable) {
+            handleToggle();
+          } else {
+            handlePressMaster();
+          }
+        }}
+        onToggleStack={handleToggle}
+        onAccept={handleAcceptMaster}
+        onReject={handleRejectMaster}
+        onToggleRead={() => onToggleRead(group.items)}
+        onDelete={() => onDelete(group.items)}
+      />
+    </View>
+
+    {/* INLINE CARD STACKING / ACCORDION CONTAINER */}
+    {isStacked && (
+      <Animated.View
+        pointerEvents={isExpanded ? "auto" : "none"}
+        style={[
+          styles.stackInsetContainer,
+          {
+            height: heightAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, contentHeight],
+            }),
+            overflow: "hidden",
+            marginTop: heightAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 8],
+            }),
+            marginBottom: heightAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 8],
+            }),
+            opacity: heightAnim.interpolate({
+              inputRange: [0, 0.12, 1],
+              outputRange: [0, 1, 1],
+            }),
+            borderLeftColor: isDark
+              ? "rgba(255, 255, 255, 0.12)"
+              : "rgba(0, 0, 0, 0.10)",
+          },
+        ]}
+      >
+        <View>
+          {/* Stack Header Row with animated slide/fade */}
+          <Animated.View
+            style={{
+              opacity: cardsAnim.interpolate({
+                inputRange: [0, 0.35, 1],
+                outputRange: [0, 1, 1],
+              }),
+              transform: [
+                {
+                  translateY: cardsAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-8, 0],
+                  }),
+                },
+              ],
+            }}
+          >
+            <View style={styles.stackHeaderRow}>
+              <Text
+                style={[
+                  styles.stackHeaderTitle,
+                  {
+                    fontSize: scaleFont(13),
+                    color: isDark ? "#FFFFFF" : "#11141A",
+                  },
+                ]}
+              >
+                {isDetailItem
+                  ? "1 Detail Item"
+                  : `${group.items.length} Stacked ${group.categoryLabel} Alerts`}
+              </Text>
+
+              <TouchableOpacity
+                onPress={handleToggle}
+                style={[
+                  styles.collapseButton,
+                  {
+                    backgroundColor: isDark ? "#1E1E22" : "#E6E6E6",
+                    boxShadow: isDark
+                      ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                      : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                  },
+                ]}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.collapseButtonText,
+                    {
+                      fontSize: scaleFont(11),
+                      color: isDark ? "#F1F1F1" : "#11141A",
+                    },
+                  ]}
+                >
+                  Collapse
+                </Text>
+                <Ionicons
+                  name="chevron-up"
+                  size={13}
+                  color={isDark ? "#F1F1F1" : "#11141A"}
+                  style={{ marginLeft: 3 }}
+                />
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+
+          {/* Indented Nested Cards with Symmetrical One-by-One Accordion Unstack/Stack */}
+          {renderedItems.map((subItem, index) => {
+            const activeCount = Math.min(renderedItems.length, INITIAL_VISIBLE_COUNT);
+            const transitionSpan = Math.max(0.2, 0.8 / Math.max(1, activeCount));
+            const step = activeCount > 1 ? (1 - transitionSpan) / (activeCount - 1) : 0;
+            const p1 = Math.max(0.001, Math.min(index, INITIAL_VISIBLE_COUNT - 1) * step);
+            const p2 = Math.min(0.999, p1 + transitionSpan);
+
+            const startY = -8;
+            const isAnimatedCard = index < INITIAL_VISIBLE_COUNT;
+
+            const cardTranslateY = isAnimatedCard
+              ? cardsAnim.interpolate({
+                inputRange: [0, p1, p2, 1],
+                outputRange: [startY, startY, 0, 0],
+                extrapolate: "clamp",
+              })
+              : 0;
+
+            const cardOpacity = isAnimatedCard
+              ? cardsAnim.interpolate({
+                inputRange: [0, p1, p2, 1],
+                outputRange: [0, 0, 1, 1],
+                extrapolate: "clamp",
+              })
+              : 1;
+
+            return (
+              <Animated.View
+                key={subItem.id}
+                style={{
+                  zIndex: count - index,
+                  opacity: cardOpacity,
+                  transform: [{ translateY: cardTranslateY }],
+                }}
+              >
+                <StackedChildCard
+                  item={subItem}
+                  isDetail={isDetailItem}
+                  isDark={isDark}
+                  scaleFont={scaleFont}
+                  accentColor={accentColor}
+                  onPress={handlePressChild}
+                  onToggleRead={(item) => onToggleRead(item)}
+                  onDelete={(item) => onDelete(item)}
+                />
+              </Animated.View>
+            );
+          })}
+
+          {/* Progressive Load More pill for stacks larger than 10 */}
+          {hasMore && (
+            <Animated.View
+              style={{
+                opacity: cardsAnim.interpolate({
+                  inputRange: [0, 0.75, 1],
+                  outputRange: [0, 0, 1],
+                  extrapolate: "clamp",
+                }),
+                transform: [
+                  {
+                    translateY: cardsAnim.interpolate({
+                      inputRange: [0, 0.75, 1],
+                      outputRange: [-8, -8, 0],
+                      extrapolate: "clamp",
+                    }),
+                  },
+                ],
+              }}
+            >
+              <TouchableOpacity
+                onPress={() => {
+                  try {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  } catch { }
+                  setVisibleLimit((prev) => Math.min(group.items.length, prev + 15));
+                }}
+                style={[
+                  styles.showMoreButton,
+                  {
+                    backgroundColor: isDark ? "#1C1C1F" : "#EAEAEA",
+                    boxShadow: isDark
+                      ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                      : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                  },
+                ]}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="layers-outline"
+                  size={14}
+                  color={isDark ? "#A0A5B0" : "#555A64"}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[
+                    styles.showMoreText,
+                    {
+                      fontSize: scaleFont(12.5),
+                      color: isDark ? "#F1F1F1" : "#11141A",
+                    },
+                  ]}
+                >
+                  +{remainingCount} more in this stack • Tap to view
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+        </View>
+      </Animated.View>
+    )}
+  </View>
+);
+  },
+);
+
+/* ============================================================
+   COMPONENT: NOTIFICATION MASTER CARD (Screenshots 1, 2, 3)
+============================================================ */
+
+const NotificationMasterCard = React.memo(function NotificationMasterCard({
   item,
-  accent,
-  onAccentTextColor,
+  stackCount,
+  categoryLabel,
+  isExpanded,
   isDark,
-  themeColors,
+  isDetailItem = false,
+  expandAnim,
   scaleFont,
+  accentColor,
+  onPress,
+  onToggleStack,
+  onAccept,
+  onReject,
+  onToggleRead,
+  onDelete,
+}: {
+  item: AppNotification;
+  stackCount: number;
+  categoryLabel: string;
+  isExpanded: boolean;
+  isDark: boolean;
+  isDetailItem?: boolean;
+  expandAnim?: Animated.Value;
+  scaleFont: (size: number) => number;
+  accentColor?: string;
+  onPress: () => void;
+  onToggleStack: () => void;
+  onAccept: () => void;
+  onReject: () => void;
+  onToggleRead?: () => void;
+  onDelete?: () => void;
+}) {
+  const isStacked = stackCount > 1;
+  const isExpandable = isStacked || isDetailItem;
+  const isFriendRequest = item.type === "friend_request";
+  const isFriendAccepted = item.type === "friend_accepted";
+  const isPendingRequest =
+    isFriendRequest && item.status !== "accepted" && item.status !== "rejected";
+  const isMissedCall = item.type === "missed_call";
+
+  const isGroup = isGroupNotification(item);
+  const typeConfig = getTypeConfig(item.type, isGroup, item.title);
+
+  // Clean and formatted title
+  let titleText = item.senderName || item.title || typeConfig.label;
+  if (
+    item.type === "call" ||
+    item.type === "missed_call" ||
+    Boolean(item.callId)
+  ) {
+    if (item.senderName) {
+      titleText = item.senderName;
+    } else if (titleText.startsWith("Missed Call from ")) {
+      titleText = titleText.replace(/^Missed Call from /i, "");
+    } else if (
+      titleText.startsWith("Incoming ") &&
+      titleText.includes(" from ")
+    ) {
+      titleText = titleText.split(" from ")[1] || titleText;
+    }
+  }
+  if (isFriendRequest) titleText = "Friend Request Received";
+  if (isFriendAccepted) titleText = "Friend Request Accepted";
+
+  // Clean body snippet
+  const rawCleanBody = stripHtml(
+    item.body ||
+    item.content ||
+    item.message ||
+    item.info ||
+    item.description ||
+    (isFriendAccepted
+      ? `${item.senderName || "User"} accepted your friend request.`
+      : ""),
+  );
+  let displayBody = rawCleanBody;
+  if (isMissedCall && displayBody.toLowerCase().includes("missed audio call")) {
+    displayBody = "1 missed audio call";
+  } else if (
+    isMissedCall &&
+    displayBody.toLowerCase().includes("missed video call")
+  ) {
+    displayBody = "1 missed video call";
+  }
+
+  const isFeedbackItem = isFeedbackOrGeneralNotification(item);
+  const avatarUrl = item.pic || item.senderAvatar;
+  const fallbackInitial = isFeedbackItem
+    ? ""
+    : (titleText.trim()[0] || "B").toUpperCase();
+  const fallbackBg = isFeedbackItem
+    ? (isDark ? "#FFFFFF" : "#E2E8F0")
+    : getAvatarInitialBg(titleText);
+
+  // Swipeable ref to close after slide action click
+  const swipeableRef = useRef<any>(null);
+
+  // Tactile press animation
+  const pressScale = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    Animated.spring(pressScale, {
+      toValue: 0.985,
+      useNativeDriver: true,
+      stiffness: 600,
+      damping: 28,
+      mass: 0.5,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(pressScale, {
+      toValue: 1,
+      useNativeDriver: true,
+      stiffness: 500,
+      damping: 24,
+      mass: 0.5,
+    }).start();
+  };
+
+  const handlePress = () => {
+    if (isExpandable) {
+      try {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      } catch { }
+      if (isDetailItem) {
+        onPress();
+      }
+      onToggleStack();
+      return;
+    }
+    onPress();
+  };
+
+  const cardBgColor = isDark
+    ? isExpanded
+      ? "#1A1A1E"
+      : "#161618"
+    : isExpanded
+      ? "#F5F5F7"
+      : "#FFFFFF";
+
+  const chevronRotate = expandAnim
+    ? expandAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: ["0deg", "180deg"],
+    })
+    : isExpanded
+      ? "180deg"
+      : "0deg";
+
+  const renderRightActions = (
+    _progress?: any,
+    _translation?: any,
+    swipeableMethods?: any,
+  ) => {
+    if (!onDelete && !onToggleRead) return null;
+    const closeSwipe = () => {
+      try {
+        swipeableMethods?.close();
+      } catch { }
+      try {
+        swipeableRef.current?.close();
+      } catch { }
+    };
+    return (
+      <View
+        style={[
+          styles.swipeActionsContainer,
+          { backgroundColor: isDark ? "#101012" : "#E2E8F0" },
+        ]}
+      >
+        {onToggleRead && (
+          <TouchableOpacity
+            style={styles.swipeActionButton}
+            onPress={() => {
+              closeSwipe();
+              onToggleRead();
+            }}
+            activeOpacity={0.85}
+            accessibilityLabel="Mark as read"
+          >
+            <LinearGradient
+              colors={
+                isDark
+                  ? [
+                      "rgba(16,16,16,0.05)",
+                      "rgba(21,53,38,0.72)",
+                      "rgba(21,53,38,0.96)",
+                    ]
+                  : [
+                      "rgba(241,245,249,0.05)",
+                      "rgba(220,252,231,0.72)",
+                      "rgba(187,247,208,0.96)",
+                    ]
+              }
+              locations={[0, 0.4, 1]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View
+              style={[
+                styles.swipeActionIconCircle,
+                { backgroundColor: isDark ? "#184726" : "#DCFCE7" },
+              ]}
+            >
+              <Ionicons
+                name="checkmark"
+                size={21}
+                color={isDark ? "#4ADE80" : "#16A34A"}
+              />
+            </View>
+          </TouchableOpacity>
+        )}
+        {onDelete && (
+          <TouchableOpacity
+            style={styles.swipeActionButton}
+            onPress={() => {
+              closeSwipe();
+              onDelete();
+            }}
+            activeOpacity={0.85}
+            accessibilityLabel="Delete notification"
+          >
+            <LinearGradient
+              colors={
+                isDark
+                  ? [
+                      onToggleRead
+                        ? "rgba(21,53,38,0.35)"
+                        : "rgba(16,16,16,0.05)",
+                      "rgba(53,25,27,0.82)",
+                      "rgba(53,25,27,0.98)",
+                    ]
+                  : [
+                      onToggleRead
+                        ? "rgba(187,247,208,0.35)"
+                        : "rgba(241,245,249,0.05)",
+                      "rgba(254,226,226,0.82)",
+                      "rgba(254,202,202,0.98)",
+                    ]
+              }
+              locations={[0, 0.35, 1]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View
+              style={[
+                styles.swipeActionIconCircle,
+                { backgroundColor: isDark ? "#4E201D" : "#FEE2E2" },
+              ]}
+            >
+              <Ionicons
+                name="trash"
+                size={19}
+                color={isDark ? "#FF5A5F" : "#DC2626"}
+              />
+            </View>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
+  return (
+    <Swipeable
+      ref={swipeableRef}
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      friction={2}
+      containerStyle={styles.masterSwipeableContainer}
+    >
+      <Pressable
+        onPress={handlePress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+      >
+        <Animated.View style={{ transform: [{ scale: pressScale }] }}>
+          <Animated.View
+            style={[
+              styles.cardContainer,
+            {
+              backgroundColor: cardBgColor,
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              borderWidth: 0,
+            },
+          ]}
+        >
+          <View style={styles.cardMainRow}>
+            {/* Avatar with Badges */}
+            <View style={styles.avatarWrapper}>
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={styles.cardAvatar} />
+              ) : (
+                <View
+                  style={[
+                    styles.cardAvatarFallback,
+                    { backgroundColor: fallbackBg },
+                  ]}
+                >
+                  {fallbackInitial ? (
+                    <Text
+                      style={[
+                        styles.avatarInitialText,
+                        {
+                          fontSize: scaleFont(19),
+                          color: isFeedbackItem
+                            ? (isDark ? "#000000" : "#11141A")
+                            : "#FFFFFF",
+                        },
+                      ]}
+                    >
+                      {fallbackInitial}
+                    </Text>
+                  ) : null}
+                </View>
+              )}
+
+              {/* Bottom-right Mini Status Badge */}
+              <View
+                style={[
+                  styles.avatarMiniBadge,
+                  {
+                    backgroundColor: typeConfig.bgColor,
+                    borderColor: isDark ? "#161618" : "#FFFFFF",
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={typeConfig.icon}
+                  size={10}
+                  color="#FFFFFF"
+                  style={
+                    isMissedCall
+                      ? { transform: [{ rotate: "135deg" }] }
+                      : undefined
+                  }
+                />
+              </View>
+
+              {/* Top-right Stack Count Badge (White circle with black counter e.g. 5, 3, 2 in dark mode, inverted in light) */}
+              {isStacked && (
+                <View
+                  style={[
+                    styles.stackBadge,
+                    {
+                      backgroundColor: isDark ? "#FFFFFF" : "#000000",
+                      borderColor: isDark ? "#161618" : "#FFFFFF",
+                      boxShadow: isDark
+                        ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                        : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.stackBadgeText,
+                      {
+                        fontSize: scaleFont(10.5),
+                        color: isDark ? "#000000" : "#FFFFFF",
+                      },
+                    ]}
+                  >
+                    {stackCount}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Content Column */}
+            <View style={styles.cardContent}>
+              {/* Header Row: Title and Timestamp */}
+              <View style={styles.cardHeaderRow}>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.cardTitle,
+                    {
+                      fontSize: scaleFont(15),
+                      color: isDark ? "#FFFFFF" : "#11141A",
+                    },
+                  ]}
+                >
+                  {titleText}
+                </Text>
+                <Text
+                  style={[
+                    styles.cardTimeText,
+                    {
+                      fontSize: scaleFont(12),
+                      color: isDark ? "#7E8590" : "#8A909A",
+                    },
+                  ]}
+                >
+                  {formatCardTime(item.timestamp)}
+                </Text>
+              </View>
+
+              {/* Missed Call Banner inside parent card only if solitary */}
+              {isMissedCall && !isStacked && (
+                <View style={styles.missedCallBadgeRow}>
+                  <Ionicons
+                    name="call"
+                    size={12}
+                    color="#FF5A5F"
+                    style={{
+                      marginRight: 5,
+                      transform: [{ rotate: "135deg" }],
+                    }}
+                  />
+                  <Text
+                    style={[
+                      styles.missedCallLabel,
+                      { fontSize: scaleFont(12) },
+                    ]}
+                  >
+                    Missed Call
+                  </Text>
+                </View>
+              )}
+
+              {/* Message / Subtitle */}
+              {displayBody.length > 0 && (
+                <Text
+                  numberOfLines={isDetailItem && isExpanded ? undefined : 1}
+                  style={[
+                    styles.cardMessage,
+                    {
+                      fontSize: scaleFont(13.5),
+                      color: isDark ? "rgba(255, 255, 255, 0.65)" : "#555A64",
+                    },
+                    isDetailItem && isExpanded && {
+                      lineHeight: 20,
+                      marginTop: 4,
+                      color: isDark ? "#FFFFFF" : "#11141A",
+                    },
+                    isMissedCall && (isDark ? styles.cardMessageWhite : { color: "#11141A", fontWeight: "500" }),
+                  ]}
+                >
+                  {displayBody}
+                </Text>
+              )}
+
+              {/* Group Summary Row for Multi-card Stacks (Matching Image 1) */}
+              {isStacked && (
+                <View style={styles.groupSummaryRow} pointerEvents="none">
+                  <Ionicons
+                    name="layers"
+                    size={13}
+                    color={isDark ? "#F1F1F1" : "#555860"}
+                    style={styles.summaryLayersIcon}
+                  />
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.groupSummaryText,
+                      {
+                        fontSize: scaleFont(12),
+                        color: isDark ? "#F1F1F1" : "#4B5563",
+                      },
+                    ]}
+                  >
+                    {isExpanded
+                      ? `Tap to collapse ${stackCount} stacked alerts`
+                      : `+${stackCount - 1} more in ${categoryLabel} • Tap to unstack`}
+                  </Text>
+                  <Animated.View
+                    style={{
+                      marginLeft: 4,
+                      transform: [{ rotate: chevronRotate }],
+                    }}
+                  >
+                    <Ionicons
+                      name="chevron-down"
+                      size={13}
+                      color={isDark ? "#F1F1F1" : "#555860"}
+                    />
+                  </Animated.View>
+                </View>
+              )}
+
+              {/* Single Detail Notification Summary Row (Matching screenshot for Feedback/General/Accepted) */}
+              {isDetailItem && (
+                <View style={styles.groupSummaryRow} pointerEvents="none">
+                  <Ionicons
+                    name={isExpanded ? "chevron-up" : "chevron-down"}
+                    size={13}
+                    color={isDark ? "#F1F1F1" : "#555860"}
+                    style={styles.summaryLayersIcon}
+                  />
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.groupSummaryText,
+                      {
+                        fontSize: scaleFont(12),
+                        color: isDark ? "#F1F1F1" : "#4B5563",
+                      },
+                    ]}
+                  >
+                    {isExpanded ? "Tap to collapse" : "Tap to view full info"}
+                  </Text>
+                </View>
+              )}
+
+              {/* Dual Pill Action Buttons (inline for Friend Requests) */}
+              {isPendingRequest && (
+                <View style={styles.friendButtonsRow}>
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      onAccept();
+                    }}
+                    style={[
+                      styles.acceptButton,
+                      {
+                        backgroundColor: isDark ? "#FFFFFF" : "#000000",
+                        boxShadow: isDark
+                          ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                          : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                      },
+                    ]}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.acceptButtonText,
+                        {
+                          fontSize: scaleFont(13),
+                          color: isDark ? "#000000" : "#FFFFFF",
+                        },
+                      ]}
+                    >
+                      Accept
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      onReject();
+                    }}
+                    style={[
+                      styles.declineButton,
+                      {
+                        backgroundColor: isDark ? "#242428" : "#E6E6E6",
+                        boxShadow: isDark
+                          ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                          : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                      },
+                    ]}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.declineButtonText,
+                        {
+                          fontSize: scaleFont(13),
+                          color: isDark ? "#FFFFFF" : "#11141A",
+                        },
+                      ]}
+                    >
+                      Decline
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+        </Animated.View>
+      </Animated.View>
+    </Pressable>
+    </Swipeable>
+  );
+});
+
+/* ============================================================
+   COMPONENT: STACKED CHILD CARD (Screenshot 1 & 4 Inset List)
+============================================================ */
+
+const StackedChildCard = React.memo(function StackedChildCard({
+  item,
+  isDetail = false,
+  isDark,
+  scaleFont,
+  accentColor,
   onPress,
   onToggleRead,
   onDelete,
-  onAccept,
-  onReject,
 }: {
-  item: NotificationItem;
-  accent: string;
-  onAccentTextColor: string;
+  item: AppNotification;
+  isDetail?: boolean;
   isDark: boolean;
-  themeColors: any;
   scaleFont: (size: number) => number;
-  onPress: () => void;
-  onToggleRead: () => void;
-  onDelete: () => void;
-  onAccept: () => void;
-  onReject: () => void;
+  accentColor?: string;
+  onPress: (item: AppNotification) => void;
+  onToggleRead?: (item: AppNotification) => void;
+  onDelete?: (item: AppNotification) => void;
 }) {
-  const isUnread = !item.seen;
-  const typeConfig = getTypeConfig(item.type, accent);
-  const isFriendRequest = item.type === "friend_request";
-  const isPendingRequest = isFriendRequest && item.status !== "accepted" && item.status !== "rejected";
-  const cleanBody = stripHtml(item.content || item.message || "New activity notification");
+  const isMissedCall = item.type === "missed_call";
+  const isGroup = isGroupNotification(item);
+  const typeConfig = getTypeConfig(item.type, isGroup, item.title);
+  const cleanBody = stripHtml(item.body || item.content || item.message || "");
+  const isFeedbackItem = isFeedbackOrGeneralNotification(item);
+  const avatarUrl = item.pic || item.senderAvatar;
+  const fallbackInitial = isFeedbackItem
+    ? ""
+    : (item.title || item.senderName || "B")[0]?.toUpperCase() || "B";
+  const fallbackBg = isFeedbackItem
+    ? (isDark ? "#FFFFFF" : "#E2E8F0")
+    : getAvatarInitialBg(item.title || item.senderName || "B");
 
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.cardContainer,
-        {
-          backgroundColor: isUnread
-            ? isDark
-              ? "rgba(30, 30, 36, 0.95)"
-              : "#FFFFFF"
-            : isDark
-            ? "rgba(22, 22, 26, 0.7)"
-            : "rgba(0, 0, 0, 0.02)",
-          borderColor: isUnread
-            ? isDark
-              ? "rgba(255, 255, 255, 0.12)"
-              : "rgba(0, 0, 0, 0.1)"
-            : isDark
-            ? "rgba(255, 255, 255, 0.06)"
-            : "rgba(0, 0, 0, 0.04)",
-        },
-        pressed && styles.cardPressed,
-      ]}
-    >
-      {/* Left Active Glow Indicator Strip */}
-      {isUnread && <View style={[styles.unreadStrip, { backgroundColor: accent }]} />}
+  // Swipeable ref to close after slide action click
+  const swipeableRef = useRef<any>(null);
 
-      {/* Avatar Container with Type Badge */}
-      <View style={styles.avatarWrapper}>
-        {item.pic ? (
-          <Image source={{ uri: item.pic }} style={[styles.cardAvatar, { backgroundColor: isDark ? "#202024" : "#E2E8F0" }]} />
-        ) : (
-          <View style={[styles.cardAvatarFallback, { backgroundColor: typeConfig.badgeBg }]}>
-            <Ionicons name={typeConfig.icon} size={20} color={typeConfig.color} />
-          </View>
-        )}
+  // Tactile press animation (native driver)
+  const pressScale = useRef(new Animated.Value(1)).current;
 
-        {/* Small floating corner icon */}
-        <View style={[styles.avatarMiniBadge, { backgroundColor: typeConfig.color, borderColor: themeColors.background }]}>
-          <Ionicons
-            name={typeConfig.icon}
-            size={10}
-            color={typeConfig.color === "#ffffff" ? "#000000" : "#ffffff"}
-          />
-        </View>
-      </View>
+  const handlePressIn = () => {
+    Animated.spring(pressScale, {
+      toValue: 0.98,
+      useNativeDriver: true,
+      stiffness: 600,
+      damping: 28,
+      mass: 0.5,
+    }).start();
+  };
 
-      {/* Main Content */}
-      <View style={styles.cardContent}>
-        <View style={styles.cardHeaderRow}>
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.cardTitle,
-              { color: themeColors.text, fontSize: scaleFont(14) },
-              isUnread && { fontWeight: "800", color: themeColors.text },
-            ]}
-          >
-            {item.title || item.senderName || typeConfig.label}
-          </Text>
-          <Text style={[styles.cardTimeText, { color: themeColors.textSecondary, fontSize: scaleFont(11) }]}>
-            {formatRelativeTime(item.timestamp)}
-          </Text>
-        </View>
+  const handlePressOut = () => {
+    Animated.spring(pressScale, {
+      toValue: 1,
+      useNativeDriver: true,
+      stiffness: 500,
+      damping: 24,
+      mass: 0.5,
+    }).start();
+  };
 
-        <Text
-          numberOfLines={2}
-          style={[
-            styles.cardMessage,
-            { color: themeColors.textSecondary, fontSize: scaleFont(12.5) },
-            isUnread && { color: themeColors.text },
-          ]}
-        >
-          {cleanBody}
-        </Text>
+  const handleCardPress = useCallback(() => {
+    onPress(item);
+  }, [onPress, item]);
 
-        {/* Interactive action row for Friend Requests */}
-        {isPendingRequest ? (
-          <View style={styles.actionButtonsRow}>
-            <TouchableOpacity
-              onPress={(e) => {
-                e.stopPropagation();
-                onAccept();
-              }}
-              style={[styles.primaryActionBtn, { backgroundColor: accent }]}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="checkmark" size={14} color={onAccentTextColor} style={{ marginRight: 4 }} />
-              <Text style={[styles.primaryActionText, { color: onAccentTextColor, fontSize: scaleFont(11) }]}>Accept</Text>
-            </TouchableOpacity>
+  const cardBgColor = isDark ? "#161618" : "#FFFFFF";
 
-            <TouchableOpacity
-              onPress={(e) => {
-                e.stopPropagation();
-                onReject();
-              }}
-              style={[
-                styles.secondaryActionBtn,
-                {
-                  backgroundColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.03)",
-                  borderColor: "rgba(239, 68, 68, 0.25)",
-                },
-              ]}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="close" size={14} color="#ff6b6b" style={{ marginRight: 4 }} />
-              <Text style={[styles.secondaryActionText, { fontSize: scaleFont(11) }]}>Decline</Text>
-            </TouchableOpacity>
-          </View>
-        ) : item.type === "chat" && isUnread ? (
-          <View style={styles.inlineActionHint}>
-            <Ionicons name="return-down-forward" size={13} color={accent} style={{ marginRight: 4 }} />
-            <Text style={[styles.inlineActionText, { color: accent, fontSize: scaleFont(11.5) }]}>Tap to reply</Text>
-          </View>
-        ) : item.type === "missed_call" ? (
-          <View style={styles.inlineActionHint}>
-            <Ionicons name="call" size={12} color="#ef4444" style={{ marginRight: 4 }} />
-            <Text style={[styles.inlineActionText, { color: "#ef4444", fontSize: scaleFont(11.5) }]}>Missed call • Tap to callback</Text>
-          </View>
-        ) : null}
-      </View>
+  let callDisplayTitle = cleanBody || item.title || "";
+  if (!callDisplayTitle) {
+    if (item.type === "missed_call") {
+      callDisplayTitle = "1 missed audio call";
+    } else if (item.callType === "video") {
+      callDisplayTitle = "Incoming video call";
+    } else {
+      callDisplayTitle = "Incoming voice call";
+    }
+  }
 
-      {/* Right Quick Actions (Read indicator / Delete) */}
-      <View style={styles.cardRightActions}>
-        {isUnread ? (
-          <View style={[styles.unreadDot, { backgroundColor: accent }]} />
-        ) : (
+  const renderRightActions = (
+    _progress?: any,
+    _translation?: any,
+    swipeableMethods?: any,
+  ) => {
+    if (!onDelete && !onToggleRead) return null;
+    const closeSwipe = () => {
+      try {
+        swipeableMethods?.close();
+      } catch { }
+      try {
+        swipeableRef.current?.close();
+      } catch { }
+    };
+    return (
+      <View
+        style={[
+          styles.childSwipeActionsContainer,
+          { backgroundColor: isDark ? "#101012" : "#E2E8F0" },
+        ]}
+      >
+        {onToggleRead && (
           <TouchableOpacity
-            onPress={(e) => {
-              e.stopPropagation();
-              onDelete();
+            style={styles.childSwipeActionButton}
+            onPress={() => {
+              closeSwipe();
+              onToggleRead(item);
             }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            style={styles.cardDeleteIcon}
+            activeOpacity={0.85}
+            accessibilityLabel="Mark as read"
           >
-            <Ionicons
-              name="close-circle-outline"
-              size={17}
-              color={themeColors.textSecondary}
+            <LinearGradient
+              colors={
+                isDark
+                  ? [
+                      "rgba(16,16,16,0.05)",
+                      "rgba(21,53,38,0.72)",
+                      "rgba(21,53,38,0.96)",
+                    ]
+                  : [
+                      "rgba(241,245,249,0.05)",
+                      "rgba(220,252,231,0.72)",
+                      "rgba(187,247,208,0.96)",
+                    ]
+              }
+              locations={[0, 0.4, 1]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={StyleSheet.absoluteFillObject}
             />
+            <View
+              style={[
+                styles.swipeActionIconCircle,
+                { backgroundColor: isDark ? "#184726" : "#DCFCE7" },
+              ]}
+            >
+              <Ionicons
+                name="checkmark"
+                size={19}
+                color={isDark ? "#4ADE80" : "#16A34A"}
+              />
+            </View>
+          </TouchableOpacity>
+        )}
+        {onDelete && (
+          <TouchableOpacity
+            style={styles.childSwipeActionButton}
+            onPress={() => {
+              closeSwipe();
+              onDelete(item);
+            }}
+            activeOpacity={0.85}
+            accessibilityLabel="Delete notification"
+          >
+            <LinearGradient
+              colors={
+                isDark
+                  ? [
+                      onToggleRead
+                        ? "rgba(21,53,38,0.35)"
+                        : "rgba(16,16,16,0.05)",
+                      "rgba(53,25,27,0.82)",
+                      "rgba(53,25,27,0.98)",
+                    ]
+                  : [
+                      onToggleRead
+                        ? "rgba(187,247,208,0.35)"
+                        : "rgba(241,245,249,0.05)",
+                      "rgba(254,226,226,0.82)",
+                      "rgba(254,202,202,0.98)",
+                    ]
+              }
+              locations={[0, 0.35, 1]}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View
+              style={[
+                styles.swipeActionIconCircle,
+                { backgroundColor: isDark ? "#4E201D" : "#FEE2E2" },
+              ]}
+            >
+              <Ionicons
+                name="trash"
+                size={17}
+                color={isDark ? "#FF5A5F" : "#DC2626"}
+              />
+            </View>
           </TouchableOpacity>
         )}
       </View>
-    </Pressable>
-  );
-}
-
-/* ============================================================
-   COMPONENT: NOTIFICATION DETAIL SHEET (MODAL)
-============================================================ */
-
-function NotificationDetailSheet({
-  item,
-  accent,
-  onAccentTextColor,
-  isDark,
-  themeColors,
-  scaleFont,
-  onClose,
-  onAccept,
-  onReject,
-  onDelete,
-  onToggleRead,
-  onOpenTarget,
-}: {
-  item: NotificationItem;
-  accent: string;
-  onAccentTextColor: string;
-  isDark: boolean;
-  themeColors: any;
-  scaleFont: (size: number) => number;
-  onClose: () => void;
-  onAccept: () => void;
-  onReject: () => void;
-  onDelete: () => void;
-  onToggleRead: () => void;
-  onOpenTarget: () => void;
-}) {
-  const typeConfig = getTypeConfig(item.type, accent);
-  const cleanBody = stripHtml(item.content || item.message || "No content provided");
-  const isPendingRequest = item.type === "friend_request" && item.status !== "accepted" && item.status !== "rejected";
+    );
+  };
 
   return (
-    <View style={[styles.detailSheetContainer, { backgroundColor: themeColors.card, borderColor: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)" }]}>
-        {/* Top Drag Indicator */}
-        <View style={[styles.sheetHandleBar, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.2)" }]} />
-
-        {/* Header Row */}
-        <View style={[styles.sheetHeader, { borderBottomColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.06)" }]}>
-          <View style={styles.sheetHeaderAvatarRow}>
-            {item.pic ? (
-              <Image source={{ uri: item.pic }} style={[styles.sheetAvatar, { backgroundColor: isDark ? "#202024" : "#E2E8F0" }]} />
+    <Swipeable
+      ref={swipeableRef}
+      renderRightActions={renderRightActions}
+      overshootRight={false}
+      friction={2}
+      containerStyle={styles.childSwipeableContainer}
+    >
+      <Pressable
+        onPress={handleCardPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+      >
+        <Animated.View style={{ transform: [{ scale: pressScale }] }}>
+          <Animated.View
+            style={[
+              styles.stackedCardContainer,
+            isDetail && styles.stackedDetailCardContainer,
+            {
+              backgroundColor: cardBgColor,
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              borderWidth: 0,
+            },
+          ]}
+        >
+          {/* Avatar with mini badge */}
+          <View style={styles.stackedAvatarWrapper}>
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={styles.stackedAvatar} />
             ) : (
-              <View style={[styles.sheetAvatarFallback, { backgroundColor: typeConfig.badgeBg }]}>
-                <Ionicons name={typeConfig.icon} size={26} color={typeConfig.color} />
+              <View
+                style={[
+                  styles.stackedAvatarFallback,
+                  { backgroundColor: fallbackBg },
+                ]}
+              >
+                {fallbackInitial ? (
+                  <Text
+                    style={[
+                      styles.stackedInitialText,
+                      {
+                        fontSize: scaleFont(16),
+                        color: isFeedbackItem
+                          ? (isDark ? "#000000" : "#11141A")
+                          : "#FFFFFF",
+                      },
+                    ]}
+                  >
+                    {fallbackInitial}
+                  </Text>
+                ) : null}
               </View>
             )}
 
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <Text style={[styles.sheetSenderName, { color: themeColors.text, fontSize: scaleFont(16) }]} numberOfLines={1}>
-                  {item.title || item.senderName || "BunkMates Alert"}
-                </Text>
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", marginTop: 3 }}>
-                <View style={[styles.sheetTypeBadge, { backgroundColor: typeConfig.badgeBg }]}>
-                  <Ionicons name={typeConfig.icon} size={11} color={typeConfig.color} style={{ marginRight: 4 }} />
-                  <Text style={[styles.sheetTypeBadgeText, { color: typeConfig.color, fontSize: scaleFont(11) }]}>{typeConfig.label}</Text>
-                </View>
-                <Text style={[styles.sheetTimeText, { color: themeColors.textSecondary, fontSize: scaleFont(11.5) }]}>• {formatRelativeTime(item.timestamp)}</Text>
-              </View>
+            <View
+              style={[
+                styles.stackedMiniBadge,
+                {
+                  backgroundColor: typeConfig.bgColor,
+                  borderColor: isDark ? "#161618" : "#FFFFFF",
+                },
+              ]}
+            >
+              <Ionicons
+                name={typeConfig.icon}
+                size={9}
+                color="#FFFFFF"
+                style={
+                  isMissedCall
+                    ? { transform: [{ rotate: "135deg" }] }
+                    : undefined
+                }
+              />
             </View>
           </View>
 
-          <TouchableOpacity
-            onPress={onClose}
-            style={[styles.sheetCloseButton, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)" }]}
+          {/* Card Details */}
+          <View
+            style={[styles.stackedCardContent, isDetail && { paddingTop: 2 }]}
           >
-            <Ionicons name="close" size={20} color={themeColors.text} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Timestamp Meta */}
-        <View style={[styles.exactTimeBox, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.02)" : "rgba(0, 0, 0, 0.02)", borderBottomColor: isDark ? "rgba(255, 255, 255, 0.04)" : "rgba(0, 0, 0, 0.04)" }]}>
-          <Ionicons name="time-outline" size={13} color={themeColors.textSecondary} style={{ marginRight: 6 }} />
-          <Text style={[styles.exactTimeText, { color: themeColors.textSecondary, fontSize: scaleFont(11.5) }]}>{formatExactDateTime(item.timestamp)}</Text>
-        </View>
-
-        {/* Message Content Box */}
-        <ScrollView style={styles.sheetScroll} showsVerticalScrollIndicator={false}>
-          <Text style={[styles.sheetMessageText, { color: themeColors.text, fontSize: scaleFont(15) }]}>{cleanBody}</Text>
-
-          {/* Action Box for Requests */}
-          {isPendingRequest && (
-            <View style={styles.sheetRequestActions}>
-              <TouchableOpacity
-                onPress={() => {
-                  onAccept();
-                  onClose();
-                }}
-                style={[styles.sheetAcceptBtn, { backgroundColor: accent }]}
-                activeOpacity={0.8}
+            {isMissedCall ? (
+              <>
+                <View style={styles.missedCallHeaderRow}>
+                  <Ionicons
+                    name="call"
+                    size={12}
+                    color="#FF5A5F"
+                    style={{
+                      marginRight: 5,
+                      transform: [{ rotate: "135deg" }],
+                    }}
+                  />
+                  <Text
+                    style={[
+                      styles.missedCallBadgeText,
+                      { fontSize: scaleFont(12) },
+                    ]}
+                  >
+                    Missed Call
+                  </Text>
+                </View>
+                <Text
+                  numberOfLines={isDetail ? undefined : 1}
+                  style={[
+                    styles.stackedMessageTitle,
+                    isDetail && styles.stackedMessageTitleMultiline,
+                    {
+                      fontSize: scaleFont(13.5),
+                      color: isDark ? "#FFFFFF" : "#11141A",
+                    },
+                  ]}
+                >
+                  {callDisplayTitle}
+                </Text>
+              </>
+            ) : (
+              <Text
+                numberOfLines={isDetail ? undefined : 1}
+                style={[
+                  styles.stackedMessageTitle,
+                  isDetail && styles.stackedMessageTitleMultiline,
+                  {
+                    fontSize: scaleFont(13.5),
+                    color: isDark ? "#FFFFFF" : "#11141A",
+                  },
+                ]}
               >
-                <Ionicons name="checkmark-circle" size={18} color={onAccentTextColor} style={{ marginRight: 6 }} />
-                <Text style={[styles.sheetActionBtnText, { color: onAccentTextColor, fontSize: scaleFont(13) }]}>Accept Friend Request</Text>
-              </TouchableOpacity>
+                {callDisplayTitle}
+              </Text>
+            )}
 
-              <TouchableOpacity
-                onPress={() => {
-                  onReject();
-                  onClose();
-                }}
-                style={styles.sheetRejectBtn}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="close-circle" size={18} color="#ff6b6b" style={{ marginRight: 6 }} />
-                <Text style={[styles.sheetActionBtnText, { color: "#ff6b6b", fontSize: scaleFont(13) }]}>Decline</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Quick CTA to Chat or Calls */}
-          {item.type === "chat" && item.senderId && (
-            <TouchableOpacity
-              onPress={onOpenTarget}
-              style={[styles.sheetPrimaryCta, { backgroundColor: accent }]}
-              activeOpacity={0.8}
+            <Text
+              style={[
+                styles.stackedTimestampText,
+                {
+                  fontSize: scaleFont(11.5),
+                  color: isDark ? "#7E8590" : "#8A909A",
+                },
+              ]}
             >
-              <Ionicons name="chatbubble" size={17} color={onAccentTextColor} style={{ marginRight: 8 }} />
-              <Text style={[styles.sheetPrimaryCtaText, { color: onAccentTextColor, fontSize: scaleFont(14) }]}>Open Conversation</Text>
-            </TouchableOpacity>
-          )}
-
-          {item.type === "missed_call" && item.senderId && (
-            <TouchableOpacity
-              onPress={onOpenTarget}
-              style={[styles.sheetPrimaryCta, { backgroundColor: accent }]}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="call" size={17} color={onAccentTextColor} style={{ marginRight: 8 }} />
-              <Text style={[styles.sheetPrimaryCtaText, { color: onAccentTextColor, fontSize: scaleFont(14) }]}>Call Back</Text>
-            </TouchableOpacity>
-          )}
-
-          {item.tripId && (
-            <TouchableOpacity
-              onPress={onOpenTarget}
-              style={[styles.sheetPrimaryCta, { backgroundColor: accent }]}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="airplane" size={17} color={onAccentTextColor} style={{ marginRight: 8 }} />
-              <Text style={[styles.sheetPrimaryCtaText, { color: onAccentTextColor, fontSize: scaleFont(14) }]}>View Trip Details</Text>
-            </TouchableOpacity>
-          )}
-        </ScrollView>
-
-        {/* Footer Actions */}
-        <View style={[styles.sheetFooter, { borderTopColor: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.06)" }]}>
-          <TouchableOpacity
-            onPress={() => {
-              onToggleRead();
-            }}
-            style={[styles.sheetSecondaryBtn, { backgroundColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.04)", borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)" }]}
-          >
-            <Ionicons
-              name={item.seen ? "mail-unread-outline" : "checkmark-circle-outline"}
-              size={16}
-              color={themeColors.textSecondary}
-              style={{ marginRight: 6 }}
-            />
-            <Text style={[styles.sheetSecondaryBtnText, { color: themeColors.textSecondary, fontSize: scaleFont(12.5) }]}>
-              {item.seen ? "Mark Unread" : "Mark as Read"}
+              {formatStackedTime(item.timestamp)}
             </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => {
-              onDelete();
-              onClose();
-            }}
-            style={[styles.sheetSecondaryBtn, { borderColor: "rgba(239,68,68,0.3)", backgroundColor: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.04)" }]}
-          >
-            <Ionicons name="trash-outline" size={16} color="#ef4444" style={{ marginRight: 6 }} />
-            <Text style={[styles.sheetSecondaryBtnText, { color: "#ef4444", fontSize: scaleFont(12.5) }]}>Delete</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+          </View>
+        </Animated.View>
+      </Animated.View>
+    </Pressable>
+    </Swipeable>
   );
-}
+});
 
 /* ============================================================
-   STYLES
+   STYLES (AMOLED Pitch Black `#000000`, Zero-Red, 26px Cards)
 ============================================================ */
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: "transparent",
   },
 
-  /* Header */
+  /* 1. Top App Bar */
   header: {
-    height: 60,
+    height: 48,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255, 255, 255, 0.06)",
+    paddingHorizontal: 20,
+    zIndex: 20,
+    backgroundColor: "transparent",
   },
-  headerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  circleIconButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
+  modernHeaderBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 0,
     justifyContent: "center",
     alignItems: "center",
   },
-  headerTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginLeft: 12,
+  notificationListOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 1,
+    elevation: 1,
+  },
+  pressed: {
+    opacity: 0.85,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#ffffff",
+    fontWeight: "700",
+    marginLeft: 12,
     letterSpacing: -0.4,
   },
-  unreadCountPill: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginLeft: 8,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  unreadCountText: {
-    color: "#000000",
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  headerRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  actionPillButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 10,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1,
-    backgroundColor: "rgba(255,255,255,0.04)",
-  },
-  actionPillText: {
-    fontSize: 12,
-    fontWeight: "700",
-  },
 
-  /* Search Bar */
-  searchBarWrapper: {
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 4,
-  },
-  searchBarInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    height: 42,
-    borderRadius: 14,
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.09)",
-    paddingHorizontal: 12,
-  },
-  searchInput: {
-    flex: 1,
-    color: "#ffffff",
-    fontSize: 14,
-    paddingVertical: 0,
-  },
-
-  /* Filters */
+  /* 2. Filter Pills */
   filtersWrapper: {
     paddingVertical: 10,
+    position: "relative",
+    zIndex: 20,
+    elevation: 20,
+    backgroundColor: "transparent",
   },
   filtersScrollContent: {
     paddingHorizontal: 16,
     gap: 8,
   },
-  categoryChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    height: 34,
-    paddingHorizontal: 12,
-    borderRadius: 17,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-  },
-  categoryChipActive: {
-    backgroundColor: "#ffffff",
-    borderColor: "#ffffff",
-  },
-  categoryChipText: {
-    color: "rgba(255, 255, 255, 0.75)",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  categoryChipTextActive: {
-    color: "#000000",
-    fontWeight: "800",
-  },
-  chipBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-    borderRadius: 8,
-    marginLeft: 6,
-  },
-  chipBadgeActive: {
-    backgroundColor: "#000000",
-  },
-  chipBadgeInactive: {
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-  },
-  chipBadgeText: {
-    fontSize: 10,
-    fontWeight: "800",
-  },
-
-  /* Unread Quick Banner */
-  unreadBannerContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  unreadBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "rgba(255, 255, 255, 0.03)",
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  unreadBannerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  pulseDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  unreadBannerText: {
-    color: "rgba(255, 255, 255, 0.7)",
-    fontSize: 12.5,
-  },
-  bannerActionBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  bannerActionText: {
-    fontSize: 11.5,
-    fontWeight: "700",
-  },
-
-  /* List & Sections */
-  listScrollContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 40,
-  },
-  sectionBlock: {
-    marginBottom: 16,
-  },
-  sectionHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-    marginTop: 6,
-  },
-  sectionTitle: {
-    color: "rgba(255, 255, 255, 0.4)",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    marginRight: 10,
-  },
-  sectionDivider: {
-    flex: 1,
-    height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-  },
-
-  /* Notification Card */
-  cardContainer: {
-    flexDirection: "row",
-    backgroundColor: "rgba(22, 22, 26, 0.7)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.06)",
-    borderRadius: 18,
-    padding: 12,
-    marginBottom: 8,
-    position: "relative",
-    overflow: "hidden",
-  },
-  cardUnread: {
-    backgroundColor: "rgba(30, 30, 36, 0.95)",
-    borderColor: "rgba(255, 255, 255, 0.12)",
-  },
-  cardPressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.995 }],
-  },
-  unreadStrip: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 3.5,
-  },
-  avatarWrapper: {
-    position: "relative",
-    marginRight: 12,
-  },
-  cardAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#202024",
-  },
-  cardAvatarFallback: {
-    width: 44,
-    height: 44,
+  filterPill: {
+    height: 38,
+    paddingHorizontal: 18,
     borderRadius: 22,
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 0,
+  },
+  filterPillText: {
+    fontWeight: "600",
+  },
+
+  /* 3. Chronological Timeline Grouping */
+  listScrollContent: {
+    paddingTop: 150,
+    paddingBottom: 40,
+  },
+  sectionBlock: {
+    marginBottom: 4,
+  },
+  sectionTitle: {
+    color: "#7E8590",
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    marginTop: 20,
+    marginBottom: 8,
+    marginHorizontal: 20,
+  },
+
+  groupWrapper: {
+    position: "relative",
+    marginBottom: 8,
+    overflow: "visible",
+  },
+
+  groupWrapperStacked: {
+    marginBottom: 20,
+  },
+
+  stackedPeekLayer1: {
+    position: "absolute",
+    left: 36,
+    right: 36,
+    bottom: -6,
+    height: 24,
+    borderRadius: 16,
+    backgroundColor: "#1B1B1D",
+    zIndex: 1,
+    elevation: 0,
+  },
+
+  stackedPeekLayer2: {
+    position: "absolute",
+    left: 54,
+    right: 54,
+    bottom: -12,
+    height: 24,
+    borderRadius: 16,
+    backgroundColor: "#131315",
+    zIndex: 0,
+    elevation: 0,
+  },
+
+  masterCardLayer: {
+    position: "relative",
+    zIndex: 10,
+    elevation: 10,
+  },
+
+  /* 4. Parent / Master Card (Border Radius = 26px) */
+  masterSwipeableContainer: {
+    marginHorizontal: 16,
+    borderRadius: 26,
+    overflow: "hidden",
+  },
+  swipeActionsContainer: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    justifyContent: "flex-end",
+    height: "100%",
+    backgroundColor: "#101010",
+    paddingHorizontal: 0,
+    overflow: "hidden",
+  },
+  swipeActionButton: {
+    width: 54,
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+    position: "relative",
+  },
+  swipeActionIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  readIconCircle: {
+    backgroundColor: "#184726",
+  },
+  deleteIconCircle: {
+    backgroundColor: "#4E201D",
+  },
+  cardContainer: {
+    borderRadius: 26,
+    marginHorizontal: 0,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 0,
+    // zIndex: 3,
+  },
+  cardPressed: {
+    opacity: 0.9,
+    transform: [{ scale: 0.995 }],
+  },
+  cardMainRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  avatarWrapper: {
+    position: "relative",
+    marginRight: 14,
+  },
+  cardAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#202024",
+  },
+  cardAvatarFallback: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  avatarInitialText: {
+    fontWeight: "700",
   },
   avatarMiniBadge: {
     position: "absolute",
@@ -1800,8 +3360,22 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "#09090b",
+    borderWidth: 2,
+  },
+  stackBadge: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 2,
+  },
+  stackBadgeText: {
+    fontWeight: "800",
   },
   cardContent: {
     flex: 1,
@@ -1815,99 +3389,226 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     flex: 1,
-    fontSize: 14,
-    fontWeight: "600",
-    color: "rgba(255, 255, 255, 0.85)",
+    fontWeight: "700",
     marginRight: 8,
   },
-  cardTitleUnread: {
-    fontWeight: "800",
-    color: "#ffffff",
-  },
   cardTimeText: {
-    fontSize: 11,
-    color: "rgba(255, 255, 255, 0.4)",
     fontWeight: "500",
   },
   cardMessage: {
-    fontSize: 12.5,
-    lineHeight: 17,
-    color: "rgba(255, 255, 255, 0.55)",
+    lineHeight: 18,
   },
-  cardMessageUnread: {
-    color: "rgba(255, 255, 255, 0.85)",
+  cardMessageWhite: {
+    fontWeight: "500",
   },
-  cardRightActions: {
-    marginLeft: 6,
-    justifyContent: "flex-start",
-    alignItems: "center",
-    paddingTop: 2,
-  },
-  unreadDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  cardDeleteIcon: {
-    padding: 2,
-  },
-
-  /* In-card Action Buttons */
-  actionButtonsRow: {
+  missedCallBadgeRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginTop: 8,
+    marginBottom: 2,
   },
-  primaryActionBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 12,
-    backgroundColor: "#ffffff",
-  },
-  primaryActionText: {
-    color: "#000000",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  secondaryActionBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 12,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.25)",
-  },
-  secondaryActionText: {
-    color: "#ff6b6b",
-    fontSize: 11,
+  missedCallLabel: {
+    color: "#FF5A5F",
     fontWeight: "700",
   },
-  inlineActionHint: {
+
+  /* Group Summary Row (Directly below message preview, matching reference) */
+  groupSummaryRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 6,
+    marginTop: 5,
+    minHeight: 18,
   },
-  inlineActionText: {
-    fontSize: 11.5,
+  summaryLayersIcon: {
+    marginRight: 6,
+  },
+  groupSummaryText: {
+    fontWeight: "500",
+    letterSpacing: -0.1,
+    flexShrink: 1,
+  },
+
+  /* Inline Friend Request Action Buttons */
+  friendButtonsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    gap: 10,
+  },
+  acceptButton: {
+    height: 36,
+    paddingHorizontal: 26,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 0,
+  },
+  acceptButtonText: {
+    fontWeight: "700",
+  },
+  declineButton: {
+    height: 36,
+    paddingHorizontal: 22,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 0,
+  },
+  declineButtonText: {
     fontWeight: "600",
   },
 
-  /* Empty State */
+  /* Unstack / Accordion Bottom Bar (legacy compatibility) */
+  unstackRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+  },
+  unstackRowText: {
+    fontWeight: "500",
+    color: "#F1F1F1",
+    marginLeft: 6,
+  },
+
+  /* 5. Inline Accordion Stack Container (Screenshot 1 & 4) */
+  stackInsetContainer: {
+    marginLeft: 20,
+    paddingLeft: 14,
+    borderLeftWidth: 1.5,
+    paddingRight: 16,
+  },
+  stackHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  stackHeaderTitle: {
+    fontWeight: "700",
+  },
+  collapseButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 0,
+  },
+  collapseButtonText: {
+    fontWeight: "600",
+  },
+  showMoreButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    borderWidth: 0,
+  },
+  showMoreText: {
+    fontWeight: "600",
+  },
+  childSwipeableContainer: {
+    borderRadius: 22,
+    overflow: "hidden",
+    marginBottom: 8,
+  },
+  childSwipeActionsContainer: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    justifyContent: "flex-end",
+    height: "100%",
+    backgroundColor: "#101010",
+    paddingHorizontal: 0,
+    overflow: "hidden",
+  },
+  childSwipeActionButton: {
+    width: 50,
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+    position: "relative",
+  },
+  stackedCardContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 22,
+    minHeight: 66,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 0,
+    borderWidth: 0,
+  },
+  stackedDetailCardContainer: {
+    alignItems: "flex-start",
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+  },
+  stackedAvatarWrapper: {
+    position: "relative",
+    marginRight: 12,
+  },
+  stackedAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#202024",
+  },
+  stackedAvatarFallback: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  stackedInitialText: {
+    fontWeight: "700",
+  },
+  stackedMiniBadge: {
+    position: "absolute",
+    bottom: -1,
+    right: -1,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1.5,
+  },
+  stackedCardContent: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  missedCallHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 2,
+  },
+  missedCallBadgeText: {
+    color: "#FF5A5F",
+    fontWeight: "700",
+  },
+  stackedMessageTitle: {
+    fontWeight: "500",
+    marginBottom: 2,
+  },
+  stackedMessageTitleMultiline: {
+    lineHeight: 20,
+    marginTop: 0,
+    marginBottom: 8,
+  },
+  stackedTimestampText: {
+    fontWeight: "400",
+  },
+
+  /* 6. Empty / Loading State */
   centerLoading: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-  },
-  loadingSubtitle: {
-    color: "rgba(255, 255, 255, 0.5)",
-    fontSize: 13,
-    marginTop: 12,
-    fontWeight: "600",
   },
   emptyContainer: {
     flex: 1,
@@ -1920,279 +3621,18 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: "rgba(255, 255, 255, 0.04)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 16,
+    borderWidth: 0,
   },
   emptyTitle: {
-    fontSize: 18,
     fontWeight: "800",
-    color: "#ffffff",
     textAlign: "center",
   },
   emptyDescription: {
-    fontSize: 13,
     lineHeight: 19,
-    color: "rgba(255, 255, 255, 0.5)",
     textAlign: "center",
     marginTop: 8,
-  },
-  emptyResetBtn: {
-    marginTop: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 20,
-  },
-  emptyResetText: {
-    color: "#ffffff",
-    fontSize: 12.5,
-    fontWeight: "700",
-  },
-
-  /* Detail Bottom Sheet */
-  modalOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-  },
-  modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
-  },
-  detailSheetContainer: {
-    backgroundColor: "#121216",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
-    maxHeight: "85%",
-    paddingBottom: Platform.OS === "ios" ? 36 : 24,
-  },
-  sheetHandleBar: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    alignSelf: "center",
-    marginTop: 10,
-    marginBottom: 6,
-  },
-  sheetHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255, 255, 255, 0.06)",
-  },
-  sheetHeaderAvatarRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-    marginRight: 10,
-  },
-  sheetAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#202024",
-  },
-  sheetAvatarFallback: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  sheetSenderName: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#ffffff",
-  },
-  sheetTypeBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 8,
-    paddingVertical: 2.5,
-    borderRadius: 8,
-  },
-  sheetTypeBadgeText: {
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  sheetTimeText: {
-    fontSize: 11.5,
-    color: "rgba(255, 255, 255, 0.4)",
-    marginLeft: 6,
-  },
-  sheetCloseButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  exactTimeBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    backgroundColor: "rgba(255, 255, 255, 0.02)",
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255, 255, 255, 0.04)",
-  },
-  exactTimeText: {
-    fontSize: 11.5,
-    color: "rgba(255, 255, 255, 0.45)",
-    fontWeight: "500",
-  },
-  sheetScroll: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  sheetMessageText: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: "rgba(255, 255, 255, 0.88)",
-  },
-  sheetRequestActions: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 20,
-  },
-  sheetAcceptBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#ffffff",
-  },
-  sheetRejectBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(239, 68, 68, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.25)",
-  },
-  sheetActionBtnText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  sheetPrimaryCta: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    height: 46,
-    borderRadius: 23,
-    marginTop: 20,
-    backgroundColor: "#ffffff",
-  },
-  sheetPrimaryCtaText: {
-    color: "#000000",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  sheetFooter: {
-    flexDirection: "row",
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255, 255, 255, 0.06)",
-  },
-  sheetSecondaryBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.08)",
-  },
-  sheetSecondaryBtnText: {
-    color: "rgba(255, 255, 255, 0.8)",
-    fontSize: 12.5,
-    fontWeight: "600",
-  },
-
-  /* Options Popup Modal */
-  optionsPopup: {
-    backgroundColor: "#16161b",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: Platform.OS === "ios" ? 36 : 24,
-    marginTop: "auto",
-  },
-  optionsHandle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    alignSelf: "center",
-    marginBottom: 14,
-  },
-  optionsTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#ffffff",
-    marginBottom: 14,
-  },
-  optionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255, 255, 255, 0.05)",
-  },
-  optionIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 14,
-  },
-  optionTextBox: {
-    flex: 1,
-  },
-  optionRowTitle: {
-    fontSize: 14.5,
-    fontWeight: "700",
-    color: "#ffffff",
-  },
-  optionRowSubtitle: {
-    fontSize: 12,
-    color: "rgba(255, 255, 255, 0.45)",
-    marginTop: 2,
-  },
-  optionsCloseBtn: {
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255, 255, 255, 0.07)",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 16,
-  },
-  optionsCloseText: {
-    color: "#ffffff",
-    fontSize: 13.5,
-    fontWeight: "700",
   },
 });

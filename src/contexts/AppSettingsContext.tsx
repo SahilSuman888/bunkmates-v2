@@ -14,7 +14,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import * as Haptics from "expo-haptics";
-import { Platform, AccessibilityInfo } from "react-native";
+import { Platform, AccessibilityInfo, Linking } from "react-native";
 import { auth, db } from "../lib/firebase";
 import {
   NotificationCategory,
@@ -23,6 +23,33 @@ import {
   isQuietHoursActiveNow,
   shouldDeliverNotification as checkNotificationDelivery,
 } from "../lib/NotificationService";
+
+// -------------------------------------------------------------
+// MAPS & NAVIGATION TYPES & DEFAULTS
+// -------------------------------------------------------------
+export type MapProvider = "Apple Maps" | "Google Maps" | "Waze";
+export type StyleProfile = "Standard" | "Satellite" | "Terrain";
+export type DistanceUnit = "mi" | "km" | "nm";
+
+export interface MapsPreferences {
+  mapProvider: MapProvider;
+  distanceUnit: DistanceUnit;
+  autoReroute: boolean;
+  avoidTolls: boolean;
+  styleProfile: StyleProfile;
+  showPOI: boolean;
+}
+
+export const DEFAULT_MAPS_PREFERENCES: MapsPreferences = {
+  mapProvider: "Google Maps",
+  distanceUnit: "mi",
+  autoReroute: true,
+  avoidTolls: false,
+  styleProfile: "Standard",
+  showPOI: true,
+};
+
+// -------------------------------------------------------------
 // TYPES & DEFAULTS
 // -------------------------------------------------------------
 
@@ -127,6 +154,9 @@ export interface AppSettingsContextType {
   showSymbol: boolean;
   autoRoundOff: boolean;
   splitMethod: string;
+  autoCategorize: boolean;
+  savingsGoalEnabled: boolean;
+  savingsGoalAmount: number;
   formatCurrency: (amount: number | string | undefined | null) => string;
   updateCurrencyPreferences: (prefs: Partial<CurrencyPreferences>) => Promise<void>;
 
@@ -152,6 +182,12 @@ export interface AppSettingsContextType {
   ) => number | null;
   formatWindSpeed: (speedMps: number | undefined | null) => string;
   updateWeatherPreferences: (prefs: Partial<WeatherPreferences>) => Promise<void>;
+
+  // Maps & Navigation
+  mapsPreferences: MapsPreferences;
+  formatDistance: (distanceInKm: number | string | undefined | null) => string;
+  openMapDirections: (origin?: string, destination?: string) => Promise<void>;
+  updateMapsPreferences: (prefs: Partial<MapsPreferences>) => Promise<void>;
 
   // Locale & Formats
   dateFormat: DateFormat;
@@ -219,6 +255,10 @@ const memoryCache = {
   currency: DEFAULT_CURRENCY,
   showSymbol: true,
   autoRoundOff: false,
+  autoCategorize: true,
+  savingsGoalEnabled: false,
+  savingsGoalAmount: 0,
+  mapsPreferences: DEFAULT_MAPS_PREFERENCES,
   tempUnit: "°C" as TempUnit,
   dateFormat: "DD/MM/YYYY" as DateFormat,
   is24Hour: false,
@@ -233,6 +273,67 @@ const memoryCache = {
   hidePastTrips: false,
   notificationPreferences: DEFAULT_NOTIFICATION_PREFERENCES,
 };
+
+export function formatDistanceValue(
+  distanceInKm: number | string | undefined | null,
+  unit: DistanceUnit = memoryCache.mapsPreferences.distanceUnit
+): string {
+  if (distanceInKm === undefined || distanceInKm === null || distanceInKm === "") {
+    return "--";
+  }
+  const km = typeof distanceInKm === "number" ? distanceInKm : parseFloat(String(distanceInKm));
+  if (isNaN(km)) return String(distanceInKm);
+
+  if (unit === "mi") {
+    const mi = (km * 0.621371).toFixed(1);
+    return `${mi} mi`;
+  } else if (unit === "nm") {
+    const nm = (km * 0.539957).toFixed(1);
+    return `${nm} nm`;
+  } else {
+    return `${km.toFixed(1)} km`;
+  }
+}
+
+export async function openExternalMapDirections(
+  origin?: string,
+  destination?: string,
+  prefs: MapsPreferences = memoryCache.mapsPreferences
+): Promise<void> {
+  const org = encodeURIComponent(origin || "");
+  const dest = encodeURIComponent(destination || "");
+  if (!dest && !org) return;
+
+  let url = `https://www.google.com/maps/dir/?api=1&origin=${org}&destination=${dest}${prefs.avoidTolls ? "&avoid=tolls" : ""}`;
+
+  if (prefs.mapProvider === "Apple Maps") {
+    const appleNative = `maps://?saddr=${org}&daddr=${dest}`;
+    try {
+      const can = await Linking.canOpenURL(appleNative);
+      if (can) {
+        await Linking.openURL(appleNative);
+        return;
+      }
+    } catch {}
+    url = `https://maps.apple.com/?saddr=${org}&daddr=${dest}`;
+  } else if (prefs.mapProvider === "Waze") {
+    const wazeNative = `waze://?q=${dest}&navigate=yes`;
+    try {
+      const can = await Linking.canOpenURL(wazeNative);
+      if (can) {
+        await Linking.openURL(wazeNative);
+        return;
+      }
+    } catch {}
+    url = `https://waze.com/ul?q=${dest}&navigate=yes`;
+  }
+
+  try {
+    await Linking.openURL(url);
+  } catch (err) {
+    console.log("Failed to open map directions URL:", err);
+  }
+}
 
 export function triggerAppHaptic(type: HapticType = "selection") {
   if (!memoryCache.hapticFeedback) return;
@@ -407,6 +508,12 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
   const [showSymbol, setShowSymbol] = useState<boolean>(true);
   const [autoRoundOff, setAutoRoundOff] = useState<boolean>(false);
   const [splitMethod, setSplitMethod] = useState<string>("Equally");
+  const [autoCategorize, setAutoCategorize] = useState<boolean>(true);
+  const [savingsGoalEnabled, setSavingsGoalEnabled] = useState<boolean>(false);
+  const [savingsGoalAmount, setSavingsGoalAmount] = useState<number>(0);
+
+  // Maps & Navigation
+  const [mapsPreferences, setMapsPreferences] = useState<MapsPreferences>(DEFAULT_MAPS_PREFERENCES);
 
   // Weather
   const [tempUnit, setTempUnit] = useState<TempUnit>("°C");
@@ -480,6 +587,10 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
     memoryCache.currency = currency;
     memoryCache.showSymbol = showSymbol;
     memoryCache.autoRoundOff = autoRoundOff;
+    memoryCache.autoCategorize = autoCategorize;
+    memoryCache.savingsGoalEnabled = savingsGoalEnabled;
+    memoryCache.savingsGoalAmount = savingsGoalAmount;
+    memoryCache.mapsPreferences = mapsPreferences;
     memoryCache.tempUnit = tempUnit;
     memoryCache.dateFormat = dateFormat;
     memoryCache.is24Hour = is24Hour;
@@ -497,6 +608,10 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
     currency,
     showSymbol,
     autoRoundOff,
+    autoCategorize,
+    savingsGoalEnabled,
+    savingsGoalAmount,
+    mapsPreferences,
     tempUnit,
     dateFormat,
     is24Hour,
@@ -535,6 +650,7 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
           savedAna,
           cachedTrip,
           cachedNotif,
+          cachedMaps,
         ] = await Promise.all([
           AsyncStorage.getItem("@bunkmates_currency_preferences"),
           AsyncStorage.getItem("@bunkmates_weather_preferences"),
@@ -546,6 +662,7 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
           AsyncStorage.getItem("analytics_collection"),
           AsyncStorage.getItem("@bunkmates_trip_preferences"),
           AsyncStorage.getItem("@bunkmates_notification_preferences"),
+          AsyncStorage.getItem("@bunkmates_maps_navigation_preferences"),
         ]);
 
         if (cachedCurr) {
@@ -554,6 +671,16 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
           if (parsed.showSymbol !== undefined) setShowSymbol(parsed.showSymbol);
           if (parsed.autoRoundOff !== undefined) setAutoRoundOff(parsed.autoRoundOff);
           if (parsed.splitMethod) setSplitMethod(parsed.splitMethod);
+          if (parsed.autoCategorize !== undefined) setAutoCategorize(parsed.autoCategorize);
+          if (parsed.savingsGoalEnabled !== undefined) setSavingsGoalEnabled(parsed.savingsGoalEnabled);
+          if (parsed.savingsGoalAmount !== undefined) setSavingsGoalAmount(parsed.savingsGoalAmount);
+        }
+
+        if (cachedMaps) {
+          try {
+            const parsedMaps = JSON.parse(cachedMaps);
+            setMapsPreferences((prev) => ({ ...prev, ...parsedMaps }));
+          } catch {}
         }
 
         if (cachedWeather) {
@@ -649,6 +776,14 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
           if (cp.showSymbol !== undefined) setShowSymbol(cp.showSymbol);
           if (cp.autoRoundOff !== undefined) setAutoRoundOff(cp.autoRoundOff);
           if (cp.splitMethod) setSplitMethod(cp.splitMethod);
+          if (cp.autoCategorize !== undefined) setAutoCategorize(cp.autoCategorize);
+          if (cp.savingsGoalEnabled !== undefined) setSavingsGoalEnabled(cp.savingsGoalEnabled);
+          if (cp.savingsGoalAmount !== undefined) setSavingsGoalAmount(cp.savingsGoalAmount);
+        }
+
+        // Maps & Navigation
+        if (data.mapsPreferences) {
+          setMapsPreferences((prev) => ({ ...prev, ...data.mapsPreferences }));
         }
 
         // Weather
@@ -742,6 +877,9 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
       if (prefs.showSymbol !== undefined) setShowSymbol(prefs.showSymbol);
       if (prefs.autoRoundOff !== undefined) setAutoRoundOff(prefs.autoRoundOff);
       if (prefs.splitMethod) setSplitMethod(prefs.splitMethod);
+      if (prefs.autoCategorize !== undefined) setAutoCategorize(prefs.autoCategorize);
+      if (prefs.savingsGoalEnabled !== undefined) setSavingsGoalEnabled(prefs.savingsGoalEnabled);
+      if (prefs.savingsGoalAmount !== undefined) setSavingsGoalAmount(prefs.savingsGoalAmount);
 
       try {
         const cached = await AsyncStorage.getItem("@bunkmates_currency_preferences");
@@ -768,6 +906,55 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
       }
     },
     [user]
+  );
+
+  const updateMapsPreferences = useCallback(
+    async (prefs: Partial<MapsPreferences>) => {
+      setMapsPreferences((prev) => {
+        const next = { ...prev, ...prefs };
+        memoryCache.mapsPreferences = next;
+        return next;
+      });
+
+      try {
+        const cached = await AsyncStorage.getItem("@bunkmates_maps_navigation_preferences");
+        const existing = cached ? JSON.parse(cached) : {};
+        const updated = { ...existing, ...prefs };
+        await AsyncStorage.setItem(
+          "@bunkmates_maps_navigation_preferences",
+          JSON.stringify(updated)
+        );
+      } catch (e) {
+        console.log("updateMapsPreferences AsyncStorage error:", e);
+      }
+
+      if (user) {
+        try {
+          const userDocRef = doc(db, "users", user.uid);
+          await updateDoc(userDocRef, {
+            mapsPreferences: prefs,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (e) {
+          console.log("updateMapsPreferences Firestore error:", e);
+        }
+      }
+    },
+    [user]
+  );
+
+  const formatDistance = useCallback(
+    (distanceInKm: number | string | undefined | null) => {
+      return formatDistanceValue(distanceInKm, mapsPreferences.distanceUnit);
+    },
+    [mapsPreferences.distanceUnit]
+  );
+
+  const openMapDirections = useCallback(
+    async (origin?: string, destination?: string) => {
+      return openExternalMapDirections(origin, destination, mapsPreferences);
+    },
+    [mapsPreferences]
   );
 
   const updateWeatherPreferences = useCallback(
@@ -1152,8 +1339,17 @@ export const AppSettingsProvider: React.FC<{ children: ReactNode }> = ({ childre
         showSymbol,
         autoRoundOff,
         splitMethod,
+        autoCategorize,
+        savingsGoalEnabled,
+        savingsGoalAmount,
         formatCurrency,
         updateCurrencyPreferences,
+
+        // Maps & Navigation
+        mapsPreferences,
+        formatDistance,
+        openMapDirections,
+        updateMapsPreferences,
 
         // Weather
         weatherPreferences: {
@@ -1248,8 +1444,16 @@ export function useAppSettings(): AppSettingsContextType {
       showSymbol: memoryCache.showSymbol,
       autoRoundOff: memoryCache.autoRoundOff,
       splitMethod: "Equally",
+      autoCategorize: memoryCache.autoCategorize,
+      savingsGoalEnabled: memoryCache.savingsGoalEnabled,
+      savingsGoalAmount: memoryCache.savingsGoalAmount,
       formatCurrency: (amt) => formatCurrencyValue(amt),
       updateCurrencyPreferences: async () => {},
+
+      mapsPreferences: memoryCache.mapsPreferences,
+      formatDistance: (dist) => formatDistanceValue(dist),
+      openMapDirections: async (o, d) => openExternalMapDirections(o, d),
+      updateMapsPreferences: async () => {},
 
       tempUnit: memoryCache.tempUnit,
       forecastHorizon: "5 Days",

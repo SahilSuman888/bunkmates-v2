@@ -18,6 +18,7 @@ import {
   Alert,
   ActivityIndicator,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -28,6 +29,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 interface OpenSourceLib {
@@ -122,6 +124,8 @@ const SOCIAL_LINKS = [
 ];
 
 export default function AboutScreen() {
+  const insets = useSafeAreaInsets();
+  const topInset = insets.top > 0 ? insets.top : Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 44;
   const router = useRouter();
   const { t } = useLanguage();
   const { themeColors, accentColor, isDark } = useThemeToggle();
@@ -201,7 +205,7 @@ export default function AboutScreen() {
   // Handle verify developer passkey against Firestore
   const handleVerifyDevKey = async () => {
     if (!enteredKey.trim()) {
-      Alert.alert("Required", "Please enter the developer key.");
+      triggerToast("Please enter the developer key.");
       return;
     }
 
@@ -218,23 +222,14 @@ export default function AboutScreen() {
         try {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         } catch (e) {}
-        Alert.alert(
-          "Developer Mode",
-          "🧑‍💻 Developer Mode Unlocked!",
-          [
-            {
-              text: "Open Developer Tools",
-              onPress: () => router.push("/settings/developers" as any),
-            },
-            { text: "OK" },
-          ]
-        );
+        triggerToast("🧑‍💻 Developer Mode Unlocked!");
+        router.push("/settings/developers" as any);
       } else {
-        Alert.alert("Invalid Developer Key", "The developer key is incorrect.");
+        triggerToast("Invalid key: The developer key is incorrect.");
       }
     } catch (error) {
       console.error("Error verifying developer key:", error);
-      Alert.alert("Error", "Could not verify the developer key. Try again later.");
+      triggerToast("Could not verify the developer key. Try again later.");
     } finally {
       setVerifyingKey(false);
     }
@@ -276,7 +271,7 @@ export default function AboutScreen() {
       bg: themeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
       card: themeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"),
       cardBorder: "transparent",
-      divider: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)",
+      divider: (themeColors as any)?.divider ?? (isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)"),
       textPrimary: themeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
       textSecondary: themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
       sectionHeader: themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
@@ -391,8 +386,14 @@ export default function AboutScreen() {
         </Animated.View>
       )}
 
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
       {/* Header with Circular Back Button */}
-      <View style={styles.header}>
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => {
             if (router.canGoBack()) router.back();
@@ -401,9 +402,11 @@ export default function AboutScreen() {
           style={({ pressed }) => [
             styles.modernHeaderBtn,
             {
-              backgroundColor: colors.card,
-              borderColor: colors.cardBorder,
-              opacity: pressed ? 0.7 : 1,
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
             },
           ]}
           accessibilityLabel={t("back", "Back")}
@@ -532,12 +535,7 @@ export default function AboutScreen() {
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="document-text-outline" size={20} color={colors.greyishWhite} />
             </View>
-            <View
-              style={[
-                styles.rowContent,
-                { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth },
-              ]}
-            >
+            <View style={styles.rowContent}>
               <View style={{ flex: 1, paddingRight: 8 }}>
                 <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
                   {t("Terms & Condition", "Terms & Condition")}
@@ -549,6 +547,8 @@ export default function AboutScreen() {
               <Ionicons name="open-outline" size={17} color={colors.chevron} />
             </View>
           </Pressable>
+
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Privacy Policy (Redirects to https://app-beta.bunkmates.xyz/privacy-policy) */}
           <Pressable
@@ -562,12 +562,7 @@ export default function AboutScreen() {
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="shield-checkmark-outline" size={20} color={colors.greyishWhite} />
             </View>
-            <View
-              style={[
-                styles.rowContent,
-                { borderBottomColor: colors.divider, borderBottomWidth: StyleSheet.hairlineWidth },
-              ]}
-            >
+            <View style={styles.rowContent}>
               <View style={{ flex: 1, paddingRight: 8 }}>
                 <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
                   {t("Privacy Policy", "Privacy Policy")}
@@ -579,6 +574,8 @@ export default function AboutScreen() {
               <Ionicons name="open-outline" size={17} color={colors.chevron} />
             </View>
           </Pressable>
+
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Open Source Licenses */}
           <Pressable
@@ -687,7 +684,7 @@ export default function AboutScreen() {
           )}
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }} contentContainerStyle={{ paddingBottom: 28 }}>
           {filteredLicenses.length === 0 ? (
             <View style={{ paddingVertical: 32, alignItems: "center" }}>
               <Text style={{ color: colors.textSecondary, fontSize: 13 }}>No libraries match your search.</Text>
@@ -805,6 +802,10 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     overflow: "hidden",
     marginBottom: 26,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
   },
   rowItem: {
     flexDirection: "row",

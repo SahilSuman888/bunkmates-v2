@@ -58,9 +58,16 @@ const CATEGORIES = [
 ];
 
 export default function BudgetScreen() {
-  const { currency, formatCurrency, formatDate } = useAppSettings();
+  const {
+    currency,
+    formatCurrency,
+    formatDate,
+    savingsGoalEnabled,
+    savingsGoalAmount,
+    autoCategorize,
+  } = useAppSettings();
   const { t } = useLanguage();
-  const { themeColors, isDark, accentColor, scaleFont, background } = useThemeToggle();
+  const { themeColors, isDark, accentColor, onAccentTextColor, scaleFont, background } = useThemeToggle();
   const isAtmosphere = background.mode !== "solid";
   const [authInitialized, setAuthInitialized] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -72,6 +79,19 @@ export default function BudgetScreen() {
   const [amount, setAmount] = useState("");
   const [filterCategory, setFilterCategory] = useState("All");
   const [viewMode, setViewMode] = useState<"list" | "chart">("list");
+
+  const detectCategory = (text: string): string | null => {
+    const lower = text.toLowerCase();
+    if (lower.match(/\b(food|lunch|dinner|breakfast|snack|coffee|cafe|pizza|burger|starbucks|restaurant|eat|tea|grocer|meal|drink)\b/)) return "Food";
+    if (lower.match(/\b(uber|taxi|cab|flight|train|bus|metro|gas|petrol|diesel|fuel|parking|toll|transit|fare|drive)\b/)) return "Transport";
+    if (lower.match(/\b(rent|hotel|hostel|airbnb|stay|room|apartment|dorm|booking)\b/)) return "Rent";
+    if (lower.match(/\b(electric|power|water|bill|wifi|internet|recharge|sim|gas\s*bill|utility)\b/)) return "Utilities";
+    if (lower.match(/\b(shop|cloth|dress|shirt|shoes|mall|amazon|store|buy|purchase)\b/)) return "Shopping";
+    if (lower.match(/\b(movie|cinema|netflix|concert|club|party|game|bar|pub|show|beer|alcohol)\b/)) return "Entertainment";
+    if (lower.match(/\b(med|doctor|hospital|pharmacy|pill|health|clinic|dentist|drug)\b/)) return "Medical";
+    if (lower.match(/\b(book|course|school|college|tuition|class|exam|study|lecture)\b/)) return "Education";
+    return null;
+  };
 
   // ═══════════════════════════════════════════════════════════════
   // AUTH & DATA FETCHING
@@ -226,7 +246,7 @@ export default function BudgetScreen() {
             onPress={() => setShowModal(true)}
             style={[styles.addButton, { backgroundColor: accentColor }]}
           >
-            <MaterialCommunityIcons name="plus" size={20} color="#fff" />
+            <MaterialCommunityIcons name="plus" size={20} color={onAccentTextColor} />
           </Pressable>
         </View>
 
@@ -234,7 +254,7 @@ export default function BudgetScreen() {
         <View style={[styles.statsCard, { backgroundColor: themeColors.card, borderWidth: 0 }]}>
           <View style={styles.statItem}>
             <Text style={[styles.statLabel, { color: themeColors.textSecondary, fontSize: scaleFont(11) }]}>{t("Total Spent")}</Text>
-            <Text style={[styles.statAmount, { color: accentColor, fontSize: scaleFont(18) }]}>{formatCurrency(totalExpense)}</Text>
+            <Text style={[styles.statAmount, { color: themeColors.accentText, fontSize: scaleFont(18) }]}>{formatCurrency(totalExpense)}</Text>
           </View>
           <View style={[styles.statDivider, { backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)" }]} />
           <View style={styles.statItem}>
@@ -242,6 +262,59 @@ export default function BudgetScreen() {
             <Text style={[styles.statAmount, { color: themeColors.text, fontSize: scaleFont(18) }]}>{filteredExpenses.length}</Text>
           </View>
         </View>
+
+        {/* Savings / Budget Goal Progress Card (when enabled in Settings) */}
+        {savingsGoalEnabled && savingsGoalAmount > 0 && (
+          <View
+            style={{
+              backgroundColor: themeColors.card,
+              borderRadius: 16,
+              padding: 14,
+              marginBottom: 12,
+              borderWidth: 1,
+              borderColor: totalExpense > savingsGoalAmount ? "rgba(239, 68, 68, 0.4)" : "transparent",
+            }}
+          >
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <MaterialCommunityIcons
+                  name={totalExpense > savingsGoalAmount ? "alert-circle" : "shield-check"}
+                  size={16}
+                  color={totalExpense > savingsGoalAmount ? "#ef4444" : "#10b981"}
+                />
+                <Text style={{ color: themeColors.text, fontSize: scaleFont(13), fontWeight: "700" }}>
+                  {t("Monthly Budget Goal")}
+                </Text>
+              </View>
+              <Text style={{ color: themeColors.textSecondary, fontSize: scaleFont(12) }}>
+                {formatCurrency(totalExpense)} / {formatCurrency(savingsGoalAmount)}
+              </Text>
+            </View>
+
+            {/* Progress Bar */}
+            <View style={{ height: 6, backgroundColor: isDark ? "#28282c" : "#e5e7eb", borderRadius: 3, overflow: "hidden" }}>
+              <View
+                style={{
+                  height: "100%",
+                  width: `${Math.min(100, Math.round((totalExpense / savingsGoalAmount) * 100))}%`,
+                  backgroundColor: totalExpense > savingsGoalAmount ? "#ef4444" : (accentColor || "#38bdf8"),
+                  borderRadius: 3,
+                }}
+              />
+            </View>
+
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
+              <Text style={{ color: totalExpense > savingsGoalAmount ? "#ef4444" : themeColors.textSecondary, fontSize: scaleFont(11), fontWeight: "600" }}>
+                {totalExpense > savingsGoalAmount
+                  ? `${t("Over budget by")} ${formatCurrency(totalExpense - savingsGoalAmount)}`
+                  : `${t("Remaining")}: ${formatCurrency(savingsGoalAmount - totalExpense)}`}
+              </Text>
+              <Text style={{ color: themeColors.textSecondary, fontSize: scaleFont(11) }}>
+                {Math.round((totalExpense / savingsGoalAmount) * 100)}%
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* View Mode Toggle */}
         <View style={styles.viewToggle}>
@@ -433,7 +506,13 @@ export default function BudgetScreen() {
                   placeholder={t("What did you spend on?")}
                   placeholderTextColor={themeColors.textSecondary}
                   value={description}
-                  onChangeText={setDescription}
+                  onChangeText={(text) => {
+                    setDescription(text);
+                    if (autoCategorize) {
+                      const detected = detectCategory(text);
+                      if (detected) setSelectedCategory(detected);
+                    }
+                  }}
                 />
 
                 {/* Amount */}
@@ -543,7 +622,7 @@ function ExpenseCard({
         </View>
 
         <View style={styles.expenseRight}>
-          <Text style={[styles.expenseAmount, { color: accentColor, fontSize: scaleFont(14) }]}>{formatCurrency(expense.amount)}</Text>
+          <Text style={[styles.expenseAmount, { color: themeColors.accentText, fontSize: scaleFont(14) }]}>{formatCurrency(expense.amount)}</Text>
           <Text style={[styles.expenseDate, { color: themeColors.textSecondary, fontSize: scaleFont(10) }]}>
             {formatDate(expense.date)}
           </Text>

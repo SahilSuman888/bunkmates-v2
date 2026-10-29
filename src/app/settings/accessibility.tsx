@@ -13,15 +13,16 @@ import {
   Pressable,
   ScrollView,
   Platform,
-  Switch,
   Modal,
   StatusBar,
   Appearance,
   Animated,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { useAppSettings } from "../../contexts/AppSettingsContext";
@@ -32,8 +33,11 @@ import {
   getAccessibleHitSlop,
 } from "../../theme/accessibility";
 import { SwipeableDrawer } from "./_components/SwipeableDrawer";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 
 export default function AccessibilityScreen() {
+  const insets = useSafeAreaInsets();
+  const topInset = insets.top > 0 ? insets.top : Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 44;
   const router = useRouter();
   const { t } = useLanguage();
   const {
@@ -57,18 +61,27 @@ export default function AccessibilityScreen() {
   // Floating save/action toast state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastOpacity] = useState(() => new Animated.Value(0));
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const triggerToast = useCallback(
     (msg: string) => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+        toastTimeoutRef.current = null;
+      }
+      toastOpacity.stopAnimation();
       setToastMessage(msg);
+
       if (reduceMotion) {
         toastOpacity.setValue(1);
-        setTimeout(() => {
+        toastTimeoutRef.current = setTimeout(() => {
           toastOpacity.setValue(0);
           setToastMessage(null);
         }, 1500);
         return;
       }
+
+      toastOpacity.setValue(0);
       Animated.sequence([
         Animated.timing(toastOpacity, {
           toValue: 1,
@@ -81,7 +94,11 @@ export default function AccessibilityScreen() {
           duration: 220,
           useNativeDriver: true,
         }),
-      ]).start(() => setToastMessage(null));
+      ]).start((result) => {
+        if (result.finished) {
+          setToastMessage(null);
+        }
+      });
     },
     [toastOpacity, reduceMotion]
   );
@@ -89,11 +106,13 @@ export default function AccessibilityScreen() {
   // Theme resolution matching Bunkmates settings design system
   let themeMode: "dark" | "light" | "system" = "system";
   let dynamicThemeColors: any = null;
+  let dynamicAccent = "#FF5A5F";
   try {
     const themeContext = useThemeToggle();
     if (themeContext) {
       if (themeContext.mode) themeMode = themeContext.mode;
       dynamicThemeColors = themeContext.themeColors;
+      if (themeContext.accentColor) dynamicAccent = themeContext.accentColor;
     }
   } catch (e) {}
 
@@ -101,7 +120,7 @@ export default function AccessibilityScreen() {
     themeMode === "dark" ||
     (themeMode === "system" && Appearance.getColorScheme() === "dark");
 
-  // Dynamic colors derived from Bunkmates Settings design system (zero harsh red, greyish-white accents)
+  // Dynamic colors derived from Bunkmates Settings design system
   const colors = useMemo(() => {
     const greyishWhite = isDark ? "#E2E8F0" : "#4B5563";
 
@@ -135,8 +154,8 @@ export default function AccessibilityScreen() {
         : "#111827"
       : dynamicThemeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590");
 
-    // Native green active tint matching iOS/Android system switches and Settings pages
-    const switchActive = isDark ? "#34C759" : "#10B981";
+    // Dynamic active switch tint matching app accent colors
+    const switchActive = dynamicThemeColors?.accent || dynamicAccent;
     const switchInactive = isDark ? "#2A2D36" : "#E5E7EB";
 
     return {
@@ -150,14 +169,14 @@ export default function AccessibilityScreen() {
       chevron: isDark ? "#555860" : "#B4B9C2",
       switchActive,
       switchInactive,
-      divider: isDark ? "#202024" : "#F0F2F5",
+      divider: dynamicThemeColors?.divider ?? (isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)"),
       modalOverlay: "rgba(0, 0, 0, 0.65)",
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
       activeRowBg: isDark ? "#202024" : "#F4F5F7",
       chipBg: isDark ? "#202024" : "#EEF2F6",
     };
-  }, [isDark, highContrastMode, dynamicThemeColors]);
+  }, [isDark, highContrastMode, dynamicThemeColors, dynamicAccent]);
 
   const hitSlop = useMemo(() => getAccessibleHitSlop(largeTouchTargets), [largeTouchTargets]);
 
@@ -219,11 +238,7 @@ export default function AccessibilityScreen() {
     if (hapticFeedback) triggerHaptic("selection");
   };
 
-  const handleToggleReduceTransparency = (val: boolean) => {
-    updateAccessibilityPreferences({ reduceTransparency: val });
-    triggerToast(val ? "Reduce Transparency active (Solid surfaces)" : "Dynamic transparency active");
-    if (hapticFeedback) triggerHaptic("selection");
-  };
+
 
   const handleToggleAudioCues = (val: boolean) => {
     updateAccessibilityPreferences({ audioCues: val });
@@ -233,7 +248,7 @@ export default function AccessibilityScreen() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       {/* Floating Action/Save Toast */}
       {toastMessage && (
@@ -252,14 +267,25 @@ export default function AccessibilityScreen() {
         </Animated.View>
       )}
 
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
       {/* Header with Circular Back Button matching Settings page (modernHeaderBtn) */}
-      <View style={styles.header}>
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={hitSlop}
           accessibilityLabel={t("back", "Back")}
@@ -291,8 +317,7 @@ export default function AccessibilityScreen() {
             style={({ pressed }) => [
               styles.rowItem,
               { minHeight: largeTouchTargets ? 76 : 64 },
-              pressed && styles.pressed,
-            ]}
+              ]}
             accessible={true}
             accessibilityRole="switch"
             accessibilityState={{ checked: screenReaderCompat }}
@@ -311,13 +336,13 @@ export default function AccessibilityScreen() {
                   {t("Optimize navigation for VoiceOver & TalkBack")}
                 </Text>
               </View>
-              <Switch
-                value={screenReaderCompat}
-                onValueChange={handleToggleScreenReader}
-                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-                thumbColor="#FFFFFF"
-                hitSlop={hitSlop}
-              />
+              <View pointerEvents="none">
+                <BunkmatesAnimatedSwitch
+                  value={screenReaderCompat}
+                  activeTrackColor={colors.switchActive}
+                  inactiveTrackColor={colors.switchInactive}
+                />
+              </View>
             </View>
           </Pressable>
 
@@ -349,13 +374,13 @@ export default function AccessibilityScreen() {
                   {t("Increase text and interface element contrast")}
                 </Text>
               </View>
-              <Switch
-                value={highContrastMode}
-                onValueChange={handleToggleHighContrast}
-                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-                thumbColor="#FFFFFF"
-                hitSlop={hitSlop}
-              />
+              <View pointerEvents="none">
+                <BunkmatesAnimatedSwitch
+                  value={highContrastMode}
+                  activeTrackColor={colors.switchActive}
+                  inactiveTrackColor={colors.switchInactive}
+                />
+              </View>
             </View>
           </Pressable>
 
@@ -387,13 +412,13 @@ export default function AccessibilityScreen() {
                   {t("Expand tappable interactive elements")}
                 </Text>
               </View>
-              <Switch
-                value={largeTouchTargets}
-                onValueChange={handleToggleLargeTouchTargets}
-                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-                thumbColor="#FFFFFF"
-                hitSlop={hitSlop}
-              />
+              <View pointerEvents="none">
+                <BunkmatesAnimatedSwitch
+                  value={largeTouchTargets}
+                  activeTrackColor={colors.switchActive}
+                  inactiveTrackColor={colors.switchInactive}
+                />
+              </View>
             </View>
           </Pressable>
 
@@ -465,51 +490,13 @@ export default function AccessibilityScreen() {
                   {t("Increase text weight for enhanced legibility")}
                 </Text>
               </View>
-              <Switch
-                value={boldText}
-                onValueChange={handleToggleBoldText}
-                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-                thumbColor="#FFFFFF"
-                hitSlop={hitSlop}
-              />
-            </View>
-          </Pressable>
-
-          <View style={[styles.rowDivider, { backgroundColor: colors.divider }]} />
-
-          {/* 6. Reduce Transparency */}
-          <Pressable
-            onPress={() => handleToggleReduceTransparency(!reduceTransparency)}
-            style={({ pressed }) => [
-              styles.rowItem,
-              { minHeight: largeTouchTargets ? 76 : 64 },
-              pressed && styles.pressed,
-            ]}
-            accessible={true}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: reduceTransparency }}
-            accessibilityLabel="Reduce Transparency"
-            accessibilityHint="Double tap to toggle solid backgrounds in place of translucent blurs"
-          >
-            <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
-              <Ionicons name="layers-outline" size={20} color={colors.greyishWhite} />
-            </View>
-            <View style={styles.rowContent}>
-              <View style={styles.labelGroup}>
-                <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>
-                  {t("Reduce Transparency")}
-                </Text>
-                <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                  {t("Replace translucent glass with solid high-contrast surfaces")}
-                </Text>
+              <View pointerEvents="none">
+                <BunkmatesAnimatedSwitch
+                  value={boldText}
+                  activeTrackColor={colors.switchActive}
+                  inactiveTrackColor={colors.switchInactive}
+                />
               </View>
-              <Switch
-                value={reduceTransparency}
-                onValueChange={handleToggleReduceTransparency}
-                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-                thumbColor="#FFFFFF"
-                hitSlop={hitSlop}
-              />
             </View>
           </Pressable>
         </View>
@@ -522,7 +509,7 @@ export default function AccessibilityScreen() {
         </Text>
 
         <View style={[styles.cardGroup, { backgroundColor: colors.card }]}>
-          {/* 5. Reduce Motion */}
+          {/* 7. Reduce Motion */}
           <Pressable
             onPress={() => handleToggleReduceMotion(!reduceMotion)}
             style={({ pressed }) => [
@@ -548,19 +535,19 @@ export default function AccessibilityScreen() {
                   {t("Limit animations and decorative movements")}
                 </Text>
               </View>
-              <Switch
-                value={reduceMotion}
-                onValueChange={handleToggleReduceMotion}
-                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-                thumbColor="#FFFFFF"
-                hitSlop={hitSlop}
-              />
+              <View pointerEvents="none">
+                <BunkmatesAnimatedSwitch
+                  value={reduceMotion}
+                  activeTrackColor={colors.switchActive}
+                  inactiveTrackColor={colors.switchInactive}
+                />
+              </View>
             </View>
           </Pressable>
 
           <View style={[styles.rowDivider, { backgroundColor: colors.divider }]} />
 
-          {/* 6. Haptic Feedback */}
+          {/* 8. Haptic Feedback */}
           <Pressable
             onPress={() => handleToggleHapticFeedback(!hapticFeedback)}
             style={({ pressed }) => [
@@ -586,19 +573,19 @@ export default function AccessibilityScreen() {
                   {t("Vibrate device on key presses & confirmations")}
                 </Text>
               </View>
-              <Switch
-                value={hapticFeedback}
-                onValueChange={handleToggleHapticFeedback}
-                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-                thumbColor="#FFFFFF"
-                hitSlop={hitSlop}
-              />
+              <View pointerEvents="none">
+                <BunkmatesAnimatedSwitch
+                  value={hapticFeedback}
+                  activeTrackColor={colors.switchActive}
+                  inactiveTrackColor={colors.switchInactive}
+                />
+              </View>
             </View>
           </Pressable>
 
           <View style={[styles.rowDivider, { backgroundColor: colors.divider }]} />
 
-          {/* 8. Audio Cues */}
+          {/* 9. Audio Cues */}
           <Pressable
             onPress={() => handleToggleAudioCues(!audioCues)}
             style={({ pressed }) => [
@@ -624,13 +611,13 @@ export default function AccessibilityScreen() {
                   {t("Play tone notifications for actions and state changes")}
                 </Text>
               </View>
-              <Switch
-                value={audioCues}
-                onValueChange={handleToggleAudioCues}
-                trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-                thumbColor="#FFFFFF"
-                hitSlop={hitSlop}
-              />
+              <View pointerEvents="none">
+                <BunkmatesAnimatedSwitch
+                  value={audioCues}
+                  activeTrackColor={colors.switchActive}
+                  inactiveTrackColor={colors.switchInactive}
+                />
+              </View>
             </View>
           </Pressable>
         </View>
@@ -662,7 +649,7 @@ export default function AccessibilityScreen() {
           </Pressable>
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }} contentContainerStyle={{ paddingBottom: 24 }}>
           {COLOR_BLIND_OPTIONS.map((opt) => {
             const isSelected = colorBlindMode === opt.id;
             return (
@@ -807,7 +794,7 @@ const styles = StyleSheet.create({
   },
   rowDivider: {
     height: StyleSheet.hairlineWidth,
-    marginLeft: 68,
+    marginHorizontal: 16,
   },
   rightGroup: {
     flexDirection: "row",

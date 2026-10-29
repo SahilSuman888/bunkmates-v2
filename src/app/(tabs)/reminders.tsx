@@ -47,7 +47,7 @@ const memoryCachedReminders: Record<string, ReminderItem[]> = {};
 
 export default function RemindersScreen() {
   const router = useRouter();
-  const { isDark, themeColors, accentColor, background, scaleFont } = useThemeToggle();
+  const { isDark, themeColors, accentColor, onAccentTextColor, background, scaleFont } = useThemeToggle();
   const { user, loading: authLoading } = useUser();
   const { t } = useLanguage();
 
@@ -288,7 +288,7 @@ export default function RemindersScreen() {
             </Text>
           </View>
           <Pressable onPress={() => handleOpenForm()} style={[styles.headerAddBtn, { backgroundColor: accentColor, borderWidth: 0 }]}>
-            <Ionicons name="add" size={22} color="#ffffff" />
+            <Ionicons name="add" size={22} color={onAccentTextColor} />
           </Pressable>
         </View>
 

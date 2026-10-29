@@ -7,12 +7,14 @@ import {
   Pressable,
   ScrollView,
   Platform,
-  Switch,
-  StatusBar,
+    StatusBar,
   Appearance,
   Animated,
 } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -212,16 +214,27 @@ export default function TripPreferences() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       {/* ── Top Header ── */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={8}
           accessibilityLabel="Go back"
@@ -326,7 +339,7 @@ export default function TripPreferences() {
             </Text>
             <View style={[styles.card, { backgroundColor: colors.card }]}>
               <Pressable
-                style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                style={({ pressed }) => [styles.row, ]}
                 onPress={handleOpenCustomPreferences}
                 accessibilityRole="button"
                 accessibilityLabel="Set your trip preferences"
@@ -485,7 +498,12 @@ export default function TripPreferences() {
           {t("SMART RECOMMENDATIONS")}
         </Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleAiSuggestions(!aiSuggestions)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: aiSuggestions }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="sparkles" size={19} color={colors.greyishWhite} />
             </View>
@@ -497,13 +515,12 @@ export default function TripPreferences() {
                 {t("Receive smart recommendations for spots, routes, and bunkmates while planning trips")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={aiSuggestions}
               onValueChange={handleToggleAiSuggestions}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+              pointerEvents="none"
             />
-          </View>
+          </Pressable>
         </View>
       </ScrollView>
 

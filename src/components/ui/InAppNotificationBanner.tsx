@@ -127,20 +127,37 @@ export function InAppNotificationBanner() {
 
   if (!currentNotification) return null;
 
-  const getCategoryMeta = (cat: NotificationCategory) => {
+  const getCategoryMeta = (cat: NotificationCategory | string) => {
     switch (cat) {
-      case "tripUpdates":
-        return { icon: "airplane", color: "#38bdf8", label: "Trip Update" };
+      case "chat":
       case "chatMessages":
         return { icon: "chatbubble-ellipses", color: "#10b981", label: "Chat" };
+      case "group_chat":
+        return { icon: "people", color: "#3b82f6", label: "Group Chat" };
+      case "call":
+      case "incoming_call":
+        return { icon: "call", color: "#10b981", label: "Incoming Call" };
+      case "missed_call":
+        return { icon: "call-outline", color: "#ef4444", label: "Missed Call" };
+      case "friend_request":
+        return { icon: "person-add", color: "#8b5cf6", label: "Friend Request" };
+      case "friend_accepted":
+        return { icon: "checkmark-circle", color: "#10b981", label: "Friend Added" };
+      case "trip":
+      case "tripUpdates":
+        return { icon: "airplane", color: "#38bdf8", label: "Trip Update" };
       case "reminders":
         return { icon: "alarm", color: "#f59e0b", label: "Reminder" };
       case "recommendations":
         return { icon: "sparkles", color: "#a855f7", label: "Discovery" };
       case "promotions":
         return { icon: "pricetag", color: "#f43f5e", label: "Special Deal" };
+      case "feedback":
+        return { icon: "chatbox-ellipses", color: "#ec4899", label: "Feedback" };
+      case "like":
+        return { icon: "heart", color: "#f43f5e", label: "Like" };
       default:
-        return { icon: "notifications", color: "#ffffff", label: "Alert" };
+        return { icon: "notifications", color: "#6366f1", label: "Notification" };
     }
   };
 

@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
+  type ScrollViewInstance,
   Platform,
   Modal,
   StatusBar,
@@ -18,11 +19,13 @@ import {
   TextInput,
   Linking,
   Alert,
-  Switch,
-  KeyboardAvoidingView,
+    KeyboardAvoidingView,
 } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
+import { Ionicons, Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
@@ -32,6 +35,7 @@ import { auth, db } from "../../lib/firebase";
 import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../../theme/theme";
+import { SwipeableDrawer } from "./_components/SwipeableDrawer";
 
 interface FAQItem {
   id: string;
@@ -190,7 +194,7 @@ export default function HelpSupportScreen() {
   // Live support chat state
   const [chatMessage, setChatMessage] = useState("");
   const [isBotTyping, setIsBotTyping] = useState(false);
-  const chatScrollRef = useRef<ScrollView>(null);
+  const chatScrollRef = useRef<ScrollViewInstance>(null);
   const [chatHistory, setChatHistory] = useState<
     { sender: "bot" | "user"; text: string; time: string; isAction?: boolean }[]
   >([
@@ -324,7 +328,7 @@ export default function HelpSupportScreen() {
       bg: isDark ? "#000000" : "#F1F1F1",
       card: isDark ? "#161618" : "#FFFFFF",
       cardBorder: "transparent",
-      divider: "transparent",
+      divider: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
       textPrimary: isDark ? "#FFFFFF" : "#11141A",
       textSecondary: isDark ? "#8E95A2" : "#7E8590",
       sectionHeader: isDark ? "#8E95A2" : "#7E8590",
@@ -402,19 +406,9 @@ export default function HelpSupportScreen() {
         triggerToast("Opening email app & copied address!");
       } else {
         triggerToast(`Email copied: ${email}`);
-        Alert.alert(
-          "Email Address Copied",
-          `We've copied ${email} to your clipboard. You can paste it into your favorite email app to contact our support team.`,
-          [{ text: "OK" }]
-        );
       }
     } catch {
       triggerToast(`Email copied: ${email}`);
-      Alert.alert(
-        "Email Support",
-        `Our support email is: ${email} (Copied to clipboard). Send us a message anytime!`,
-        [{ text: "OK" }]
-      );
     }
   };
 
@@ -535,7 +529,7 @@ export default function HelpSupportScreen() {
   // Action: Submit Bug Report
   const handleSubmitBugReport = async () => {
     if (!bugTitle.trim() || !bugDescription.trim()) {
-      Alert.alert("Missing Details", "Please provide both a title and description for the bug.");
+      triggerToast("Please provide both a title and description");
       return;
     }
 
@@ -588,12 +582,6 @@ export default function HelpSupportScreen() {
     setBugDescription("");
     triggerToast(`Report filed! Reference #${ticketId}`);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-
-    Alert.alert(
-      "Bug Report Submitted",
-      `Thank you for helping us improve BunkMates! Your ticket reference is #${ticketId}. Our engineering team has logged this issue.`,
-      [{ text: "OK" }]
-    );
   };
 
   return (
@@ -618,7 +606,13 @@ export default function HelpSupportScreen() {
       )}
 
       {/* Header with Circular Back Button */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => {
             if (router.canGoBack()) router.back();
@@ -627,9 +621,11 @@ export default function HelpSupportScreen() {
           style={({ pressed }) => [
             styles.modernHeaderBtn,
             {
-              backgroundColor: colors.card,
-              borderColor: colors.cardBorder,
-              opacity: pressed ? 0.7 : 1,
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
             },
           ]}
           accessibilityLabel={t("back", "Back")}
@@ -646,9 +642,11 @@ export default function HelpSupportScreen() {
           style={({ pressed }) => [
             styles.modernHeaderBtn,
             {
-              backgroundColor: colors.card,
-              borderColor: colors.cardBorder,
-              opacity: pressed ? 0.7 : 1,
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
             },
           ]}
           accessibilityLabel="My Tickets"
@@ -826,27 +824,29 @@ export default function HelpSupportScreen() {
           {filteredCategories.map((cat, index) => {
             const isLast = index === filteredCategories.length - 1;
             return (
-              <Pressable
-                key={cat.id}
-                onPress={() => {
-                  setActiveFaqCategory(cat);
-                  setExpandedArticleId(cat.articles[0]?.id || null);
-                }}
-                style={({ pressed }) => [styles.rowItem, pressed && styles.rowPressed]}
-              >
-                <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
-                  <Ionicons name={cat.icon} size={20} color={colors.greyishWhite} />
-                </View>
-                <View style={styles.rowContent}>
-                  <View style={{ flex: 1, paddingRight: 8 }}>
-                    <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{cat.title}</Text>
-                    <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                      {cat.articles.length} articles
-                    </Text>
+              <React.Fragment key={cat.id}>
+                <Pressable
+                  onPress={() => {
+                    setActiveFaqCategory(cat);
+                    setExpandedArticleId(cat.articles[0]?.id || null);
+                  }}
+                  style={({ pressed }) => [styles.rowItem, pressed && styles.rowPressed]}
+                >
+                  <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
+                    <Ionicons name={cat.icon} size={20} color={colors.greyishWhite} />
                   </View>
-                  <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
-                </View>
-              </Pressable>
+                  <View style={styles.rowContent}>
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <Text style={[styles.rowTitle, { color: colors.textPrimary }]}>{cat.title}</Text>
+                      <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
+                        {cat.articles.length} articles
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
+                  </View>
+                </Pressable>
+                {!isLast && <View style={[styles.divider, { backgroundColor: colors.divider }]} />}
+              </React.Fragment>
             );
           })}
         </View>
@@ -879,6 +879,8 @@ export default function HelpSupportScreen() {
             </View>
           </Pressable>
 
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+
           {/* Email Support */}
           <Pressable
             onPress={handleOpenEmail}
@@ -903,6 +905,8 @@ export default function HelpSupportScreen() {
             </View>
           </Pressable>
 
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+
           {/* Report a Bug */}
           <Pressable
             onPress={() => setBugModalVisible(true)}
@@ -921,6 +925,8 @@ export default function HelpSupportScreen() {
               <Ionicons name="chevron-forward" size={17} color={colors.chevron} />
             </View>
           </Pressable>
+
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Community Forum */}
           <Pressable
@@ -957,25 +963,29 @@ export default function HelpSupportScreen() {
             </View>
             <View style={[styles.cardGroup, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
               {myTickets.slice(0, 2).map((tk, idx) => (
-                <Pressable
-                  key={tk.id}
-                  onPress={() => setTicketsModalVisible(true)}
-                  style={styles.ticketRow}
-                >
-                  <View style={{ flex: 1, paddingRight: 10 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      <Text style={[styles.ticketIdText, { color: colors.activeText }]}>#{tk.id}</Text>
-                      <View style={[styles.ticketBadge, { backgroundColor: colors.badgeBg }]}>
-                        <Text style={[styles.ticketBadgeText, { color: colors.badgeText }]}>{tk.status}</Text>
+                <React.Fragment key={tk.id}>
+                  <Pressable
+                    onPress={() => setTicketsModalVisible(true)}
+                    style={styles.ticketRow}
+                  >
+                    <View style={{ flex: 1, paddingRight: 10 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Text style={[styles.ticketIdText, { color: colors.activeText }]}>#{tk.id}</Text>
+                        <View style={[styles.ticketBadge, { backgroundColor: colors.badgeBg }]}>
+                          <Text style={[styles.ticketBadgeText, { color: colors.badgeText }]}>{tk.status}</Text>
+                        </View>
                       </View>
+                      <Text style={[styles.ticketTitleText, { color: colors.textPrimary }]} numberOfLines={1}>
+                        {tk.title}
+                      </Text>
+                      <Text style={[styles.ticketDateText, { color: colors.textSecondary }]}>{tk.createdAt}</Text>
                     </View>
-                    <Text style={[styles.ticketTitleText, { color: colors.textPrimary }]} numberOfLines={1}>
-                      {tk.title}
-                    </Text>
-                    <Text style={[styles.ticketDateText, { color: colors.textSecondary }]}>{tk.createdAt}</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color={colors.chevron} />
-                </Pressable>
+                    <Ionicons name="chevron-forward" size={16} color={colors.chevron} />
+                  </Pressable>
+                  {idx < Math.min(myTickets.length, 2) - 1 && (
+                    <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+                  )}
+                </React.Fragment>
               ))}
             </View>
           </>
@@ -985,23 +995,21 @@ export default function HelpSupportScreen() {
       </ScrollView>
 
       {/* ========================================================
-          MODAL 1: FAQ DETAILS MODAL (Accordion Articles)
+          MODAL 1: FAQ DETAILS SWIPEABLE DRAWER
       ========================================================= */}
-      <Modal
+      <SwipeableDrawer
         visible={!!activeFaqCategory}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setActiveFaqCategory(null)}
+        onClose={() => setActiveFaqCategory(null)}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
+        maxHeight="88%"
       >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setActiveFaqCategory(null)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-                {activeFaqCategory?.title}
-              </Text>
-              <Pressable
+        <View style={styles.drawerInner}>
+          <View style={styles.sheetHeader}>
+            <Text style={[styles.sheetTitle, { color: colors.textPrimary }]} numberOfLines={1}>
+              {activeFaqCategory?.title}
+            </Text>
+            <Pressable
                 onPress={() => setActiveFaqCategory(null)}
                 style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
                 hitSlop={8}
@@ -1010,7 +1018,11 @@ export default function HelpSupportScreen() {
               </Pressable>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 460 }}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ maxHeight: 460 }}
+              contentContainerStyle={{ paddingBottom: 20 }}
+            >
               {activeFaqCategory?.articles.map((art) => {
                 const isExpanded = expandedArticleId === art.id;
                 const feedback = articleFeedback[art.id];
@@ -1088,38 +1100,33 @@ export default function HelpSupportScreen() {
                 );
               })}
             </ScrollView>
-          </View>
         </View>
-      </Modal>
+      </SwipeableDrawer>
 
       {/* ========================================================
-          MODAL 2: LIVE SUPPORT CHAT
+          MODAL 2: LIVE SUPPORT CHAT SWIPEABLE DRAWER
       ========================================================= */}
-      <Modal
+      <SwipeableDrawer
         visible={contactModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setContactModalVisible(false)}
+        onClose={() => setContactModalVisible(false)}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
+        maxHeight="82%"
+        avoidKeyboard
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}
-        >
-          <Pressable style={styles.modalBackdrop} onPress={() => setContactModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder, height: "78%" }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <View
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 5,
-                    backgroundColor: "#10B981",
-                  }}
-                />
-                <View>
-                  <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>BunkMates Live Chat</Text>
+        <View style={[styles.drawerInner, { paddingBottom: 12 }]}>
+          <View style={styles.sheetHeader}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <View
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 5,
+                  backgroundColor: "#10B981",
+                }}
+              />
+              <View>
+                <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>BunkMates Live Chat</Text>
                   <Text style={[styles.chatSubheader, { color: colors.textSecondary }]}>Virtual Assistant • Instant answers</Text>
                 </View>
               </View>
@@ -1234,28 +1241,23 @@ export default function HelpSupportScreen() {
                 <Ionicons name="send" size={17} color={colors.btnPrimaryText} />
               </Pressable>
             </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </View>
+      </SwipeableDrawer>
 
       {/* ========================================================
-          MODAL 3: REPORT A BUG MODAL
+          MODAL 3: REPORT A BUG SWIPEABLE DRAWER
       ========================================================= */}
-      <Modal
+      <SwipeableDrawer
         visible={bugModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setBugModalVisible(false)}
+        onClose={() => setBugModalVisible(false)}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
+        maxHeight="86%"
+        avoidKeyboard
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}
-        >
-          <Pressable style={styles.modalBackdrop} onPress={() => setBugModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>Report a Bug</Text>
+        <View style={styles.drawerInner}>
+          <View style={styles.sheetHeader}>
+            <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>Report a Bug</Text>
               <Pressable
                 onPress={() => setBugModalVisible(false)}
                 style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
@@ -1265,7 +1267,7 @@ export default function HelpSupportScreen() {
               </Pressable>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
               <Text style={[styles.formLabel, { color: colors.textSecondary }]}>BUG TITLE</Text>
               <TextInput
                 style={[
@@ -1293,18 +1295,26 @@ export default function HelpSupportScreen() {
                       style={[
                         styles.severityPill,
                         {
-                          backgroundColor: isSelected ? colors.btnPrimaryBg : colors.chipBg,
+                          backgroundColor: isSelected ? colors.activeRowBg : colors.chipBg,
+                          borderColor: isSelected ? colors.btnPrimaryBg : "transparent",
+                          borderWidth: 1,
                         },
                       ]}
                     >
                       <Text
                         style={[
                           styles.severityPillText,
-                          { color: isSelected ? colors.btnPrimaryText : colors.textSecondary },
+                          {
+                            color: isSelected ? colors.textPrimary : colors.textSecondary,
+                            fontWeight: isSelected ? "700" : "600",
+                          },
                         ]}
                       >
                         {sev}
                       </Text>
+                      {isSelected && (
+                        <Feather name="check" size={18} color={colors.btnPrimaryBg} />
+                      )}
                     </Pressable>
                   );
                 })}
@@ -1329,7 +1339,12 @@ export default function HelpSupportScreen() {
               />
 
               {/* Include Diagnostics Toggle */}
-              <View style={[styles.diagRow, { borderColor: colors.divider }]}>
+              <Pressable
+                style={({ pressed }) => [styles.diagRow, { borderColor: colors.divider }, pressed && { opacity: 0.7 }]}
+                onPress={() => setIncludeDiagnostics(!includeDiagnostics)}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: includeDiagnostics }}
+              >
                 <View style={{ flex: 1, paddingRight: 10 }}>
                   <Text style={[styles.diagTitle, { color: colors.textPrimary }]}>
                     Attach Diagnostics
@@ -1338,13 +1353,12 @@ export default function HelpSupportScreen() {
                     Include OS ({Platform.OS} {Platform.Version}) & app logs
                   </Text>
                 </View>
-                <Switch
+                <BunkmatesAnimatedSwitch
                   value={includeDiagnostics}
                   onValueChange={setIncludeDiagnostics}
-                  trackColor={{ false: colors.chipBg, true: "#10B981" }}
-                  thumbColor={Platform.OS === "android" ? "#FFFFFF" : undefined}
+                  pointerEvents="none"
                 />
-              </View>
+              </Pressable>
 
               <Pressable
                 onPress={handleSubmitBugReport}
@@ -1360,25 +1374,22 @@ export default function HelpSupportScreen() {
                 </Text>
               </Pressable>
             </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </View>
+      </SwipeableDrawer>
 
       {/* ========================================================
-          MODAL 4: COMMUNITY FORUM HUB
+          MODAL 4: COMMUNITY FORUM HUB SWIPEABLE DRAWER
       ========================================================= */}
-      <Modal
+      <SwipeableDrawer
         visible={communityModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setCommunityModalVisible(false)}
+        onClose={() => setCommunityModalVisible(false)}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
+        maxHeight="84%"
       >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setCommunityModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder, maxHeight: "80%" }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>BunkMates Community</Text>
+        <View style={styles.drawerInner}>
+          <View style={styles.sheetHeader}>
+            <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>BunkMates Community</Text>
               <Pressable
                 onPress={() => setCommunityModalVisible(false)}
                 style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
@@ -1388,7 +1399,7 @@ export default function HelpSupportScreen() {
               </Pressable>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
               <View style={styles.communityContent}>
                 <View style={[styles.iconBoxLarge, { backgroundColor: colors.iconBoxBg }]}>
                   <Ionicons name="people" size={32} color={colors.greyishWhite} />
@@ -1451,25 +1462,22 @@ export default function HelpSupportScreen() {
                 </Text>
               </Pressable>
             </ScrollView>
-          </View>
         </View>
-      </Modal>
+      </SwipeableDrawer>
 
       {/* ========================================================
-          MODAL 5: MY TICKETS MODAL
+          MODAL 5: MY TICKETS SWIPEABLE DRAWER
       ========================================================= */}
-      <Modal
+      <SwipeableDrawer
         visible={ticketsModalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setTicketsModalVisible(false)}
+        onClose={() => setTicketsModalVisible(false)}
+        sheetStyle={[styles.drawerSheet, { backgroundColor: colors.card }]}
+        handleColor={isDark ? "rgba(255, 255, 255, 0.28)" : "rgba(0, 0, 0, 0.2)"}
+        maxHeight="80%"
       >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setTicketsModalVisible(false)} />
-          <View style={[styles.bottomSheet, { backgroundColor: colors.card, borderColor: colors.cardBorder, maxHeight: "75%" }]}>
-            <View style={[styles.sheetHandle, { backgroundColor: colors.chevron }]} />
-            <View style={styles.sheetHeader}>
-              <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>My Support Requests</Text>
+        <View style={styles.drawerInner}>
+          <View style={styles.sheetHeader}>
+            <Text style={[styles.sheetTitle, { color: colors.textPrimary }]}>My Support Requests</Text>
               <Pressable
                 onPress={() => setTicketsModalVisible(false)}
                 style={({ pressed }) => [styles.sheetCloseBtn, pressed && { opacity: 0.6 }]}
@@ -1488,7 +1496,7 @@ export default function HelpSupportScreen() {
                 </Text>
               </View>
             ) : (
-              <ScrollView showsVerticalScrollIndicator={false}>
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
                 {myTickets.map((tk, idx) => (
                   <View
                     key={tk.id}
@@ -1517,9 +1525,8 @@ export default function HelpSupportScreen() {
                 ))}
               </ScrollView>
             )}
-          </View>
         </View>
-      </Modal>
+      </SwipeableDrawer>
     </SafeAreaView>
   );
 }
@@ -1592,6 +1599,10 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     overflow: "hidden",
     marginBottom: 24,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
   },
   rowItem: {
     flexDirection: "row",
@@ -1943,20 +1954,23 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   severityRow: {
-    flexDirection: "row",
+    flexDirection: "column",
     gap: 8,
     marginBottom: 8,
+    width: "100%",
   },
   severityPill: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 14,
+    width: "100%",
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "space-between",
   },
   severityPillText: {
-    fontSize: 12,
-    fontWeight: "700",
+    fontSize: 14,
+    fontWeight: "600",
   },
   formTextarea: {
     borderRadius: 16,
@@ -2097,5 +2111,15 @@ const styles = StyleSheet.create({
   toastText: {
     fontSize: 13,
     fontWeight: "600",
+  },
+  drawerSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 8,
+  },
+  drawerInner: {
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+    paddingTop: 8,
   },
 });

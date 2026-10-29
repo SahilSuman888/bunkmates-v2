@@ -125,156 +125,12 @@ function isIconFont(style: any): boolean {
 }
 
 // -------------------------------------------------------------
-// 1. INTERCEPT: react/jsx-dev-runtime (Expo Development Server)
+// 1. INTERCEPT: React Native Text component
 // -------------------------------------------------------------
 try {
-  const jsxDev = require('react/jsx-dev-runtime');
-  if (jsxDev && jsxDev.jsxDEV && !jsxDev.jsxDEV.__accessibilityPatched) {
-    const originalJsxDev = jsxDev.jsxDEV;
+  const OriginalText = RNText;
 
-    const patchedJsxDev = function (this: any, type: any, config: any, maybeKey: any, isStatic: any, source: any, self: any) {
-      if (config) {
-        if (globalAccessibilityState.boldText && isTextComponent(type)) {
-          if (!isIconFont(config.style)) {
-            config = {
-              ...config,
-              style: Array.isArray(config.style)
-                ? [...config.style, { fontWeight: 'bold' }]
-                : [config.style, { fontWeight: 'bold' }],
-            };
-          }
-        }
-
-        if (globalAccessibilityState.largeTouchTargets) {
-          const typeName = type?.displayName || type?.name;
-          if (
-            typeName === 'Pressable' ||
-            typeName === 'TouchableOpacity' ||
-            typeName === 'TouchableHighlight'
-          ) {
-            if (!config.hitSlop) {
-              config = {
-                ...config,
-                hitSlop: { top: 12, bottom: 12, left: 12, right: 12 },
-              };
-            }
-          }
-        }
-      }
-
-      return originalJsxDev.call(this, type, config, maybeKey, isStatic, source, self);
-    };
-
-    (patchedJsxDev as any).__accessibilityPatched = true;
-    jsxDev.jsxDEV = patchedJsxDev;
-  }
-} catch (_) {}
-
-// -------------------------------------------------------------
-// 2. INTERCEPT: react/jsx-runtime (Production Builds)
-// -------------------------------------------------------------
-try {
-  const jsxRuntime = require('react/jsx-runtime');
-  if (jsxRuntime && jsxRuntime.jsx && !jsxRuntime.jsx.__accessibilityPatched) {
-    const originalJsx = jsxRuntime.jsx;
-    const originalJsxs = jsxRuntime.jsxs;
-
-    const createPatched = (orig: any) =>
-      function (this: any, type: any, config: any, maybeKey: any) {
-        if (config) {
-          if (globalAccessibilityState.boldText && isTextComponent(type)) {
-            if (!isIconFont(config.style)) {
-              config = {
-                ...config,
-                style: Array.isArray(config.style)
-                  ? [...config.style, { fontWeight: 'bold' }]
-                  : [config.style, { fontWeight: 'bold' }],
-              };
-            }
-          }
-
-          if (globalAccessibilityState.largeTouchTargets) {
-            const typeName = type?.displayName || type?.name;
-            if (
-              typeName === 'Pressable' ||
-              typeName === 'TouchableOpacity' ||
-              typeName === 'TouchableHighlight'
-            ) {
-              if (!config.hitSlop) {
-                config = {
-                  ...config,
-                  hitSlop: { top: 12, bottom: 12, left: 12, right: 12 },
-                };
-              }
-            }
-          }
-        }
-
-        return orig.call(this, type, config, maybeKey);
-      };
-
-    const patchedJsx: any = createPatched(originalJsx);
-    patchedJsx.__accessibilityPatched = true;
-    jsxRuntime.jsx = patchedJsx;
-
-    const patchedJsxs: any = createPatched(originalJsxs);
-    patchedJsxs.__accessibilityPatched = true;
-    jsxRuntime.jsxs = patchedJsxs;
-  }
-} catch (_) {}
-
-// -------------------------------------------------------------
-// 3. INTERCEPT: React.createElement (Universal Fallback)
-// -------------------------------------------------------------
-try {
-  const originalCreateElement = React.createElement;
-  if (originalCreateElement && !(originalCreateElement as any).__accessibilityPatched) {
-    const patchedCreateElement = function (this: any, type: any, config: any, ...children: any[]) {
-      if (config) {
-        if (globalAccessibilityState.boldText && isTextComponent(type)) {
-          if (!isIconFont(config.style)) {
-            config = {
-              ...config,
-              style: Array.isArray(config.style)
-                ? [...config.style, { fontWeight: 'bold' }]
-                : [config.style, { fontWeight: 'bold' }],
-            };
-          }
-        }
-
-        if (globalAccessibilityState.largeTouchTargets) {
-          const typeName = type?.displayName || type?.name;
-          if (
-            typeName === 'Pressable' ||
-            typeName === 'TouchableOpacity' ||
-            typeName === 'TouchableHighlight'
-          ) {
-            if (!config.hitSlop) {
-              config = {
-                ...config,
-                hitSlop: { top: 12, bottom: 12, left: 12, right: 12 },
-              };
-            }
-          }
-        }
-      }
-
-      return originalCreateElement.call(this, type, config, ...children);
-    };
-
-    (patchedCreateElement as any).__accessibilityPatched = true;
-    (React as any).createElement = patchedCreateElement;
-  }
-} catch (_) {}
-
-// -------------------------------------------------------------
-// 4. INTERCEPT: React Native Text module
-// -------------------------------------------------------------
-try {
-  const TextModule = require('react-native/Libraries/Text/Text');
-  const OriginalText = TextModule?.default || RNText;
-
-  if (OriginalText && !OriginalText.__accessibilityPatched) {
+  if (OriginalText && !(OriginalText as any).__accessibilityPatched) {
     const AccessibleText = React.forwardRef((props: any, ref: any) => {
       let finalStyle = props.style;
 
@@ -315,14 +171,64 @@ try {
     (AccessibleText as any).displayName = 'AccessibleText';
     (AccessibleText as any).__accessibilityPatched = true;
 
-    if (TextModule) {
-      TextModule.default = AccessibleText;
-    }
     try {
       Object.defineProperty(ReactNative, 'Text', {
         configurable: true,
         enumerable: true,
         get: () => AccessibleText,
+      });
+    } catch (_) {}
+  }
+} catch (_) {}
+
+// -------------------------------------------------------------
+// 2. INTERCEPT: Pressable & TouchableOpacity (Large Touch Targets)
+// -------------------------------------------------------------
+try {
+  const OriginalPressable = ReactNative.Pressable;
+  if (OriginalPressable && !(OriginalPressable as any).__accessibilityPatched) {
+    const AccessiblePressable = React.forwardRef((props: any, ref: any) => {
+      let hitSlop = props.hitSlop;
+      if (globalAccessibilityState.largeTouchTargets && !hitSlop) {
+        hitSlop = { top: 12, bottom: 12, left: 12, right: 12 };
+      }
+      return <OriginalPressable {...props} ref={ref} hitSlop={hitSlop} />;
+    });
+
+    Object.assign(AccessiblePressable, OriginalPressable);
+    (AccessiblePressable as any).displayName = 'AccessiblePressable';
+    (AccessiblePressable as any).__accessibilityPatched = true;
+
+    try {
+      Object.defineProperty(ReactNative, 'Pressable', {
+        configurable: true,
+        enumerable: true,
+        get: () => AccessiblePressable,
+      });
+    } catch (_) {}
+  }
+} catch (_) {}
+
+try {
+  const OriginalTouchableOpacity = ReactNative.TouchableOpacity;
+  if (OriginalTouchableOpacity && !(OriginalTouchableOpacity as any).__accessibilityPatched) {
+    const AccessibleTouchableOpacity = React.forwardRef((props: any, ref: any) => {
+      let hitSlop = props.hitSlop;
+      if (globalAccessibilityState.largeTouchTargets && !hitSlop) {
+        hitSlop = { top: 12, bottom: 12, left: 12, right: 12 };
+      }
+      return <OriginalTouchableOpacity {...props} ref={ref} hitSlop={hitSlop} />;
+    });
+
+    Object.assign(AccessibleTouchableOpacity, OriginalTouchableOpacity);
+    (AccessibleTouchableOpacity as any).displayName = 'AccessibleTouchableOpacity';
+    (AccessibleTouchableOpacity as any).__accessibilityPatched = true;
+
+    try {
+      Object.defineProperty(ReactNative, 'TouchableOpacity', {
+        configurable: true,
+        enumerable: true,
+        get: () => AccessibleTouchableOpacity,
       });
     } catch (_) {}
   }
@@ -340,19 +246,10 @@ export const AccessibilityApplicator: React.FC<{ children?: React.ReactNode }> =
     highContrastMode,
   } = useThemeToggle();
 
-  // Local state to re-render root container whenever settings update
-  const [, setTick] = React.useState(0);
-
-  useEffect(() => {
-    const handleUpdate = () => setTick((t) => t + 1);
-    listeners.add(handleUpdate);
-    return () => {
-      listeners.delete(handleUpdate);
-    };
-  }, []);
-
   const prevScreenReader = useRef<boolean | null>(null);
+  const langCtx = useLanguage();
 
+  // Synchronize global accessibility state inside useEffect to keep render pure
   useEffect(() => {
     updateGlobalAccessibility({
       boldText,
@@ -362,6 +259,13 @@ export const AccessibilityApplicator: React.FC<{ children?: React.ReactNode }> =
       highContrastMode,
     });
   }, [boldText, screenReaderCompat, largeTouchTargets, reduceTransparency, highContrastMode]);
+
+  // Synchronize global language code inside useEffect
+  useEffect(() => {
+    if (langCtx?.languageCode) {
+      setGlobalLanguageCode(langCtx.languageCode);
+    }
+  }, [langCtx?.languageCode]);
 
   // Screen reader mode activation announcement
   useEffect(() => {
@@ -377,19 +281,9 @@ export const AccessibilityApplicator: React.FC<{ children?: React.ReactNode }> =
     }
   }, [screenReaderCompat]);
 
-  let currentLang = 'en-IN';
-  try {
-    const langCtx = useLanguage();
-    if (langCtx?.languageCode) currentLang = langCtx.languageCode;
-  } catch (_) {}
-  currentGlobalLangCode = currentLang;
-
-  // Root key for structural accessibility changes (bold, contrast, targets)
-  // Preserves tree mounting during language switches so drawers and screens don't flicker/unmount
-  const rootKey = `acc-root-b:${boldText}-hc:${highContrastMode}-lt:${largeTouchTargets}-rt:${reduceTransparency}`;
-
+  // Stable root container: MUST NOT remount children or navigation tree when settings change
   return (
-    <View key={rootKey} style={{ flex: 1 }}>
+    <View style={{ flex: 1 }}>
       {children}
     </View>
   );

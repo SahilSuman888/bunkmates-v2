@@ -1433,7 +1433,10 @@ export default function TripsScreen() {
   /* ── AI Suggested Trips Handlers (Inline Grid View) ── */
   const toggleSuggestedExpanded = useCallback(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-      UIManager.setLayoutAnimationEnabledExperimental(true);
+      const isFabric = Boolean((globalThis as any).nativeFabricUIManager || (globalThis as any)._IS_FABRIC);
+      if (!isFabric) {
+        UIManager.setLayoutAnimationEnabledExperimental(true);
+      }
     }
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setSuggestedExpanded((prev) => {

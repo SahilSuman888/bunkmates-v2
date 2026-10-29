@@ -7,13 +7,15 @@ import {
   Pressable,
   ScrollView,
   Platform,
-  Switch,
-  Modal,
+    Modal,
   StatusBar,
   Appearance,
   Animated,
 } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
@@ -24,10 +26,7 @@ import { useThemeToggle } from "../../contexts/ThemeContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { ACCENT_COLORS } from "../../theme/theme";
 import { SwipeableDrawer } from "./_components/SwipeableDrawer";
-
-type MapProvider = "Apple Maps" | "Google Maps" | "Waze";
-type StyleProfile = "Standard" | "Satellite" | "Terrain";
-type DistanceUnit = "mi" | "km" | "nm";
+import { useAppSettings, MapProvider, StyleProfile, DistanceUnit } from "../../contexts/AppSettingsContext";
 
 interface DistanceOption {
   id: DistanceUnit;
@@ -44,18 +43,29 @@ const DISTANCE_OPTIONS: DistanceOption[] = [
 export default function MapsNavigation() {
   const router = useRouter();
   const { t } = useLanguage();
+  const { mapsPreferences, updateMapsPreferences } = useAppSettings();
 
   // Auth & user state
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // States matching reference image defaults
-  const [mapProvider, setMapProvider] = useState<MapProvider>("Google Maps");
-  const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>("mi");
-  const [autoReroute, setAutoReroute] = useState<boolean>(true);
-  const [avoidTolls, setAvoidTolls] = useState<boolean>(false);
-  const [styleProfile, setStyleProfile] = useState<StyleProfile>("Standard");
-  const [showPOI, setShowPOI] = useState<boolean>(true);
+  // States initialized from reactive AppSettingsContext
+  const [mapProvider, setMapProvider] = useState<MapProvider>(mapsPreferences.mapProvider);
+  const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>(mapsPreferences.distanceUnit);
+  const [autoReroute, setAutoReroute] = useState<boolean>(mapsPreferences.autoReroute);
+  const [avoidTolls, setAvoidTolls] = useState<boolean>(mapsPreferences.avoidTolls);
+  const [styleProfile, setStyleProfile] = useState<StyleProfile>(mapsPreferences.styleProfile);
+  const [showPOI, setShowPOI] = useState<boolean>(mapsPreferences.showPOI);
+
+  // Keep local state in sync if context changes
+  useEffect(() => {
+    setMapProvider(mapsPreferences.mapProvider);
+    setDistanceUnit(mapsPreferences.distanceUnit);
+    setAutoReroute(mapsPreferences.autoReroute);
+    setAvoidTolls(mapsPreferences.avoidTolls);
+    setStyleProfile(mapsPreferences.styleProfile);
+    setShowPOI(mapsPreferences.showPOI);
+  }, [mapsPreferences]);
 
   // Modals state
   const [distanceModalVisible, setDistanceModalVisible] = useState(false);
@@ -100,7 +110,7 @@ export default function MapsNavigation() {
       bg: themeColors?.background ?? (isDark ? "#000000" : "#F1F1F1"),
       card: themeColors?.card ?? (isDark ? "#161618" : "#FFFFFF"),
       cardBorder: "transparent",
-      divider: "transparent",
+      divider: (themeColors as any)?.divider ?? (isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)"),
       accent: dynamicAccent,
       textPrimary: themeColors?.text ?? (isDark ? "#FFFFFF" : "#11141A"),
       textSecondary: themeColors?.textSecondary ?? (isDark ? "#8E95A2" : "#7E8590"),
@@ -174,24 +184,9 @@ export default function MapsNavigation() {
     return () => unsubscribe();
   }, [authLoading, user]);
 
-  // Sync preference helper saving to both AsyncStorage and Firestore in background
+  // Sync preference helper saving to both AsyncStorage and Firestore via AppSettingsContext
   const syncPreference = (field: string, value: any) => {
-    AsyncStorage.getItem("@bunkmates_maps_navigation_preferences").then((current) => {
-      const currentObj = current ? JSON.parse(current) : {};
-      currentObj[field] = value;
-      AsyncStorage.setItem(
-        "@bunkmates_maps_navigation_preferences",
-        JSON.stringify(currentObj)
-      ).catch(() => {});
-    }).catch(() => {});
-
-    if (!user) return;
-    updateDoc(doc(db, "users", user.uid), {
-      [`mapsPreferences.${field}`]: value,
-      updatedAt: new Date(),
-    }).catch((e) => {
-      console.log(`Failed to update mapsPreferences.${field}:`, e);
-    });
+    updateMapsPreferences({ [field]: value });
   };
 
   const handleSelectMapProvider = (provider: MapProvider) => {
@@ -233,16 +228,27 @@ export default function MapsNavigation() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       {/* ── Top Header: Circular button matching Settings page (modernHeaderBtn) ── */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={8}
           accessibilityLabel="Go back"
@@ -300,7 +306,7 @@ export default function MapsNavigation() {
 
           {/* Distance Units */}
           <Pressable
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.row, ]}
             onPress={() => setDistanceModalVisible(true)}
             accessibilityRole="button"
             accessibilityLabel={t("Distance Units")}
@@ -321,7 +327,12 @@ export default function MapsNavigation() {
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Auto-Reroute */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleAutoReroute(!autoReroute)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: autoReroute }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="sync-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -331,19 +342,23 @@ export default function MapsNavigation() {
                 {t("Automatically find faster routes when traffic changes", "Reroute instantly if a faster path is found")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={autoReroute}
               onValueChange={handleToggleAutoReroute}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle Auto-Reroute"
             />
-          </View>
+          </Pressable>
 
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Avoid Tolls */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleAvoidTolls(!avoidTolls)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: avoidTolls }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="git-branch-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -353,14 +368,13 @@ export default function MapsNavigation() {
                 {t("Prefer free routes without toll booths", "Calculate routes to avoid toll roads")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={avoidTolls}
               onValueChange={handleToggleAvoidTolls}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle Avoid Tolls"
             />
-          </View>
+          </Pressable>
         </View>
 
         {/* ── 2. MAP STYLE ── */}
@@ -403,7 +417,12 @@ export default function MapsNavigation() {
           <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
           {/* Show Points of Interest */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleShowPOI(!showPOI)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: showPOI }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="location-outline" size={20} color={colors.greyishWhite} />
             </View>
@@ -413,14 +432,13 @@ export default function MapsNavigation() {
                 {t("Display cafes, fuel stations, and landmarks", "Display cafes, fuel stations, and landmarks")}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={showPOI}
               onValueChange={handleToggleShowPOI}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle Show Points of Interest"
             />
-          </View>
+          </Pressable>
         </View>
       </ScrollView>
 
@@ -641,7 +659,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   divider: {
-    height: 0,
+    height: StyleSheet.hairlineWidth,
     marginHorizontal: 16,
   },
 

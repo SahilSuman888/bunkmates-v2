@@ -72,7 +72,9 @@ export default function ChatsScreen() {
     isChatArchived,
     keepArchived,
     clearedAt,
+    deletedAt,
     toggleArchiveChat,
+    unarchiveChat,
   } = useChatSettings();
 
   const [showArchivedOnly, setShowArchivedOnly] = useState(false);
@@ -485,9 +487,16 @@ export default function ChatsScreen() {
 
   const normalizedChats = useMemo(() => {
     const clearedMs = clearedAt ? new Date(clearedAt).getTime() : 0;
+    const deletedMs = deletedAt ? new Date(deletedAt).getTime() : 0;
+    const cutoffMs = Math.max(clearedMs, deletedMs);
+
     // Exclude invalid/broken dummy chats with no messages or unknown names
     const validChats = (filteredChats || []).filter((c: any) => {
       if (!c || !c.id) return false;
+      const anyC = c as any;
+      const cTime = getTimestampMs(anyC.lastTimestamp || anyC.timestamp || anyC.date);
+      // If deleted completely from Chat Settings, hide until a new message arrives
+      if (deletedMs > 0 && cTime > 0 && cTime <= deletedMs) return false;
       const isDummy =
         (!c.name || c.name === "Unknown User") &&
         (!c.lastMessage || c.lastMessage === "No messages yet");
@@ -505,7 +514,7 @@ export default function ChatsScreen() {
           : c.id);
       const existing = chatByPeer.get(peerUid);
       const cTime = getTimestampMs(anyC.lastTimestamp || anyC.timestamp || anyC.date);
-      const isCleared = clearedMs > 0 && cTime > 0 && cTime < clearedMs;
+      const isCleared = cutoffMs > 0 && cTime > 0 && cTime <= cutoffMs;
 
       if (!existing || getTimestampMs(existing.timestamp) < cTime) {
         chatByPeer.set(peerUid, {
@@ -528,15 +537,23 @@ export default function ChatsScreen() {
     }
 
     return Array.from(chatByPeer.values());
-  }, [filteredChats, user?.uid, clearedAt]);
+  }, [filteredChats, user?.uid, clearedAt, deletedAt]);
 
   const normalizedGroups = useMemo(() => {
     const clearedMs = clearedAt ? new Date(clearedAt).getTime() : 0;
-    const validGroups = (filteredGroups || []).filter((g: any) => !!g && !!g.id);
+    const deletedMs = deletedAt ? new Date(deletedAt).getTime() : 0;
+    const cutoffMs = Math.max(clearedMs, deletedMs);
+
+    const validGroups = (filteredGroups || []).filter((g: any) => {
+      if (!g || !g.id) return false;
+      const gTime = getTimestampMs(g.lastTimestamp || g.updatedAt || g.createdAt || 0);
+      if (deletedMs > 0 && gTime > 0 && gTime <= deletedMs) return false;
+      return true;
+    });
 
     return validGroups.map((g: any) => {
       const gTime = getTimestampMs(g.lastTimestamp || g.updatedAt || g.createdAt || 0);
-      const isCleared = clearedMs > 0 && gTime > 0 && gTime < clearedMs;
+      const isCleared = cutoffMs > 0 && gTime > 0 && gTime <= cutoffMs;
       return {
         id: g.id,
         type: "group" as const,
@@ -551,7 +568,7 @@ export default function ChatsScreen() {
         rawItem: g,
       };
     });
-  }, [filteredGroups, clearedAt]);
+  }, [filteredGroups, clearedAt, deletedAt]);
 
   const combinedList = useMemo(() => {
     // Sort all single chats and group chats together so newest message is ALWAYS index 0 (top)
@@ -573,6 +590,16 @@ export default function ChatsScreen() {
     return combinedList.filter((item) => isChatArchived(item.id)).length;
   }, [combinedList, isChatArchived, archivedChatIds]);
 
+  // Industry-grade WhatsApp behavior: if keepArchived is disabled, new incoming messages unarchive the conversation
+  useEffect(() => {
+    if (keepArchived) return;
+    combinedList.forEach((item) => {
+      if (isChatArchived(item.id) && item.unreadCount > 0) {
+        unarchiveChat(item.id).catch(() => {});
+      }
+    });
+  }, [combinedList, keepArchived, isChatArchived, unarchiveChat]);
+
   // Filter based on activeScope (All, Unread, Group, Favourites, Private) & Archived status
   const displayedList = useMemo(() => {
     // 1. If viewing archived chats specifically
@@ -585,13 +612,10 @@ export default function ChatsScreen() {
       return combinedList.filter((item) => isItemPrivate(item));
     }
 
-    // 3. Exclude private chats
-    let nonPrivateList = combinedList.filter((item) => !isItemPrivate(item));
-
-    // 4. If keepArchived is enabled (WhatsApp behavior), exclude archived chats from regular tabs
-    if (keepArchived) {
-      nonPrivateList = nonPrivateList.filter((item) => !isChatArchived(item.id));
-    }
+    // 3. Exclude private chats & archived chats from main inbox views
+    let nonPrivateList = combinedList.filter(
+      (item) => !isItemPrivate(item) && !isChatArchived(item.id)
+    );
 
     if (activeScope === "Unread") {
       return nonPrivateList.filter((item) => item.unreadCount > 0);
@@ -605,7 +629,7 @@ export default function ChatsScreen() {
 
     // "All" tab: non-private & non-archived
     return nonPrivateList;
-  }, [combinedList, activeScope, showArchivedOnly, keepArchived, isChatArchived, archivedChatIds, privateChatIds, favouriteChatIds]);
+  }, [combinedList, activeScope, showArchivedOnly, isChatArchived, archivedChatIds, privateChatIds, favouriteChatIds]);
 
   const totalUnreadCount = useMemo(() => {
     return combinedList.filter((c) => !isItemPrivate(c) && c.unreadCount > 0).length;
@@ -1500,14 +1524,23 @@ export default function ChatsScreen() {
                           style={[
                             s.timeStringText,
                             { color: themeColors.textSecondary, fontSize: scaleFont(11.5) },
-                            isUnread && { color: accentColor, fontWeight: "700" },
+                            isUnread && { color: themeColors.accentText, fontWeight: "700" },
                           ]}
                         >
                           {formatTime(item.timestamp)}
                         </Text>
 
                         {isUnread ? (
-                          <View style={[s.unreadNumberBadge, { backgroundColor: accentColor }]}>
+                          <View
+                            style={[
+                              s.unreadNumberBadge,
+                              {
+                                backgroundColor: accentColor,
+                                borderWidth: themeColors.accentButtonBorder !== "transparent" ? 1 : 0,
+                                borderColor: themeColors.accentButtonBorder,
+                              },
+                            ]}
+                          >
                             <Text style={[s.unreadNumberText, { color: onAccentTextColor, fontSize: scaleFont(11) }]}>
                               {item.unreadCount}
                             </Text>
@@ -1516,7 +1549,7 @@ export default function ChatsScreen() {
                           <Ionicons
                             name="pin"
                             size={12}
-                            color={accentColor}
+                            color={themeColors.accentText}
                             style={{ marginTop: 6 }}
                           />
                         ) : null}

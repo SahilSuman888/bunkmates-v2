@@ -9,7 +9,7 @@ import {
   ScrollView,
 } from "react-native";
 import { BlurView } from "expo-blur";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, Feather } from "@expo/vector-icons";
 import { SwipeableDrawer } from "./SwipeableDrawer";
 
 /* ---------------- Types ---------------- */
@@ -117,13 +117,11 @@ const SettingsDrawer: React.FC<Props> = ({
     <SwipeableDrawer
       visible={settingsDrawerOpen}
       onClose={() => setSettingsDrawerOpen(false)}
-      showHandle={false}
+      showHandle={true}
+      handleColor="rgba(255, 255, 255, 0.28)"
       sheetStyle={styles.drawer}
       backdropColor="rgba(0, 0, 0, 0.7)"
     >
-      {/* Top Handle */}
-      <View style={styles.handle} />
-
       {/* Header Row: Trip Info + Close Button (Matching Image 3) */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Trip Info</Text>
@@ -136,7 +134,7 @@ const SettingsDrawer: React.FC<Props> = ({
         </TouchableOpacity>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
         {/* Glossy Trip Info Card (Exact match to Image 3) */}
         <View style={styles.glossyInfoCard}>
           <View style={styles.cardHeaderRow}>
@@ -149,10 +147,14 @@ const SettingsDrawer: React.FC<Props> = ({
             <Text style={styles.infoValue}>{trip?.name || "Bunk1"}</Text>
           </View>
 
+          <View style={styles.divider} />
+
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Location</Text>
             <Text style={styles.infoValue}>{trip?.location || trip?.to || "Jaipur"}</Text>
           </View>
+
+          <View style={styles.divider} />
 
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Dates</Text>
@@ -161,17 +163,23 @@ const SettingsDrawer: React.FC<Props> = ({
             </Text>
           </View>
 
+          <View style={styles.divider} />
+
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Route</Text>
             <Text style={styles.infoValue}>{routeText}</Text>
           </View>
+
+          <View style={styles.divider} />
 
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Created by</Text>
             <Text style={styles.infoValue}>{createdByName}</Text>
           </View>
 
-          <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+          <View style={styles.divider} />
+
+          <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Members</Text>
             <Text style={styles.infoValue}>{membersCount}</Text>
           </View>
@@ -184,32 +192,38 @@ const SettingsDrawer: React.FC<Props> = ({
             {Object.keys(tripPermissions).map((perm) => (
               <View key={perm} style={{ marginTop: 12 }}>
                 <Text style={styles.captionText}>{perm}</Text>
-                <View style={styles.toggleRow}>
-                  {["all", "admins"].map((type) => (
-                    <TouchableOpacity
-                      key={type}
-                      style={[
-                        styles.toggleBtn,
-                        tripPermissions[perm] === type && styles.toggleBtnActive,
-                      ]}
-                      onPress={() =>
-                        updatePermissions &&
-                        updatePermissions({
-                          ...tripPermissions,
-                          [perm]: type,
-                        })
-                      }
-                    >
-                      <Text
+                <View style={styles.selectorColumn}>
+                  {["all", "admins"].map((type) => {
+                    const isSelected = tripPermissions[perm] === type;
+                    return (
+                      <TouchableOpacity
+                        key={type}
                         style={[
-                          styles.toggleBtnText,
-                          tripPermissions[perm] === type && styles.toggleBtnTextActive,
+                          styles.selectorItem,
+                          isSelected && styles.selectorItemActive,
                         ]}
+                        onPress={() =>
+                          updatePermissions &&
+                          updatePermissions({
+                            ...tripPermissions,
+                            [perm]: type,
+                          })
+                        }
                       >
-                        {type === "all" ? "Everyone" : "Admins"}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                        <Text
+                          style={[
+                            styles.selectorText,
+                            isSelected && styles.selectorTextActive,
+                          ]}
+                        >
+                          {type === "all" ? "Everyone" : "Admins"}
+                        </Text>
+                        {isSelected && (
+                          <Feather name="check" size={18} color="#38bdf8" />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               </View>
             ))}
@@ -292,6 +306,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "800",
   },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+  },
   infoRow: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -315,28 +333,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 6,
   },
-  toggleRow: {
+  selectorColumn: {
+    width: "100%",
+    gap: 8,
+    marginTop: 6,
+  },
+  selectorItem: {
     flexDirection: "row",
-    backgroundColor: "rgba(255, 255, 255, 0.06)",
-    borderRadius: 12,
-    padding: 3,
-  },
-  toggleBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 10,
     alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderWidth: 1,
+    borderColor: "transparent",
   },
-  toggleBtnActive: {
-    backgroundColor: "#ffffff",
+  selectorItemActive: {
+    backgroundColor: "rgba(56, 189, 248, 0.12)",
+    borderColor: "rgba(56, 189, 248, 0.4)",
   },
-  toggleBtnText: {
-    color: "rgba(255, 255, 255, 0.7)",
-    fontSize: 13,
+  selectorText: {
+    fontSize: 14.5,
     fontWeight: "600",
+    color: "rgba(255, 255, 255, 0.75)",
   },
-  toggleBtnTextActive: {
-    color: "#000000",
+  selectorTextActive: {
+    color: "#ffffff",
     fontWeight: "700",
   },
   deleteBtn: {

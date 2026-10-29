@@ -23,6 +23,7 @@ import { AppAtmosphereBackground } from "../components/ui/AppAtmosphereBackgroun
 import { InAppNotificationBanner } from "../components/ui/InAppNotificationBanner";
 import { GradientProvider } from "../contexts/GradientContext";
 import { initOneSignal } from "../lib/onesignal";
+import { QRLoginDeepLinkHandler } from "../components/auth/QRLoginDeepLinkHandler";
 
 // Initialize OneSignal & Android Notification Channels at module load
 initOneSignal();
@@ -61,6 +62,7 @@ function LayoutContent() {
                 <NotificationsHandler />
                 <InAppNotificationBanner />
                 <IncomingCallHandler />
+                <QRLoginDeepLinkHandler />
 
                 <Stack
                   screenOptions={{

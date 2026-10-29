@@ -42,6 +42,7 @@ export function initOneSignal() {
   } catch (e) {}
 
   if (!OneSignal) {
+    isInitialized = true;
     console.log("[OneSignal] Skipped SDK initialization (running in Expo Go or native module missing).");
     return;
   }
@@ -72,7 +73,27 @@ export function initOneSignal() {
 
     // 1. Foreground notification display listener
     OneSignal.Notifications.addEventListener("foregroundWillDisplay", (event: any) => {
-      console.log("[OneSignal] Foreground notification received:", event?.getNotification()?.notificationId);
+      try {
+        const notif = event?.getNotification();
+        console.log("[OneSignal] Foreground notification received:", notif?.notificationId);
+        if (notif) {
+          const additionalData = notif.additionalData || {};
+          const { triggerInAppNotificationBanner } = require("./NotificationService");
+          triggerInAppNotificationBanner({
+            title: notif.title || "New Notification",
+            message: notif.body || "",
+            category: additionalData.type || "general",
+            route:
+              additionalData.route ||
+              (additionalData.chatId ? `/chat/${additionalData.senderId}` : undefined),
+            senderName: additionalData.displayName || additionalData.senderName,
+            senderPic: additionalData.photoURL || additionalData.pic,
+            data: additionalData,
+          });
+        }
+      } catch (e) {
+        console.warn("[OneSignal] Foreground banner dispatch error:", e);
+      }
     });
 
     // 2. Notification click & action button click listener
@@ -225,8 +246,18 @@ export async function sendOneSignalPush({
       androidAccentColor,
       buttons,
     });
-  } catch (err) {
-    console.error("[OneSignal REST] Push request failed:", err);
+  } catch (err: any) {
+    if (
+      err?.code === "functions/not-found" ||
+      err?.message?.includes("not-found") ||
+      err?.toString()?.includes("not-found")
+    ) {
+      console.log(
+        "[OneSignal REST] Cloud function 'sendOneSignalNotification' is not deployed yet. Skipping remote push."
+      );
+    } else {
+      console.warn("[OneSignal REST] Push request failed:", err?.message || err);
+    }
   }
 }
 

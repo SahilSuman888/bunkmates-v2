@@ -1,17 +1,8 @@
 // **@** Appearance Settings — Complete unified UI combining all image features (Theme Select, Accent Colors, Typography & Motion) and all General Settings features (Background Canvas & Atmosphere, Location Mode)
 // Solid dynamic surfaces (zero glassmorphism in settings), dynamic theme colors, real-time typography scaling, accent propagation, and live canvas preview.
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  ScrollView,
-  Switch,
-  StatusBar,
-  Appearance,
-  Animated,
-} from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, StatusBar, Appearance, Animated, Platform } from "react-native";
+import { BunkmatesAnimatedSwitch } from "./_components/BunkmatesAnimatedSwitch";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -24,7 +15,9 @@ import {
   LocationMode,
   FontSize,
 } from "../../contexts/ThemeContext";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLanguage } from "../../contexts/LanguageContext";
+import { SettingsHeaderGradientMask } from "./_components/SettingsHeaderGradientMask";
 
 const SWATCH_PALETTE = [
   { key: "coral", color: "#FF5A5F", label: "Default (Sunset Coral)" },
@@ -41,6 +34,8 @@ const SWATCH_PALETTE = [
 
 
 export default function AppearanceScreen() {
+  const insets = useSafeAreaInsets();
+  const topInset = insets.top > 0 ? insets.top : Platform.OS === "android" ? (StatusBar.currentHeight || 24) : 44;
   const router = useRouter();
   const { t } = useLanguage();
 
@@ -66,6 +61,7 @@ export default function AppearanceScreen() {
     setReduceAnimations,
     themeColors,
     isDark,
+    systemColorScheme,
   } = useThemeToggle();
 
   // Toast feedback state (debounced with native driver, zero animation queue backlog)
@@ -102,7 +98,8 @@ export default function AppearanceScreen() {
       segmentActiveBg: isDark ? "#2C2C32" : "#FFFFFF",
       switchActive: accentColor,
       switchInactive: isDark ? "#2A2D36" : "#E2E8F0",
-      activeText: accentColor,
+      divider: themeColors.divider ?? (isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)"),
+      activeText: themeColors.accentText,
       toastBg: isDark ? "#1F2937" : "#111827",
       toastText: "#F9FAFB",
     };
@@ -139,16 +136,27 @@ export default function AppearanceScreen() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.bg }]} edges={["top", "left", "right"]}>
-      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={colors.bg} />
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
 
       {/* ── Top Header: Circular button matching Settings page ── */}
-      <View style={styles.header}>
+      {/* **@** Header Mask Gradient — Exact WhatsApp/Chat Style 6-Stop Dissolve Mask */}
+      <SettingsHeaderGradientMask
+        backgroundColor={colors.bg}
+        zIndex={15}
+      />
+
+      <View style={[styles.header, { zIndex: 20 }]}>
         <Pressable
           onPress={() => router.back()}
           style={({ pressed }) => [
             styles.modernHeaderBtn,
-            { backgroundColor: colors.card },
-            pressed && styles.pressed,
+            {
+              backgroundColor: isDark ? "rgba(22, 22, 22, 1)" : "rgba(230, 230, 230, 1)",
+              boxShadow: isDark
+                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+              transform: [{ scale: pressed ? 0.92 : 1 }],
+            },
           ]}
           hitSlop={8}
           accessibilityLabel="Go back"
@@ -172,7 +180,7 @@ export default function AppearanceScreen() {
         <Text style={[styles.sectionHeading, { color: colors.sectionHeader, fontSize: scaleFont(12) }]}>
           {t("THEME SELECT")}
         </Text>
-        <View style={[styles.card, { backgroundColor: colors.card, padding: 16 }]}>
+        <View style={[styles.card, { backgroundColor: colors.card, padding: 14 }]}>
           <View style={styles.themeSelectRow}>
             {/* Light Option */}
             <Pressable
@@ -180,24 +188,56 @@ export default function AppearanceScreen() {
                 styles.themeOptionCard,
                 {
                   backgroundColor: mode === "light"
-                    ? (isDark ? "#2C2C32" : "#FFFFFF")
-                    : colors.cardInner,
-                  borderWidth: 0,
+                    ? (isDark ? "#26262B" : "#FFFFFF")
+                    : (isDark ? "#18181C" : "#EBECEF"),
+                  boxShadow: mode === "light"
+                    ? (isDark
+                        ? "inset 0 1px 1px rgba(255, 255, 255, 0.12), 0 2px 8px rgba(0, 0, 0, 0.3)"
+                        : "inset 0 1px 2px rgba(255, 255, 255, 0.95), 0 2px 8px rgba(0, 0, 0, 0.08)")
+                    : undefined,
+                  transform: [{ scale: pressed ? 0.96 : 1 }],
                 },
-                pressed && styles.pressed,
               ]}
               onPress={() => handleSelectTheme("light")}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: mode === "light" }}
             >
-              {/* Mini Preview Mockup */}
-              <View style={[styles.themePreviewBox, { backgroundColor: "#FFFFFF" }]}>
-                <View style={[styles.themePreviewBar, { backgroundColor: "#E2E8F0" }]} />
-                <View style={[styles.themePreviewLine, { backgroundColor: "#CBD5E1" }]} />
+              {/* Top Radio Indicator */}
+              <View style={styles.themeOptionHeader}>
+                <View
+                  style={[
+                    styles.themeRadioDot,
+                    mode === "light"
+                      ? { backgroundColor: accentColor, borderColor: accentColor }
+                      : { borderColor: isDark ? "rgba(255, 255, 255, 0.22)" : "rgba(0, 0, 0, 0.18)" },
+                  ]}
+                >
+                  {mode === "light" && (
+                    <Ionicons name="checkmark" size={10} color={onAccentTextColor} />
+                  )}
+                </View>
               </View>
+
+              {/* Mini Preview Mockup */}
+              <View
+                style={[
+                  styles.themePreviewBox,
+                  {
+                    backgroundColor: "#FFFFFF",
+                    boxShadow: "0 1px 3px rgba(0, 0, 0, 0.08)",
+                  },
+                ]}
+              >
+                <View style={[styles.themePreviewBar, { backgroundColor: "#CBD5E1" }]} />
+                <View style={[styles.themePreviewLine, { backgroundColor: "#94A3B8" }]} />
+              </View>
+
               <Text
                 style={[
                   styles.themeOptionText,
                   {
-                    color: mode === "light" ? colors.activeText : colors.textSecondary,
+                    color: mode === "light" ? colors.textPrimary : colors.textSecondary,
+                    fontWeight: mode === "light" ? "700" : "500",
                     fontSize: scaleFont(13),
                   },
                 ]}
@@ -212,24 +252,48 @@ export default function AppearanceScreen() {
                 styles.themeOptionCard,
                 {
                   backgroundColor: mode === "dark"
-                    ? (isDark ? "#2C2C32" : "#FFFFFF")
-                    : colors.cardInner,
-                  borderWidth: 0,
+                    ? (isDark ? "#26262B" : "#FFFFFF")
+                    : (isDark ? "#18181C" : "#EBECEF"),
+                  boxShadow: mode === "dark"
+                    ? (isDark
+                        ? "inset 0 1px 1px rgba(255, 255, 255, 0.12), 0 2px 8px rgba(0, 0, 0, 0.3)"
+                        : "inset 0 1px 2px rgba(255, 255, 255, 0.95), 0 2px 8px rgba(0, 0, 0, 0.08)")
+                    : undefined,
+                  transform: [{ scale: pressed ? 0.96 : 1 }],
                 },
-                pressed && styles.pressed,
               ]}
               onPress={() => handleSelectTheme("dark")}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: mode === "dark" }}
             >
+              {/* Top Radio Indicator */}
+              <View style={styles.themeOptionHeader}>
+                <View
+                  style={[
+                    styles.themeRadioDot,
+                    mode === "dark"
+                      ? { backgroundColor: accentColor, borderColor: accentColor }
+                      : { borderColor: isDark ? "rgba(255, 255, 255, 0.22)" : "rgba(0, 0, 0, 0.18)" },
+                  ]}
+                >
+                  {mode === "dark" && (
+                    <Ionicons name="checkmark" size={10} color={onAccentTextColor} />
+                  )}
+                </View>
+              </View>
+
               {/* Mini Preview Mockup */}
-              <View style={[styles.themePreviewBox, { backgroundColor: "#121216" }]}>
+              <View style={[styles.themePreviewBox, { backgroundColor: "#111115" }]}>
                 <View style={[styles.themePreviewBar, { backgroundColor: "#2A2D36" }]} />
                 <View style={[styles.themePreviewLine, { backgroundColor: "#3F424E" }]} />
               </View>
+
               <Text
                 style={[
                   styles.themeOptionText,
                   {
-                    color: mode === "dark" ? colors.activeText : colors.textSecondary,
+                    color: mode === "dark" ? colors.textPrimary : colors.textSecondary,
+                    fontWeight: mode === "dark" ? "700" : "500",
                     fontSize: scaleFont(13),
                   },
                 ]}
@@ -244,31 +308,54 @@ export default function AppearanceScreen() {
                 styles.themeOptionCard,
                 {
                   backgroundColor: mode === "system"
-                    ? (isDark ? "#2C2C32" : "#FFFFFF")
-                    : colors.cardInner,
-                  borderWidth: 0,
+                    ? (isDark ? "#26262B" : "#FFFFFF")
+                    : (isDark ? "#18181C" : "#EBECEF"),
+                  boxShadow: mode === "system"
+                    ? (isDark
+                        ? "inset 0 1px 1px rgba(255, 255, 255, 0.12), 0 2px 8px rgba(0, 0, 0, 0.3)"
+                        : "inset 0 1px 2px rgba(255, 255, 255, 0.95), 0 2px 8px rgba(0, 0, 0, 0.08)")
+                    : undefined,
+                  transform: [{ scale: pressed ? 0.96 : 1 }],
                 },
-                pressed && styles.pressed,
               ]}
               onPress={() => handleSelectTheme("system")}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: mode === "system" }}
             >
-              {/* Mini Preview Mockup */}
-              <View
-                style={[
-                  styles.themePreviewBox,
-                  {
-                    backgroundColor: isDark ? "#121216" : "#FFFFFF",
-                  },
-                ]}
-              >
-                <View style={[styles.themePreviewBar, { backgroundColor: isDark ? "#2A2D36" : "#E2E8F0" }]} />
-                <View style={[styles.themePreviewLine, { backgroundColor: isDark ? "#3F424E" : "#CBD5E1" }]} />
+              {/* Top Radio Indicator */}
+              <View style={styles.themeOptionHeader}>
+                <View
+                  style={[
+                    styles.themeRadioDot,
+                    mode === "system"
+                      ? { backgroundColor: accentColor, borderColor: accentColor }
+                      : { borderColor: isDark ? "rgba(255, 255, 255, 0.22)" : "rgba(0, 0, 0, 0.18)" },
+                  ]}
+                >
+                  {mode === "system" && (
+                    <Ionicons name="checkmark" size={10} color={onAccentTextColor} />
+                  )}
+                </View>
               </View>
+
+              {/* Mini Preview Mockup - Split Half Light / Half Dark */}
+              <View style={[styles.themePreviewBox, styles.themePreviewSplit]}>
+                <View style={[styles.splitHalf, { backgroundColor: "#FFFFFF" }]}>
+                  <View style={[styles.themePreviewBar, { backgroundColor: "#CBD5E1" }]} />
+                  <View style={[styles.themePreviewLine, { backgroundColor: "#94A3B8" }]} />
+                </View>
+                <View style={[styles.splitHalf, { backgroundColor: "#111115" }]}>
+                  <View style={[styles.themePreviewBar, { backgroundColor: "#2A2D36" }]} />
+                  <View style={[styles.themePreviewLine, { backgroundColor: "#3F424E" }]} />
+                </View>
+              </View>
+
               <Text
                 style={[
                   styles.themeOptionText,
                   {
-                    color: mode === "system" ? colors.activeText : colors.textSecondary,
+                    color: mode === "system" ? colors.textPrimary : colors.textSecondary,
+                    fontWeight: mode === "system" ? "700" : "500",
                     fontSize: scaleFont(13),
                   },
                 ]}
@@ -276,6 +363,22 @@ export default function AppearanceScreen() {
                 {t("System")}
               </Text>
             </Pressable>
+          </View>
+
+          {/* Dynamic Status Banner */}
+          <View style={[styles.themeStatusBadge, { backgroundColor: colors.cardInner }]}>
+            <Ionicons
+              name={mode === "system" ? "phone-portrait-outline" : mode === "dark" ? "moon-outline" : "sunny-outline"}
+              size={14}
+              color={accentColor}
+            />
+            <Text style={[styles.themeStatusText, { color: colors.textSecondary, fontSize: scaleFont(12) }]}>
+              {mode === "system"
+                ? `${t("System")}: ${t("Currently")} ${systemColorScheme === "dark" ? t("Dark") : t("Light")} (${t("matches device settings")})`
+                : mode === "dark"
+                ? t("Dark theme active across entire app")
+                : t("Light theme active across entire app")}
+            </Text>
           </View>
         </View>
 
@@ -338,13 +441,13 @@ export default function AppearanceScreen() {
               <Ionicons
                 name="sparkles"
                 size={14}
-                color={accentColor === "#FFFFFF" || accentColor === "#e5e7eb" ? "#000000" : "#FFFFFF"}
+                color={onAccentTextColor}
               />
               <Text
                 style={[
                   styles.accentPillText,
                   {
-                    color: accentColor === "#FFFFFF" || accentColor === "#e5e7eb" ? "#000000" : "#FFFFFF",
+                    color: onAccentTextColor,
                     fontSize: scaleFont(12),
                   },
                 ]}
@@ -437,8 +540,15 @@ export default function AppearanceScreen() {
             </View>
           </View>
 
+          <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+
           {/* Reduce Animations */}
-          <View style={styles.row}>
+          <Pressable
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+            onPress={() => handleToggleReduceAnimations(!reduceAnimations)}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: reduceAnimations }}
+          >
             <View style={[styles.iconBox, { backgroundColor: colors.iconBoxBg }]}>
               <Ionicons name="pulse-outline" size={20} color={colors.textPrimary} />
             </View>
@@ -450,14 +560,13 @@ export default function AppearanceScreen() {
                 {reduceAnimations ? "Instant non-animated transitions" : "Fluid transitional animations enabled"}
               </Text>
             </View>
-            <Switch
+            <BunkmatesAnimatedSwitch
               value={reduceAnimations}
               onValueChange={handleToggleReduceAnimations}
-              trackColor={{ false: colors.switchInactive, true: colors.switchActive }}
-              thumbColor="#FFFFFF"
+              pointerEvents="none"
               accessibilityLabel="Toggle Reduce Animations"
             />
-          </View>
+          </Pressable>
         </View>
 
         {/* ── 4. LOCATION PRIVACY MODE ── */}
@@ -580,24 +689,49 @@ const styles = StyleSheet.create({
   // Theme Select Row
   themeSelectRow: {
     flexDirection: "row",
-    gap: 12,
+    gap: 10,
   },
   themeOptionCard: {
     flex: 1,
     borderRadius: 18,
     borderWidth: 0,
-    paddingVertical: 14,
+    paddingVertical: 12,
     paddingHorizontal: 8,
     alignItems: "center",
   },
+  themeOptionHeader: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginBottom: 6,
+  },
+  themeRadioDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   themePreviewBox: {
-    width: "82%",
-    height: 38,
+    width: "88%",
+    height: 40,
     borderRadius: 10,
     borderWidth: 0,
     padding: 6,
     justifyContent: "space-between",
     marginBottom: 10,
+  },
+  themePreviewSplit: {
+    flexDirection: "row",
+    padding: 0,
+    overflow: "hidden",
+  },
+  splitHalf: {
+    flex: 1,
+    height: "100%",
+    padding: 6,
+    justifyContent: "space-between",
   },
   themePreviewBar: {
     width: "100%",
@@ -610,7 +744,20 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   themeOptionText: {
-    fontWeight: "700",
+    fontWeight: "600",
+  },
+  themeStatusBadge: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  themeStatusText: {
+    flex: 1,
+    fontWeight: "500",
   },
 
   // Accent Swatches
@@ -722,6 +869,11 @@ const styles = StyleSheet.create({
   },
   liveTypeBody: {
     lineHeight: 17,
+  },
+
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 16,
   },
 
   // Row inside card

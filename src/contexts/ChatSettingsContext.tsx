@@ -161,6 +161,7 @@ export interface ChatSettingsContextType extends ChatPreferences {
   archivedChatIds: string[];
   isChatArchived: (chatId?: string | null) => boolean;
   toggleArchiveChat: (chatId: string) => Promise<void>;
+  unarchiveChat: (chatId: string) => Promise<void>;
   clearedAt: string | null;
   deletedAt: string | null;
 
@@ -336,6 +337,24 @@ export const ChatSettingsProvider = ({ children }: { children: ReactNode }) => {
     [user]
   );
 
+  const unarchiveChat = useCallback(
+    async (chatId: string) => {
+      setArchivedChatIds((prev) => {
+        if (!prev.includes(chatId)) return prev;
+        const next = prev.filter((id) => id !== chatId);
+        AsyncStorage.setItem("@bunkmates_archived_chat_ids", JSON.stringify(next)).catch(() => {});
+        if (user) {
+          updateDoc(doc(db, "users", user.uid), {
+            "chatPreferences.archivedChatIds": next,
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {});
+        }
+        return next;
+      });
+    },
+    [user]
+  );
+
   const isChatArchived = useCallback(
     (chatId?: string | null) => Boolean(chatId && archivedChatIds.includes(chatId)),
     [archivedChatIds]
@@ -352,17 +371,37 @@ export const ChatSettingsProvider = ({ children }: { children: ReactNode }) => {
   const setDisappearingTimer = useCallback((t: DisappearingTimer) => updateChatPreferences({ disappearingTimer: t }), [updateChatPreferences]);
   const setKeepArchived = useCallback((v: boolean) => updateChatPreferences({ keepArchived: v }), [updateChatPreferences]);
 
-  // Reset all preferences
+  // Reset only user preferences to default; preserve clearedAt / deletedAt so messages are not accidentally restored
   const resetChatPreferences = useCallback(async () => {
-    await updateChatPreferences(DEFAULT_CHAT_PREFERENCES);
+    await updateChatPreferences({
+      wallpaper: DEFAULT_CHAT_PREFERENCES.wallpaper,
+      enterIsSend: DEFAULT_CHAT_PREFERENCES.enterIsSend,
+      readReceipts: DEFAULT_CHAT_PREFERENCES.readReceipts,
+      typingIndicator: DEFAULT_CHAT_PREFERENCES.typingIndicator,
+      autoDownloadMedia: DEFAULT_CHAT_PREFERENCES.autoDownloadMedia,
+      saveToGallery: DEFAULT_CHAT_PREFERENCES.saveToGallery,
+      linkPreviews: DEFAULT_CHAT_PREFERENCES.linkPreviews,
+      disappearingTimer: DEFAULT_CHAT_PREFERENCES.disappearingTimer,
+      keepArchived: DEFAULT_CHAT_PREFERENCES.keepArchived,
+    });
   }, [updateChatPreferences]);
 
-  // Clear all chats: resets messages
+  // Clear all chats: resets message view while retaining conversation threads
   const clearAllChats = useCallback(async () => {
     try {
       const ts = new Date().toISOString();
       setClearedAt(ts);
       await AsyncStorage.setItem("@bunkmates_chats_cleared_at", ts);
+
+      // Clean local cache keys for individual chat messages
+      try {
+        const allKeys = await AsyncStorage.getAllKeys();
+        const msgKeys = allKeys.filter((k) => k.startsWith("@bunkmates_chat_msgs_"));
+        if (msgKeys.length > 0) {
+          await AsyncStorage.multiRemove(msgKeys);
+        }
+      } catch {}
+
       if (user) {
         await updateDoc(doc(db, "users", user.uid), {
           "chatPreferences.clearedAt": ts,
@@ -374,7 +413,7 @@ export const ChatSettingsProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [user]);
 
-  // Delete all chats
+  // Delete all chats: permanently removes all conversations
   const deleteAllChats = useCallback(async () => {
     try {
       const ts = new Date().toISOString();
@@ -386,7 +425,13 @@ export const ChatSettingsProvider = ({ children }: { children: ReactNode }) => {
         AsyncStorage.setItem("@bunkmates_chats_cleared_at", ts),
         AsyncStorage.removeItem("@bunkmates_archived_chat_ids"),
       ]);
+
       if (user) {
+        await Promise.all([
+          AsyncStorage.removeItem(`@bunkmates_cached_chats_${user.uid}`).catch(() => {}),
+          AsyncStorage.removeItem(`@bunkmates_cached_groups_${user.uid}`).catch(() => {}),
+        ]);
+
         await updateDoc(doc(db, "users", user.uid), {
           "chatPreferences.deletedAt": ts,
           "chatPreferences.clearedAt": ts,
@@ -415,6 +460,7 @@ export const ChatSettingsProvider = ({ children }: { children: ReactNode }) => {
     archivedChatIds,
     isChatArchived,
     toggleArchiveChat,
+    unarchiveChat,
 
     // Setters
     setWallpaper,
