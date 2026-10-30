@@ -1,21 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   arrayUnion,
   collection,
-  deleteDoc,
   doc,
   limit,
   onSnapshot,
   query,
   setDoc,
   updateDoc,
-  where,
+  where
 } from "firebase/firestore";
-import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import React, {
   useCallback,
   useEffect,
@@ -24,7 +23,6 @@ import React, {
   useState,
 } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Animated,
   Easing,
@@ -39,20 +37,25 @@ import {
   Text,
   TouchableOpacity,
   UIManager,
-  View,
+  View
 } from "react-native";
+import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
+import Reanimated, { useAnimatedStyle } from "react-native-reanimated";
 import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useThemeToggle } from "../contexts/ThemeContext";
+import {
+  markNotificationIdsAsDeleted,
+  markNotificationIdsAsRead,
+} from "../hooks/useUnreadNotifications";
 import { useUserChats } from "../hooks/useUserChats";
 import { useUserGroups } from "../hooks/useUserGroups";
 import { auth, db } from "../lib/firebase";
 import { sendFriendAcceptedNotification } from "../lib/sendAppNotification";
 import SettingsHeaderGradientMask from "./settings/_components/SettingsHeaderGradientMask";
-import { LinearGradient } from "expo-linear-gradient";
 
 // Enable experimental layout animations on Android (only on legacy architecture; Fabric natively supports it)
 if (
@@ -565,21 +568,39 @@ function isFeedbackOrGeneralNotification(item: AppNotification): boolean {
     t === "support" ||
     t === "system" ||
     t === "announcement" ||
+    t.includes("feedback") ||
+    t.includes("thank") ||
     Boolean(item.feedbackId) ||
     Boolean(item.ticketId)
   ) {
     return true;
   }
   const title = (item.title || "").toLowerCase();
+  const body = (
+    item.body ||
+    item.content ||
+    item.message ||
+    item.description ||
+    item.info ||
+    ""
+  ).toLowerCase();
   if (
     title.includes("feedback") ||
+    title.includes("thank") ||
     title.includes("received") ||
     title.includes("general") ||
     title.includes("#fb-") ||
     title.includes("ticket") ||
     title.includes("support") ||
     title.includes("notice") ||
-    title.includes("announcement")
+    title.includes("announcement") ||
+    title.includes("appreciate") ||
+    body.includes("feedback") ||
+    body.includes("thank you") ||
+    body.includes("thankyou") ||
+    body.includes("thanks for") ||
+    body.includes("thanking you") ||
+    body.includes("appreciate")
   ) {
     return true;
   }
@@ -952,29 +973,31 @@ export default function Notifications() {
     setExpandedStackId((prev) => (prev === stackId ? null : stackId));
   }, []);
 
-  // 5. Read / Direct Action Handlers
+  // 5. Read / Direct Action Handlers (Production-grade cross-screen synchronization)
   const markAsRead = useCallback(async (item: AppNotification) => {
     if (item.isRead || item.seen || item.read) return;
 
-    // Optimistic local update
+    // 1. Optimistic React state update
     setNotifications((prev) =>
       prev.map((n) =>
-        n.id === item.id ? { ...n, isRead: true, seen: true, read: true } : n,
+        n.id === item.id
+          ? { ...n, isRead: true, seen: true, read: true, status: "read" }
+          : n,
       ),
     );
 
-    try {
-      await updateDoc(doc(db, "notifications", item.id), {
-        isRead: true,
-        seen: true,
-        read: true,
-      });
-    } catch (err) {
-      console.warn("Failed to mark notification as read:", err);
-    }
+    // 2. Module-level in-memory cache update
+    memoryNotificationsCache = memoryNotificationsCache.map((n) =>
+      n.id === item.id
+        ? { ...n, isRead: true, seen: true, read: true, status: "read" }
+        : n,
+    );
+
+    // 3. Global unread badge decrement & Firestore batch write
+    markNotificationIdsAsRead(item.id);
   }, []);
 
-  // Slide-to-action: Toggle read/unread status on notification(s)
+  // Slide-to-action: Mark notification(s) as read with atomic Firestore batch & global badge sync
   const handleToggleRead = useCallback(
     async (target: AppNotification | AppNotification[]) => {
       try {
@@ -983,36 +1006,41 @@ export default function Notifications() {
       const items = Array.isArray(target) ? target : [target];
       if (items.length === 0) return;
 
-      const anyUnread = items.some((n) => !n.isRead && !n.seen && !n.read);
-      const newStatus = anyUnread ? true : false;
       const ids = items.map((n) => n.id);
 
+      try {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      } catch { }
+
+      // 1. Optimistic React state update
       setNotifications((prev) =>
         prev.map((n) =>
           ids.includes(n.id)
-            ? { ...n, isRead: newStatus, seen: newStatus, read: newStatus }
+            ? { ...n, isRead: true, seen: true, read: true, status: "read" }
             : n,
         ),
       );
 
-      try {
-        await Promise.all(
-          ids.map((id) =>
-            updateDoc(doc(db, "notifications", id), {
-              isRead: newStatus,
-              seen: newStatus,
-              read: newStatus,
-            }).catch(() => { }),
-          ),
-        );
-      } catch (err) {
-        console.warn("Failed to update notification read status:", err);
-      }
+      // 2. Module-level in-memory cache update
+      memoryNotificationsCache = memoryNotificationsCache.map((n) =>
+        ids.includes(n.id)
+          ? { ...n, isRead: true, seen: true, read: true, status: "read" }
+          : n,
+      );
+
+      // 3. Global unread badge update & atomic Firestore batch write
+      await markNotificationIdsAsRead(ids);
+
+      // 4. Persistent offline AsyncStorage cache update
+      AsyncStorage.setItem(
+        NOTIFICATIONS_CACHE_KEY,
+        JSON.stringify(memoryNotificationsCache),
+      ).catch(() => { });
     },
     [],
   );
 
-  // Slide-to-action: Delete notification(s)
+  // Slide-to-action: Delete notification(s) with atomic Firestore batch & global badge sync
   const handleDeleteNotification = useCallback(
     async (target: AppNotification | AppNotification[]) => {
       try {
@@ -1022,17 +1050,27 @@ export default function Notifications() {
       if (items.length === 0) return;
 
       const ids = items.map((n) => n.id);
-      setNotifications((prev) => prev.filter((n) => !ids.includes(n.id)));
 
       try {
-        await Promise.all(
-          ids.map((id) =>
-            deleteDoc(doc(db, "notifications", id)).catch(() => { }),
-          ),
-        );
-      } catch (err) {
-        console.warn("Failed to delete notification(s):", err);
-      }
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      } catch { }
+
+      // 1. Optimistic React state update
+      setNotifications((prev) => prev.filter((n) => !ids.includes(n.id)));
+
+      // 2. Module-level in-memory cache update
+      memoryNotificationsCache = memoryNotificationsCache.filter(
+        (n) => !ids.includes(n.id),
+      );
+
+      // 3. Global unread badge update & atomic Firestore batch delete
+      await markNotificationIdsAsDeleted(ids);
+
+      // 4. Persistent offline AsyncStorage cache update
+      AsyncStorage.setItem(
+        NOTIFICATIONS_CACHE_KEY,
+        JSON.stringify(memoryNotificationsCache),
+      ).catch(() => { });
     },
     [],
   );
@@ -1483,6 +1521,8 @@ export default function Notifications() {
         >
           {t("notifications", "Notifications")}
         </Text>
+
+
       </View>
 
       {/* 2. FILTER PILLS (Horizontal Scrollable - Screenshot 3) */}
@@ -1539,8 +1579,40 @@ export default function Notifications() {
 
       {/* 3. MAIN NOTIFICATION SCROLLVIEW */}
       {loading ? (
-        <View style={styles.centerLoading}>
-          <ActivityIndicator size="large" color={isDark ? "#FFFFFF" : "#000000"} />
+        <View style={styles.skeletonContainer}>
+          {[1, 2, 3, 4].map((k) => (
+            <View
+              key={k}
+              style={[
+                styles.skeletonCard,
+                {
+                  backgroundColor: isDark ? "#161618" : "#FFFFFF",
+                  borderColor: isDark ? "rgba(255, 255, 255, 0.06)" : "#E2E8F0",
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.skeletonAvatar,
+                  { backgroundColor: isDark ? "#242428" : "#E2E8F0" },
+                ]}
+              />
+              <View style={styles.skeletonContent}>
+                <View
+                  style={[
+                    styles.skeletonLineTitle,
+                    { backgroundColor: isDark ? "#242428" : "#E2E8F0" },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.skeletonLineBody,
+                    { backgroundColor: isDark ? "#1F1F22" : "#F1F5F9" },
+                  ]}
+                />
+              </View>
+            </View>
+          ))}
         </View>
       ) : filteredNotifications.length === 0 ? (
         <ScrollView
@@ -1774,6 +1846,8 @@ const NotificationStackGroupItem = React.memo(
 
     const INITIAL_VISIBLE_COUNT = 10;
     const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_COUNT);
+    const [isAnimating, setIsAnimating] = useState(false);
+    const [measuredHeight, setMeasuredHeight] = useState<number>(0);
 
     const heightAnim = useRef(new Animated.Value(isExpanded ? 1 : 0)).current;
     const cardsAnim = useRef(new Animated.Value(isExpanded ? 1 : 0)).current;
@@ -1781,14 +1855,8 @@ const NotificationStackGroupItem = React.memo(
 
     const count = group.items.length;
 
-    // Symmetrical duration for both unstack and stack (relaxed for smoother visual accordion cascade)
-    const animDuration = useMemo(() => {
-      const activeCount = Math.min(count, INITIAL_VISIBLE_COUNT);
-      if (activeCount <= 2) return 380;
-      if (activeCount <= 4) return 460;
-      if (activeCount <= 7) return 540;
-      return 620;
-    }, [count]);
+    // Snappy, 60fps-optimized 300ms bezier curve duration
+    const animDuration = 300;
 
     const renderedItems = useMemo(() => {
       if (isDetailItem) return group.items.slice(0, 1);
@@ -1798,433 +1866,668 @@ const NotificationStackGroupItem = React.memo(
     const hasMore = !isDetailItem && group.items.length > renderedItems.length;
     const remainingCount = group.items.length - renderedItems.length;
 
-    // Stable pre-computed content height (avoids mid-animation re-renders and layout thrashing for 30+/1000+ items)
-    const contentHeight = useMemo(() => {
-      if (isDetailItem) return 110;
-      return 38 + renderedItems.length * 74 + (hasMore ? 54 : 0);
+    // Generous estimated content height to prevent any clipping during animation
+    const estimatedHeight = useMemo(() => {
+      if (isDetailItem) return 240;
+      return 56 + renderedItems.length * 115 + (hasMore ? 64 : 0) + 36;
     }, [isDetailItem, renderedItems.length, hasMore]);
 
-
     const runExpandAnimation = useCallback(() => {
+      setIsAnimating(true);
       Animated.parallel([
         Animated.timing(heightAnim, {
           toValue: 1,
-          duration: animDuration,
-          easing: Easing.inOut(Easing.cubic),
+          duration: 290,
+          easing: Easing.bezier(0.22, 1, 0.36, 1),
           useNativeDriver: false,
         }),
         Animated.timing(cardsAnim, {
           toValue: 1,
-          duration: animDuration,
-          easing: Easing.inOut(Easing.cubic),
+          duration: 290,
+          easing: Easing.bezier(0.22, 1, 0.36, 1),
           useNativeDriver: true,
         }),
-      ]).start();
-    }, [heightAnim, cardsAnim, animDuration]);
+      ]).start(() => {
+        setIsAnimating(false);
+      });
+    }, [heightAnim, cardsAnim]);
 
     const runCollapseAnimation = useCallback(() => {
+      setIsAnimating(true);
       Animated.parallel([
         Animated.timing(heightAnim, {
           toValue: 0,
-          duration: animDuration,
-          easing: Easing.inOut(Easing.cubic),
+          duration: 260,
+          easing: Easing.bezier(0.22, 1, 0.36, 1),
           useNativeDriver: false,
         }),
         Animated.timing(cardsAnim, {
           toValue: 0,
-          duration: animDuration,
-          easing: Easing.inOut(Easing.cubic),
+          duration: 260,
+          easing: Easing.bezier(0.22, 1, 0.36, 1),
           useNativeDriver: true,
         }),
       ]).start(({ finished }) => {
+        setIsAnimating(false);
         if (finished) {
           setVisibleLimit(INITIAL_VISIBLE_COUNT);
         }
       });
-    }, [heightAnim, cardsAnim, animDuration]);
+    }, [heightAnim, cardsAnim]);
 
     const handleToggle = useCallback(() => {
       try {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       } catch { }
 
-      try {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      } catch { }
-
       const willExpand = !isExpanded;
       prevExpandedRef.current = willExpand;
 
-      if (isStacked) {
-        if (willExpand) {
+      if (willExpand) {
+        runExpandAnimation();
+      } else {
+        runCollapseAnimation();
+      }
+
+      onToggleStack(group.groupKey);
+    }, [isExpanded, runExpandAnimation, runCollapseAnimation, onToggleStack, group.groupKey]);
+
+    useEffect(() => {
+      if (prevExpandedRef.current !== isExpanded) {
+        prevExpandedRef.current = isExpanded;
+        if (isExpanded) {
           runExpandAnimation();
         } else {
           runCollapseAnimation();
         }
       }
+    }, [isExpanded, runExpandAnimation, runCollapseAnimation]);
 
-      onToggleStack(group.groupKey);
-    }, [isExpanded, isStacked, runExpandAnimation, runCollapseAnimation, onToggleStack, group.groupKey]);
+    const handlePressMaster = useCallback(() => {
+      onPressItem(group.masterItem);
+    }, [onPressItem, group.masterItem]);
 
-useEffect(() => {
-  if (prevExpandedRef.current !== isExpanded) {
-    prevExpandedRef.current = isExpanded;
-    if (isExpanded) {
-      runExpandAnimation();
-    } else {
-      runCollapseAnimation();
-    }
-  }
-}, [isExpanded, runExpandAnimation, runCollapseAnimation]);
-
-const handlePressMaster = useCallback(() => {
-  onPressItem(group.masterItem);
-}, [onPressItem, group.masterItem]);
-
-const handlePressChild = useCallback(
-  (subItem: AppNotification) => {
-    if (isDetailItem) {
-      handleToggle();
-    } else {
-      const itemToRoute = { ...subItem };
-      // Deep inheritance from master item for rock-solid routing
-      if (!itemToRoute.groupId && group.masterItem?.groupId) {
-        itemToRoute.groupId = group.masterItem.groupId;
-      }
-      if (!itemToRoute.chatId && group.masterItem?.chatId) {
-        itemToRoute.chatId = group.masterItem.chatId;
-      }
-      if (!itemToRoute.senderId && group.masterItem?.senderId) {
-        itemToRoute.senderId = group.masterItem.senderId;
-      }
-      if (!itemToRoute.groupName && group.masterItem?.groupName) {
-        itemToRoute.groupName = group.masterItem.groupName;
-      }
-      if (!itemToRoute.route && group.masterItem?.route) {
-        itemToRoute.route = group.masterItem.route;
-      }
-      if (!itemToRoute.tripId && group.masterItem?.tripId) {
-        itemToRoute.tripId = group.masterItem.tripId;
-      }
-      if (
-        group.categoryLabel === "Group Chat" &&
-        !extractGroupId(itemToRoute)
-      ) {
-        const fallbackGrp =
-          extractGroupId(group.masterItem) ||
-          (group.groupKey
-            ? group.groupKey.split("_group_")[1] ||
-            group.groupKey.replace(/^.*?group_/, "")
-            : null);
-        if (fallbackGrp) {
-          itemToRoute.groupId = fallbackGrp;
-        }
-      }
-      onPressItem(itemToRoute);
-    }
-  },
-  [isDetailItem, handleToggle, onPressItem, group],
-);
-
-const handleAcceptMaster = useCallback(() => {
-  onAccept(group.masterItem);
-}, [onAccept, group.masterItem]);
-
-const handleRejectMaster = useCallback(() => {
-  onReject(group.masterItem);
-}, [onReject, group.masterItem]);
-
-return (
-  <View
-    style={[
-      styles.groupWrapper,
-      isStacked && !isExpanded && styles.groupWrapperStacked,
-    ]}
-  >
-    {/* 3D Layered Cards behind (Deck of Cards visual when collapsed, smooth fade when unstacking) */}
-    {isStacked && (
-      <>
-        {group.items.length >= 3 && (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.stackedPeekLayer2,
-              {
-                backgroundColor: isDark ? "#131315" : "#DADAE0",
-                boxShadow: isDark
-                  ? undefined
-                  : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.05)",
-                opacity: cardsAnim.interpolate({
-                  inputRange: [0, 0.4, 1],
-                  outputRange: [1, 0, 0],
-                }),
-              },
-            ]}
-          />
-        )}
-
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.stackedPeekLayer1,
-            {
-              backgroundColor: isDark ? "#1B1B1D" : "#E5E5E8",
-              boxShadow: isDark
-                ? undefined
-                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.05)",
-              opacity: cardsAnim.interpolate({
-                inputRange: [0, 0.4, 1],
-                outputRange: [1, 0, 0],
-              }),
-            },
-          ]}
-        />
-      </>
-    )}
-
-    {/* Front / Master notification card: tapping ALWAYS toggles stack/unstack */}
-    <View style={styles.masterCardLayer}>
-      <NotificationMasterCard
-        item={group.masterItem}
-        stackCount={group.items.length}
-        categoryLabel={group.categoryLabel}
-        isExpanded={isExpanded}
-        isDark={isDark}
-        isDetailItem={isDetailItem}
-        expandAnim={cardsAnim}
-        scaleFont={scaleFont}
-        accentColor={accentColor}
-        onPress={() => {
-          if (isExpandable) {
-            handleToggle();
-          } else {
-            handlePressMaster();
+    const handlePressChild = useCallback(
+      (subItem: AppNotification) => {
+        if (isDetailItem) {
+          handleToggle();
+        } else {
+          const itemToRoute = { ...subItem };
+          // Deep inheritance from master item for rock-solid routing
+          if (!itemToRoute.groupId && group.masterItem?.groupId) {
+            itemToRoute.groupId = group.masterItem.groupId;
           }
-        }}
-        onToggleStack={handleToggle}
-        onAccept={handleAcceptMaster}
-        onReject={handleRejectMaster}
-        onToggleRead={() => onToggleRead(group.items)}
-        onDelete={() => onDelete(group.items)}
-      />
-    </View>
+          if (!itemToRoute.chatId && group.masterItem?.chatId) {
+            itemToRoute.chatId = group.masterItem.chatId;
+          }
+          if (!itemToRoute.senderId && group.masterItem?.senderId) {
+            itemToRoute.senderId = group.masterItem.senderId;
+          }
+          if (!itemToRoute.groupName && group.masterItem?.groupName) {
+            itemToRoute.groupName = group.masterItem.groupName;
+          }
+          if (!itemToRoute.route && group.masterItem?.route) {
+            itemToRoute.route = group.masterItem.route;
+          }
+          if (!itemToRoute.tripId && group.masterItem?.tripId) {
+            itemToRoute.tripId = group.masterItem.tripId;
+          }
+          if (
+            group.categoryLabel === "Group Chat" &&
+            !extractGroupId(itemToRoute)
+          ) {
+            const fallbackGrp =
+              extractGroupId(group.masterItem) ||
+              (group.groupKey
+                ? group.groupKey.split("_group_")[1] ||
+                group.groupKey.replace(/^.*?group_/, "")
+                : null);
+            if (fallbackGrp) {
+              itemToRoute.groupId = fallbackGrp;
+            }
+          }
+          onPressItem(itemToRoute);
+        }
+      },
+      [isDetailItem, handleToggle, onPressItem, group],
+    );
 
-    {/* INLINE CARD STACKING / ACCORDION CONTAINER */}
-    {isStacked && (
-      <Animated.View
-        pointerEvents={isExpanded ? "auto" : "none"}
+    const handleAcceptMaster = useCallback(() => {
+      onAccept(group.masterItem);
+    }, [onAccept, group.masterItem]);
+
+    const handleRejectMaster = useCallback(() => {
+      onReject(group.masterItem);
+    }, [onReject, group.masterItem]);
+
+    return (
+      <View
         style={[
-          styles.stackInsetContainer,
-          {
-            height: heightAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, contentHeight],
-            }),
-            overflow: "hidden",
-            marginTop: heightAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, 8],
-            }),
-            marginBottom: heightAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, 8],
-            }),
-            opacity: heightAnim.interpolate({
-              inputRange: [0, 0.12, 1],
-              outputRange: [0, 1, 1],
-            }),
-            borderLeftColor: isDark
-              ? "rgba(255, 255, 255, 0.12)"
-              : "rgba(0, 0, 0, 0.10)",
-          },
+          styles.groupWrapper,
+          isStacked && !isExpanded && styles.groupWrapperStacked,
         ]}
       >
-        <View>
-          {/* Stack Header Row with animated slide/fade */}
-          <Animated.View
-            style={{
-              opacity: cardsAnim.interpolate({
-                inputRange: [0, 0.35, 1],
-                outputRange: [0, 1, 1],
-              }),
-              transform: [
-                {
-                  translateY: cardsAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-8, 0],
-                  }),
-                },
-              ],
-            }}
-          >
-            <View style={styles.stackHeaderRow}>
-              <Text
-                style={[
-                  styles.stackHeaderTitle,
-                  {
-                    fontSize: scaleFont(13),
-                    color: isDark ? "#FFFFFF" : "#11141A",
-                  },
-                ]}
-              >
-                {isDetailItem
-                  ? "1 Detail Item"
-                  : `${group.items.length} Stacked ${group.categoryLabel} Alerts`}
-              </Text>
-
-              <TouchableOpacity
-                onPress={handleToggle}
-                style={[
-                  styles.collapseButton,
-                  {
-                    backgroundColor: isDark ? "#1E1E22" : "#E6E6E6",
-                    boxShadow: isDark
-                      ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
-                      : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
-                  },
-                ]}
-                activeOpacity={0.7}
-              >
-                <Text
-                  style={[
-                    styles.collapseButtonText,
-                    {
-                      fontSize: scaleFont(11),
-                      color: isDark ? "#F1F1F1" : "#11141A",
-                    },
-                  ]}
-                >
-                  Collapse
-                </Text>
-                <Ionicons
-                  name="chevron-up"
-                  size={13}
-                  color={isDark ? "#F1F1F1" : "#11141A"}
-                  style={{ marginLeft: 3 }}
-                />
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
-
-          {/* Indented Nested Cards with Symmetrical One-by-One Accordion Unstack/Stack */}
-          {renderedItems.map((subItem, index) => {
-            const activeCount = Math.min(renderedItems.length, INITIAL_VISIBLE_COUNT);
-            const transitionSpan = Math.max(0.2, 0.8 / Math.max(1, activeCount));
-            const step = activeCount > 1 ? (1 - transitionSpan) / (activeCount - 1) : 0;
-            const p1 = Math.max(0.001, Math.min(index, INITIAL_VISIBLE_COUNT - 1) * step);
-            const p2 = Math.min(0.999, p1 + transitionSpan);
-
-            const startY = -8;
-            const isAnimatedCard = index < INITIAL_VISIBLE_COUNT;
-
-            const cardTranslateY = isAnimatedCard
-              ? cardsAnim.interpolate({
-                inputRange: [0, p1, p2, 1],
-                outputRange: [startY, startY, 0, 0],
-                extrapolate: "clamp",
-              })
-              : 0;
-
-            const cardOpacity = isAnimatedCard
-              ? cardsAnim.interpolate({
-                inputRange: [0, p1, p2, 1],
-                outputRange: [0, 0, 1, 1],
-                extrapolate: "clamp",
-              })
-              : 1;
-
-            return (
+        {/* 3D Layered Cards behind (Deck of Cards visual when collapsed, smooth fade when unstacking) */}
+        {isStacked && (
+          <>
+            {group.items.length >= 3 && (
               <Animated.View
-                key={subItem.id}
-                style={{
-                  zIndex: count - index,
-                  opacity: cardOpacity,
-                  transform: [{ translateY: cardTranslateY }],
-                }}
-              >
-                <StackedChildCard
-                  item={subItem}
-                  isDetail={isDetailItem}
-                  isDark={isDark}
-                  scaleFont={scaleFont}
-                  accentColor={accentColor}
-                  onPress={handlePressChild}
-                  onToggleRead={(item) => onToggleRead(item)}
-                  onDelete={(item) => onDelete(item)}
-                />
-              </Animated.View>
-            );
-          })}
-
-          {/* Progressive Load More pill for stacks larger than 10 */}
-          {hasMore && (
-            <Animated.View
-              style={{
-                opacity: cardsAnim.interpolate({
-                  inputRange: [0, 0.75, 1],
-                  outputRange: [0, 0, 1],
-                  extrapolate: "clamp",
-                }),
-                transform: [
+                pointerEvents="none"
+                style={[
+                  styles.stackedPeekLayer2,
                   {
-                    translateY: cardsAnim.interpolate({
-                      inputRange: [0, 0.75, 1],
-                      outputRange: [-8, -8, 0],
-                      extrapolate: "clamp",
+                    backgroundColor: isDark ? "#131315" : "#DADAE0",
+                    boxShadow: isDark
+                      ? undefined
+                      : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.05)",
+                    opacity: cardsAnim.interpolate({
+                      inputRange: [0, 0.4, 1],
+                      outputRange: [1, 0, 0],
                     }),
                   },
-                ],
+                ]}
+              />
+            )}
+
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.stackedPeekLayer1,
+                {
+                  backgroundColor: isDark ? "#1B1B1D" : "#E5E5E8",
+                  boxShadow: isDark
+                    ? undefined
+                    : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.05)",
+                  opacity: cardsAnim.interpolate({
+                    inputRange: [0, 0.4, 1],
+                    outputRange: [1, 0, 0],
+                  }),
+                },
+              ]}
+            />
+          </>
+        )}
+
+        {/* Front / Master notification card: tapping ALWAYS toggles stack/unstack */}
+        <View style={styles.masterCardLayer}>
+          <NotificationMasterCard
+            item={group.masterItem}
+            stackCount={group.items.length}
+            categoryLabel={group.categoryLabel}
+            hasUnread={group.items.some((n) => !n.isRead && !n.seen && !n.read)}
+            isExpanded={isExpanded}
+            isDark={isDark}
+            isDetailItem={isDetailItem}
+            expandAnim={cardsAnim}
+            scaleFont={scaleFont}
+            accentColor={accentColor}
+            onPress={() => {
+              if (isExpandable) {
+                handleToggle();
+              } else {
+                handlePressMaster();
+              }
+            }}
+            onToggleStack={handleToggle}
+            onAccept={handleAcceptMaster}
+            onReject={handleRejectMaster}
+            onToggleRead={() => onToggleRead(group.items)}
+            onDelete={() => onDelete(group.items)}
+          />
+        </View>
+
+        {/* INLINE CARD STACKING / ACCORDION CONTAINER */}
+        {isStacked && (
+          <Animated.View
+            pointerEvents={isExpanded ? "auto" : "none"}
+            style={[
+              styles.stackInsetContainer,
+              {
+                height: isExpanded && !isAnimating
+                  ? undefined
+                  : heightAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, Math.max(measuredHeight, estimatedHeight)],
+                  }),
+                overflow: isExpanded && !isAnimating ? "visible" : "hidden",
+                marginTop: heightAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 8],
+                }),
+                marginBottom: heightAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 8],
+                }),
+                opacity: heightAnim.interpolate({
+                  inputRange: [0, 0.12, 1],
+                  outputRange: [0, 1, 1],
+                }),
+                borderLeftColor: isDark
+                  ? "rgba(255, 255, 255, 0.12)"
+                  : "rgba(0, 0, 0, 0.10)",
+              },
+            ]}
+          >
+            <View
+              onLayout={(e) => {
+                const h = Math.ceil(e.nativeEvent.layout.height);
+                if (h > 0 && Math.abs(h - measuredHeight) > 4) {
+                  setMeasuredHeight(h);
+                }
               }}
             >
-              <TouchableOpacity
-                onPress={() => {
-                  try {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  } catch { }
-                  setVisibleLimit((prev) => Math.min(group.items.length, prev + 15));
-                }}
-                style={[
-                  styles.showMoreButton,
-                  {
-                    backgroundColor: isDark ? "#1C1C1F" : "#EAEAEA",
-                    boxShadow: isDark
-                      ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
-                      : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
-                  },
-                ]}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name="layers-outline"
-                  size={14}
-                  color={isDark ? "#A0A5B0" : "#555A64"}
-                  style={{ marginRight: 6 }}
-                />
-                <Text
-                  style={[
-                    styles.showMoreText,
+              {/* Stack Header Row with animated slide/fade */}
+              <Animated.View
+                style={{
+                  opacity: cardsAnim.interpolate({
+                    inputRange: [0, 0.35, 1],
+                    outputRange: [0, 1, 1],
+                  }),
+                  transform: [
                     {
-                      fontSize: scaleFont(12.5),
-                      color: isDark ? "#F1F1F1" : "#11141A",
+                      translateY: cardsAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [-8, 0],
+                      }),
                     },
-                  ]}
+                  ],
+                }}
+              >
+                <View style={styles.stackHeaderRow}>
+                  <Text
+                    style={[
+                      styles.stackHeaderTitle,
+                      {
+                        fontSize: scaleFont(13),
+                        color: isDark ? "#FFFFFF" : "#11141A",
+                      },
+                    ]}
+                  >
+                    {isDetailItem
+                      ? "1 Detail Item"
+                      : `${group.items.length} Stacked ${group.categoryLabel} Alerts`}
+                  </Text>
+
+                  <TouchableOpacity
+                    onPress={handleToggle}
+                    style={[
+                      styles.collapseButton,
+                      {
+                        backgroundColor: isDark ? "#1E1E22" : "#E6E6E6",
+                        boxShadow: isDark
+                          ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                          : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                      },
+                    ]}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.collapseButtonText,
+                        {
+                          fontSize: scaleFont(11),
+                          color: isDark ? "#F1F1F1" : "#11141A",
+                        },
+                      ]}
+                    >
+                      Collapse
+                    </Text>
+                    <Ionicons
+                      name="chevron-up"
+                      size={13}
+                      color={isDark ? "#F1F1F1" : "#11141A"}
+                      style={{ marginLeft: 3 }}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </Animated.View>
+
+              {/* Indented Nested Cards with Symmetrical One-by-One Accordion Unstack/Stack */}
+              {renderedItems.map((subItem, index) => {
+                const activeCount = Math.min(renderedItems.length, INITIAL_VISIBLE_COUNT);
+                const transitionSpan = Math.max(0.2, 0.8 / Math.max(1, activeCount));
+                const step = activeCount > 1 ? (1 - transitionSpan) / (activeCount - 1) : 0;
+                const p1 = Math.max(0.001, Math.min(index, INITIAL_VISIBLE_COUNT - 1) * step);
+                const p2 = Math.min(0.999, p1 + transitionSpan);
+
+                const startY = -8;
+                const isAnimatedCard = index < INITIAL_VISIBLE_COUNT;
+
+                const cardTranslateY = isAnimatedCard
+                  ? cardsAnim.interpolate({
+                    inputRange: [0, p1, p2, 1],
+                    outputRange: [startY, startY, 0, 0],
+                    extrapolate: "clamp",
+                  })
+                  : 0;
+
+                const cardOpacity = isAnimatedCard
+                  ? cardsAnim.interpolate({
+                    inputRange: [0, p1, p2, 1],
+                    outputRange: [0, 0, 1, 1],
+                    extrapolate: "clamp",
+                  })
+                  : 1;
+
+                return (
+                  <Animated.View
+                    key={subItem.id}
+                    style={{
+                      zIndex: count - index,
+                      opacity: cardOpacity,
+                      transform: [{ translateY: cardTranslateY }],
+                    }}
+                  >
+                    <StackedChildCard
+                      item={subItem}
+                      isDetail={isDetailItem}
+                      isDark={isDark}
+                      scaleFont={scaleFont}
+                      accentColor={accentColor}
+                      onPress={handlePressChild}
+                      onToggleRead={(item) => onToggleRead(item)}
+                      onDelete={(item) => onDelete(item)}
+                    />
+                  </Animated.View>
+                );
+              })}
+
+              {/* Progressive Load More pill for stacks larger than 10 */}
+              {hasMore && (
+                <Animated.View
+                  style={{
+                    opacity: cardsAnim.interpolate({
+                      inputRange: [0, 0.75, 1],
+                      outputRange: [0, 0, 1],
+                      extrapolate: "clamp",
+                    }),
+                    transform: [
+                      {
+                        translateY: cardsAnim.interpolate({
+                          inputRange: [0, 0.75, 1],
+                          outputRange: [-8, -8, 0],
+                          extrapolate: "clamp",
+                        }),
+                      },
+                    ],
+                  }}
                 >
-                  +{remainingCount} more in this stack • Tap to view
-                </Text>
-              </TouchableOpacity>
-            </Animated.View>
-          )}
-        </View>
-      </Animated.View>
-    )}
-  </View>
-);
+                  <TouchableOpacity
+                    onPress={() => {
+                      try {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      } catch { }
+                      setVisibleLimit((prev) => Math.min(group.items.length, prev + 15));
+                    }}
+                    style={[
+                      styles.showMoreButton,
+                      {
+                        backgroundColor: isDark ? "#1C1C1F" : "#EAEAEA",
+                        boxShadow: isDark
+                          ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                          : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                      },
+                    ]}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name="layers-outline"
+                      size={14}
+                      color={isDark ? "#A0A5B0" : "#555A64"}
+                      style={{ marginRight: 6 }}
+                    />
+                    <Text
+                      style={[
+                        styles.showMoreText,
+                        {
+                          fontSize: scaleFont(12.5),
+                          color: isDark ? "#F1F1F1" : "#11141A",
+                        },
+                      ]}
+                    >
+                      +{remainingCount} more in this stack • Tap to view
+                    </Text>
+                  </TouchableOpacity>
+                </Animated.View>
+              )}
+            </View>
+          </Animated.View>
+        )}
+      </View>
+    );
   },
 );
 
 /* ============================================================
    COMPONENT: NOTIFICATION MASTER CARD (Screenshots 1, 2, 3)
 ============================================================ */
+
+
+/* ============================================================
+   SWIPE ACTIONS VIEW COMPONENTS (OPACITY 0 UNTIL SWIPED)
+============================================================ */
+
+const SwipeActionsMasterView = React.memo(function SwipeActionsMasterView({
+  progress,
+  showReadAction,
+  onDelete,
+  onToggleRead,
+  isDark,
+  closeSwipe,
+  handleDeletePress,
+}: {
+  progress?: any;
+  showReadAction: boolean;
+  onDelete?: () => void;
+  onToggleRead?: () => void;
+  isDark: boolean;
+  closeSwipe: () => void;
+  handleDeletePress: () => void;
+}) {
+  const animStyle = useAnimatedStyle(() => {
+    if (!progress) return { opacity: 0 };
+    const p = typeof progress.value === "number" ? progress.value : 0;
+    return {
+      opacity: p > 0.06 ? Math.min(1, (p - 0.06) * 3) : 0,
+    };
+  });
+
+  const gradientColors = isDark
+    ? showReadAction
+      ? ["#202020", "#193426", "#35191B"]
+      : ["#202020", "#292021", "#35191B"]
+    : showReadAction
+      ? ["#E0E0E0", "#C4DEC9", "#E8C3C3"]
+      : ["#E0E0E0", "#E1CACA", "#E8C3C3"];
+
+  return (
+    <Reanimated.View
+      style={[
+        styles.swipeActionsContainer,
+        {
+          width: showReadAction ? 136 : 72,
+          backgroundColor: "transparent",
+        },
+        animStyle,
+      ]}
+    >
+      <LinearGradient
+        colors={gradientColors as any}
+        locations={[0, 0.56, 1]}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        pointerEvents="none"
+        style={StyleSheet.absoluteFillObject}
+      />
+      {showReadAction && (
+        <TouchableOpacity
+          style={styles.swipeActionButton}
+          onPress={(e) => {
+            e?.stopPropagation?.();
+            try {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            } catch { }
+            onToggleRead?.();
+            closeSwipe();
+          }}
+          hitSlop={{ top: 14, bottom: 14, left: 8, right: 8 }}
+          activeOpacity={0.75}
+          accessibilityLabel="Mark as read"
+        >
+          <View
+            style={[
+              styles.swipeActionIconCircle,
+              { backgroundColor: isDark ? "rgba(34, 197, 94, 0.22)" : "#DCFCE7" },
+            ]}
+          >
+            <Ionicons
+              name="checkmark-done"
+              size={21}
+              color={isDark ? "#4ADE80" : "#16A34A"}
+            />
+          </View>
+        </TouchableOpacity>
+      )}
+      {onDelete && (
+        <TouchableOpacity
+          style={styles.swipeActionButton}
+          onPress={(e) => {
+            e?.stopPropagation?.();
+            handleDeletePress();
+          }}
+          hitSlop={{ top: 14, bottom: 14, left: 8, right: 8 }}
+          activeOpacity={0.75}
+          accessibilityLabel="Delete notification"
+        >
+          <View
+            style={[
+              styles.swipeActionIconCircle,
+              { backgroundColor: isDark ? "rgba(239, 68, 68, 0.22)" : "#FEE2E2" },
+            ]}
+          >
+            <Ionicons
+              name="trash"
+              size={18}
+              color={isDark ? "#EF4444" : "#DC2626"}
+            />
+          </View>
+        </TouchableOpacity>
+      )}
+    </Reanimated.View>
+  );
+});
+
+const SwipeActionsChildView = React.memo(function SwipeActionsChildView({
+  progress,
+  showReadAction,
+  onDelete,
+  onToggleRead,
+  item,
+  isDark,
+  closeSwipe,
+  handleDeletePress,
+}: {
+  progress?: any;
+  showReadAction: boolean;
+  onDelete?: () => void;
+  onToggleRead?: () => void;
+  item: AppNotification;
+  isDark: boolean;
+  closeSwipe: () => void;
+  handleDeletePress: () => void;
+}) {
+  const animStyle = useAnimatedStyle(() => {
+    if (!progress) return { opacity: 0 };
+    const p = typeof progress.value === "number" ? progress.value : 0;
+    return {
+      opacity: p > 0.06 ? Math.min(1, (p - 0.06) * 3) : 0,
+    };
+  });
+
+  const gradientColors = isDark
+    ? showReadAction
+      ? ["#202020", "#193426", "#35191B"]
+      : ["#202020", "#292021", "#35191B"]
+    : showReadAction
+      ? ["#E0E0E0", "#C4DEC9", "#E8C3C3"]
+      : ["#E0E0E0", "#E1CACA", "#E8C3C3"];
+
+  return (
+    <Reanimated.View
+      style={[
+        styles.childSwipeActionsContainer,
+        {
+          width: showReadAction ? 126 : 68,
+          backgroundColor: "transparent",
+        },
+        animStyle,
+      ]}
+    >
+      <LinearGradient
+        colors={gradientColors as any}
+        locations={[0, 0.56, 1]}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        pointerEvents="none"
+        style={StyleSheet.absoluteFillObject}
+      />
+      {showReadAction && (
+        <TouchableOpacity
+          style={styles.childSwipeActionButton}
+          onPress={(e) => {
+            e?.stopPropagation?.();
+            try {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            } catch { }
+            onToggleRead?.();
+            closeSwipe();
+          }}
+          hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }}
+          activeOpacity={0.75}
+          accessibilityLabel="Mark as read"
+        >
+          <View
+            style={[
+              styles.childSwipeActionIconCircle,
+              { backgroundColor: isDark ? "rgba(34, 197, 94, 0.22)" : "#DCFCE7" },
+            ]}
+          >
+            <Ionicons
+              name="checkmark-done"
+              size={19}
+              color={isDark ? "#4ADE80" : "#16A34A"}
+            />
+          </View>
+        </TouchableOpacity>
+      )}
+      {onDelete && (
+        <TouchableOpacity
+          style={styles.childSwipeActionButton}
+          onPress={(e) => {
+            e?.stopPropagation?.();
+            handleDeletePress();
+          }}
+          hitSlop={{ top: 12, bottom: 12, left: 6, right: 6 }}
+          activeOpacity={0.75}
+          accessibilityLabel="Delete notification"
+        >
+          <View
+            style={[
+              styles.childSwipeActionIconCircle,
+              { backgroundColor: isDark ? "rgba(239, 68, 68, 0.22)" : "#FEE2E2" },
+            ]}
+          >
+            <Ionicons
+              name="trash"
+              size={17}
+              color={isDark ? "#EF4444" : "#DC2626"}
+            />
+          </View>
+        </TouchableOpacity>
+      )}
+    </Reanimated.View>
+  );
+});
 
 const NotificationMasterCard = React.memo(function NotificationMasterCard({
   item,
@@ -2242,6 +2545,7 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
   onReject,
   onToggleRead,
   onDelete,
+  hasUnread,
 }: {
   item: AppNotification;
   stackCount: number;
@@ -2258,6 +2562,7 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
   onReject: () => void;
   onToggleRead?: () => void;
   onDelete?: () => void;
+  hasUnread?: boolean;
 }) {
   const isStacked = stackCount > 1;
   const isExpandable = isStacked || isDetailItem;
@@ -2298,6 +2603,8 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
     item.message ||
     item.info ||
     item.description ||
+    item.details ||
+    item.notes ||
     (isFriendAccepted
       ? `${item.senderName || "User"} accepted your friend request.`
       : ""),
@@ -2323,6 +2630,7 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
 
   // Swipeable ref to close after slide action click
   const swipeableRef = useRef<any>(null);
+  const [isSwipeOpen, setIsSwipeOpen] = useState(false);
 
   // Tactile press animation
   const pressScale = useRef(new Animated.Value(1)).current;
@@ -2350,11 +2658,21 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
   const handlePress = () => {
     if (isExpandable) {
       try {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        LayoutAnimation.configureNext({
+          duration: 280,
+          create: {
+            type: LayoutAnimation.Types.easeInEaseOut,
+            property: LayoutAnimation.Properties.opacity,
+          },
+          update: {
+            type: LayoutAnimation.Types.easeInEaseOut,
+          },
+          delete: {
+            type: LayoutAnimation.Types.easeInEaseOut,
+            property: LayoutAnimation.Properties.opacity,
+          },
+        });
       } catch { }
-      if (isDetailItem) {
-        onPress();
-      }
       onToggleStack();
       return;
     }
@@ -2378,12 +2696,43 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
       ? "180deg"
       : "0deg";
 
+  const isUnread = hasUnread !== undefined
+    ? hasUnread
+    : (!item.isRead && !item.seen && !item.read);
+
+  // Deletion animation state
+  const deleteAnim = useRef(new Animated.Value(1)).current;
+  const isDeletingRef = useRef(false);
+
+  const handleDeletePress = () => {
+    if (isDeletingRef.current) return;
+    isDeletingRef.current = true;
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch { }
+    try {
+      swipeableRef.current?.close();
+    } catch { }
+    Animated.parallel([
+      Animated.timing(deleteAnim, {
+        toValue: 0,
+        duration: 250,
+        easing: Easing.bezier(0.25, 1, 0.36, 1),
+        useNativeDriver: false,
+      }),
+    ]).start(() => {
+      onDelete?.();
+    });
+  };
+
+  const showReadAction = isUnread && Boolean(onToggleRead);
+
   const renderRightActions = (
-    _progress?: any,
+    progress?: any,
     _translation?: any,
     swipeableMethods?: any,
   ) => {
-    if (!onDelete && !onToggleRead) return null;
+    if (!onDelete && !showReadAction) return null;
     const closeSwipe = () => {
       try {
         swipeableMethods?.close();
@@ -2392,418 +2741,514 @@ const NotificationMasterCard = React.memo(function NotificationMasterCard({
         swipeableRef.current?.close();
       } catch { }
     };
+
     return (
-      <View
-        style={[
-          styles.swipeActionsContainer,
-          { backgroundColor: isDark ? "#101012" : "#E2E8F0" },
-        ]}
-      >
-        {onToggleRead && (
-          <TouchableOpacity
-            style={styles.swipeActionButton}
-            onPress={() => {
-              closeSwipe();
-              onToggleRead();
-            }}
-            activeOpacity={0.85}
-            accessibilityLabel="Mark as read"
-          >
-            <LinearGradient
-              colors={
-                isDark
-                  ? [
-                      "rgba(16,16,16,0.05)",
-                      "rgba(21,53,38,0.72)",
-                      "rgba(21,53,38,0.96)",
-                    ]
-                  : [
-                      "rgba(241,245,249,0.05)",
-                      "rgba(220,252,231,0.72)",
-                      "rgba(187,247,208,0.96)",
-                    ]
-              }
-              locations={[0, 0.4, 1]}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={StyleSheet.absoluteFillObject}
-            />
-            <View
-              style={[
-                styles.swipeActionIconCircle,
-                { backgroundColor: isDark ? "#184726" : "#DCFCE7" },
-              ]}
-            >
-              <Ionicons
-                name="checkmark"
-                size={21}
-                color={isDark ? "#4ADE80" : "#16A34A"}
-              />
-            </View>
-          </TouchableOpacity>
-        )}
-        {onDelete && (
-          <TouchableOpacity
-            style={styles.swipeActionButton}
-            onPress={() => {
-              closeSwipe();
-              onDelete();
-            }}
-            activeOpacity={0.85}
-            accessibilityLabel="Delete notification"
-          >
-            <LinearGradient
-              colors={
-                isDark
-                  ? [
-                      onToggleRead
-                        ? "rgba(21,53,38,0.35)"
-                        : "rgba(16,16,16,0.05)",
-                      "rgba(53,25,27,0.82)",
-                      "rgba(53,25,27,0.98)",
-                    ]
-                  : [
-                      onToggleRead
-                        ? "rgba(187,247,208,0.35)"
-                        : "rgba(241,245,249,0.05)",
-                      "rgba(254,226,226,0.82)",
-                      "rgba(254,202,202,0.98)",
-                    ]
-              }
-              locations={[0, 0.35, 1]}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={StyleSheet.absoluteFillObject}
-            />
-            <View
-              style={[
-                styles.swipeActionIconCircle,
-                { backgroundColor: isDark ? "#4E201D" : "#FEE2E2" },
-              ]}
-            >
-              <Ionicons
-                name="trash"
-                size={19}
-                color={isDark ? "#FF5A5F" : "#DC2626"}
-              />
-            </View>
-          </TouchableOpacity>
-        )}
-      </View>
+      <SwipeActionsMasterView
+        progress={progress}
+        showReadAction={showReadAction}
+        onDelete={onDelete ? handleDeletePress : undefined}
+        onToggleRead={onToggleRead}
+        isDark={isDark}
+        closeSwipe={closeSwipe}
+        handleDeletePress={handleDeletePress}
+      />
     );
   };
 
   return (
-    <Swipeable
-      ref={swipeableRef}
-      renderRightActions={renderRightActions}
-      overshootRight={false}
-      friction={2}
-      containerStyle={styles.masterSwipeableContainer}
+    <Animated.View
+      pointerEvents={isDeletingRef.current ? "none" : "auto"}
+      style={{
+        opacity: deleteAnim,
+        maxHeight: deleteAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, 1000],
+        }),
+        transform: [
+          {
+            scale: deleteAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0.85, 1],
+            }),
+          },
+          {
+            translateX: deleteAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [-90, 0],
+            }),
+          },
+        ],
+        overflow: "hidden",
+      }}
     >
-      <Pressable
-        onPress={handlePress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
+      <Swipeable
+        ref={swipeableRef}
+        renderRightActions={renderRightActions}
+        onSwipeableWillOpen={() => setIsSwipeOpen(true)}
+        onSwipeableWillClose={() => setIsSwipeOpen(false)}
+        overshootRight={false}
+        rightThreshold={showReadAction ? 40 : 25}
+        friction={1.5}
+        childrenContainerStyle={{ width: "100%" }}
+        containerStyle={[
+          styles.masterSwipeableContainer,
+          { backgroundColor: cardBgColor },
+        ]}
       >
-        <Animated.View style={{ transform: [{ scale: pressScale }] }}>
-          <Animated.View
-            style={[
-              styles.cardContainer,
-            {
-              backgroundColor: cardBgColor,
-              boxShadow: isDark
-                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
-                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
-              borderWidth: 0,
-            },
-          ]}
+        <Pressable
+          style={{ width: "100%" }}
+          onPress={handlePress}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
         >
-          <View style={styles.cardMainRow}>
-            {/* Avatar with Badges */}
-            <View style={styles.avatarWrapper}>
-              {avatarUrl ? (
-                <Image source={{ uri: avatarUrl }} style={styles.cardAvatar} />
-              ) : (
-                <View
-                  style={[
-                    styles.cardAvatarFallback,
-                    { backgroundColor: fallbackBg },
-                  ]}
-                >
-                  {fallbackInitial ? (
-                    <Text
+          <Animated.View style={{ width: "100%", transform: [{ scale: pressScale }] }}>
+            <Animated.View
+              style={[
+                styles.cardContainer,
+                { width: "100%" },
+                {
+                  backgroundColor: cardBgColor,
+                  boxShadow: isDark
+                    ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                    : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                  borderWidth: 0,
+                },
+              ]}
+            >
+              <View style={styles.cardMainRow}>
+                {/* Avatar with Badges */}
+                <View style={styles.avatarWrapper}>
+                  {avatarUrl ? (
+                    <Image source={{ uri: avatarUrl }} style={styles.cardAvatar} />
+                  ) : (
+                    <View
                       style={[
-                        styles.avatarInitialText,
-                        {
-                          fontSize: scaleFont(19),
-                          color: isFeedbackItem
-                            ? (isDark ? "#000000" : "#11141A")
-                            : "#FFFFFF",
-                        },
+                        styles.cardAvatarFallback,
+                        { backgroundColor: fallbackBg },
                       ]}
                     >
-                      {fallbackInitial}
-                    </Text>
-                  ) : null}
-                </View>
-              )}
+                      {fallbackInitial ? (
+                        <Text
+                          style={[
+                            styles.avatarInitialText,
+                            {
+                              fontSize: scaleFont(19),
+                              color: isFeedbackItem
+                                ? (isDark ? "#000000" : "#11141A")
+                                : "#FFFFFF",
+                            },
+                          ]}
+                        >
+                          {fallbackInitial}
+                        </Text>
+                      ) : null}
+                    </View>
+                  )}
 
-              {/* Bottom-right Mini Status Badge */}
-              <View
-                style={[
-                  styles.avatarMiniBadge,
-                  {
-                    backgroundColor: typeConfig.bgColor,
-                    borderColor: isDark ? "#161618" : "#FFFFFF",
-                  },
-                ]}
-              >
-                <Ionicons
-                  name={typeConfig.icon}
-                  size={10}
-                  color="#FFFFFF"
-                  style={
-                    isMissedCall
-                      ? { transform: [{ rotate: "135deg" }] }
-                      : undefined
-                  }
-                />
-              </View>
-
-              {/* Top-right Stack Count Badge (White circle with black counter e.g. 5, 3, 2 in dark mode, inverted in light) */}
-              {isStacked && (
-                <View
-                  style={[
-                    styles.stackBadge,
-                    {
-                      backgroundColor: isDark ? "#FFFFFF" : "#000000",
-                      borderColor: isDark ? "#161618" : "#FFFFFF",
-                      boxShadow: isDark
-                        ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
-                        : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
-                    },
-                  ]}
-                >
-                  <Text
+                  {/* Bottom-right Mini Status Badge */}
+                  <View
                     style={[
-                      styles.stackBadgeText,
+                      styles.avatarMiniBadge,
                       {
-                        fontSize: scaleFont(10.5),
-                        color: isDark ? "#000000" : "#FFFFFF",
+                        backgroundColor: typeConfig.bgColor,
+                        borderColor: isDark ? "#161618" : "#FFFFFF",
                       },
                     ]}
-                  >
-                    {stackCount}
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Content Column */}
-            <View style={styles.cardContent}>
-              {/* Header Row: Title and Timestamp */}
-              <View style={styles.cardHeaderRow}>
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.cardTitle,
-                    {
-                      fontSize: scaleFont(15),
-                      color: isDark ? "#FFFFFF" : "#11141A",
-                    },
-                  ]}
-                >
-                  {titleText}
-                </Text>
-                <Text
-                  style={[
-                    styles.cardTimeText,
-                    {
-                      fontSize: scaleFont(12),
-                      color: isDark ? "#7E8590" : "#8A909A",
-                    },
-                  ]}
-                >
-                  {formatCardTime(item.timestamp)}
-                </Text>
-              </View>
-
-              {/* Missed Call Banner inside parent card only if solitary */}
-              {isMissedCall && !isStacked && (
-                <View style={styles.missedCallBadgeRow}>
-                  <Ionicons
-                    name="call"
-                    size={12}
-                    color="#FF5A5F"
-                    style={{
-                      marginRight: 5,
-                      transform: [{ rotate: "135deg" }],
-                    }}
-                  />
-                  <Text
-                    style={[
-                      styles.missedCallLabel,
-                      { fontSize: scaleFont(12) },
-                    ]}
-                  >
-                    Missed Call
-                  </Text>
-                </View>
-              )}
-
-              {/* Message / Subtitle */}
-              {displayBody.length > 0 && (
-                <Text
-                  numberOfLines={isDetailItem && isExpanded ? undefined : 1}
-                  style={[
-                    styles.cardMessage,
-                    {
-                      fontSize: scaleFont(13.5),
-                      color: isDark ? "rgba(255, 255, 255, 0.65)" : "#555A64",
-                    },
-                    isDetailItem && isExpanded && {
-                      lineHeight: 20,
-                      marginTop: 4,
-                      color: isDark ? "#FFFFFF" : "#11141A",
-                    },
-                    isMissedCall && (isDark ? styles.cardMessageWhite : { color: "#11141A", fontWeight: "500" }),
-                  ]}
-                >
-                  {displayBody}
-                </Text>
-              )}
-
-              {/* Group Summary Row for Multi-card Stacks (Matching Image 1) */}
-              {isStacked && (
-                <View style={styles.groupSummaryRow} pointerEvents="none">
-                  <Ionicons
-                    name="layers"
-                    size={13}
-                    color={isDark ? "#F1F1F1" : "#555860"}
-                    style={styles.summaryLayersIcon}
-                  />
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.groupSummaryText,
-                      {
-                        fontSize: scaleFont(12),
-                        color: isDark ? "#F1F1F1" : "#4B5563",
-                      },
-                    ]}
-                  >
-                    {isExpanded
-                      ? `Tap to collapse ${stackCount} stacked alerts`
-                      : `+${stackCount - 1} more in ${categoryLabel} • Tap to unstack`}
-                  </Text>
-                  <Animated.View
-                    style={{
-                      marginLeft: 4,
-                      transform: [{ rotate: chevronRotate }],
-                    }}
                   >
                     <Ionicons
-                      name="chevron-down"
-                      size={13}
-                      color={isDark ? "#F1F1F1" : "#555860"}
+                      name={typeConfig.icon}
+                      size={10}
+                      color="#FFFFFF"
+                      style={
+                        isMissedCall
+                          ? { transform: [{ rotate: "135deg" }] }
+                          : undefined
+                      }
                     />
-                  </Animated.View>
-                </View>
-              )}
+                  </View>
 
-              {/* Single Detail Notification Summary Row (Matching screenshot for Feedback/General/Accepted) */}
-              {isDetailItem && (
-                <View style={styles.groupSummaryRow} pointerEvents="none">
-                  <Ionicons
-                    name={isExpanded ? "chevron-up" : "chevron-down"}
-                    size={13}
-                    color={isDark ? "#F1F1F1" : "#555860"}
-                    style={styles.summaryLayersIcon}
-                  />
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.groupSummaryText,
-                      {
-                        fontSize: scaleFont(12),
-                        color: isDark ? "#F1F1F1" : "#4B5563",
-                      },
-                    ]}
-                  >
-                    {isExpanded ? "Tap to collapse" : "Tap to view full info"}
-                  </Text>
-                </View>
-              )}
-
-              {/* Dual Pill Action Buttons (inline for Friend Requests) */}
-              {isPendingRequest && (
-                <View style={styles.friendButtonsRow}>
-                  <TouchableOpacity
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      onAccept();
-                    }}
-                    style={[
-                      styles.acceptButton,
-                      {
-                        backgroundColor: isDark ? "#FFFFFF" : "#000000",
-                        boxShadow: isDark
-                          ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
-                          : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
-                      },
-                    ]}
-                    activeOpacity={0.8}
-                  >
-                    <Text
+                  {/* Top-right Stack Count Badge (White circle with black counter e.g. 5, 3, 2 in dark mode, inverted in light) */}
+                  {isStacked && (
+                    <View
                       style={[
-                        styles.acceptButtonText,
+                        styles.stackBadge,
                         {
-                          fontSize: scaleFont(13),
-                          color: isDark ? "#000000" : "#FFFFFF",
+                          backgroundColor: isDark ? "#FFFFFF" : "#000000",
+                          borderColor: isDark ? "#161618" : "#FFFFFF",
+                          boxShadow: isDark
+                            ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                            : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
                         },
                       ]}
                     >
-                      Accept
-                    </Text>
-                  </TouchableOpacity>
+                      <Text
+                        style={[
+                          styles.stackBadgeText,
+                          {
+                            fontSize: scaleFont(10.5),
+                            color: isDark ? "#000000" : "#FFFFFF",
+                          },
+                        ]}
+                      >
+                        {stackCount}
+                      </Text>
+                    </View>
+                  )}
+                </View>
 
-                  <TouchableOpacity
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      onReject();
-                    }}
-                    style={[
-                      styles.declineButton,
-                      {
-                        backgroundColor: isDark ? "#242428" : "#E6E6E6",
-                        boxShadow: isDark
-                          ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
-                          : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
-                      },
-                    ]}
-                    activeOpacity={0.8}
-                  >
+                {/* Content Column */}
+                <View style={styles.cardContent}>
+                  {/* Header Row: Title and Timestamp */}
+                  <View style={styles.cardHeaderRow}>
                     <Text
+                      numberOfLines={1}
                       style={[
-                        styles.declineButtonText,
+                        styles.cardTitle,
                         {
-                          fontSize: scaleFont(13),
+                          fontSize: scaleFont(15),
                           color: isDark ? "#FFFFFF" : "#11141A",
                         },
                       ]}
                     >
-                      Decline
+                      {titleText}
                     </Text>
-                  </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.cardTimeText,
+                        {
+                          fontSize: scaleFont(12),
+                          color: isDark ? "#7E8590" : "#8A909A",
+                        },
+                      ]}
+                    >
+                      {formatCardTime(item.timestamp)}
+                    </Text>
+                  </View>
+
+                  {/* Missed Call Banner inside parent card only if solitary */}
+                  {isMissedCall && !isStacked && (
+                    <View style={styles.missedCallBadgeRow}>
+                      <Ionicons
+                        name="call"
+                        size={12}
+                        color="#FF5A5F"
+                        style={{
+                          marginRight: 5,
+                          transform: [{ rotate: "135deg" }],
+                        }}
+                      />
+                      <Text
+                        style={[
+                          styles.missedCallLabel,
+                          { fontSize: scaleFont(12) },
+                        ]}
+                      >
+                        Missed Call
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Message / Subtitle */}
+                  {displayBody.length > 0 && (
+                    <Text
+                      numberOfLines={isDetailItem && isExpanded ? undefined : 1}
+                      style={[
+                        styles.cardMessage,
+                        {
+                          fontSize: scaleFont(13.5),
+                          color: isDark ? "rgba(255, 255, 255, 0.65)" : "#555A64",
+                        },
+                        isDetailItem && isExpanded && {
+                          fontSize: scaleFont(14),
+                          lineHeight: 21,
+                          marginTop: 6,
+                          color: isDark ? "#F4F4F5" : "#18181B",
+                        },
+                        isMissedCall && (isDark ? styles.cardMessageWhite : { color: "#11141A", fontWeight: "500" }),
+                      ]}
+                    >
+                      {displayBody}
+                      {isUnread && (
+                        <Text style={{ color: isDark ? "#FFFFFF" : "#11141A", fontWeight: "800" }}> •</Text>
+                      )}
+                    </Text>
+                  )}
+
+                  {/* Extended Feedback / Support / Info details when expanded in place */}
+                  {isDetailItem && isExpanded && (
+                    <View style={styles.detailContentContainer}>
+                      {(item.reply || item.response || item.adminReply || item.notes) && (
+                        <View
+                          style={[
+                            styles.feedbackResponseBox,
+                            {
+                              backgroundColor: isDark ? "rgba(255, 255, 255, 0.05)" : "#F8FAFC",
+                              borderColor: isDark ? "rgba(255, 255, 255, 0.08)" : "#E2E8F0",
+                            },
+                          ]}
+                        >
+                          <View style={styles.feedbackResponseHeader}>
+                            <Ionicons
+                              name="chatbubble-ellipses-outline"
+                              size={13}
+                              color={isDark ? "#60A5FA" : "#2563EB"}
+                            />
+                            <Text
+                              style={[
+                                styles.feedbackResponseTitle,
+                                {
+                                  fontSize: scaleFont(12),
+                                  color: isDark ? "#93C5FD" : "#1D4ED8",
+                                },
+                              ]}
+                            >
+                              Response
+                            </Text>
+                          </View>
+                          <Text
+                            style={[
+                              styles.feedbackResponseText,
+                              {
+                                fontSize: scaleFont(13),
+                                color: isDark ? "#E4E4E7" : "#334155",
+                              },
+                            ]}
+                          >
+                            {stripHtml(item.reply || item.response || item.adminReply || item.notes)}
+                          </Text>
+                        </View>
+                      )}
+
+                      {(item.feedbackId || item.ticketId || item.status || item.category) && (
+                        <View style={styles.feedbackMetaRow}>
+                          {(item.feedbackId || item.ticketId) && (
+                            <View
+                              style={[
+                                styles.feedbackMetaChip,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(255, 255, 255, 0.08)"
+                                    : "#F1F5F9",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.feedbackMetaChipText,
+                                  {
+                                    fontSize: scaleFont(11),
+                                    color: isDark ? "#A1A1AA" : "#64748B",
+                                  },
+                                ]}
+                              >
+                                Ref #{item.feedbackId || item.ticketId}
+                              </Text>
+                            </View>
+                          )}
+                          {item.status && (
+                            <View
+                              style={[
+                                styles.feedbackMetaChip,
+                                {
+                                  backgroundColor: isDark
+                                    ? "rgba(34, 197, 94, 0.16)"
+                                    : "#DCFCE7",
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.feedbackMetaChipText,
+                                  {
+                                    fontSize: scaleFont(11),
+                                    color: isDark ? "#4ADE80" : "#16A34A",
+                                  },
+                                ]}
+                              >
+                                {String(item.status).toUpperCase()}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  )}
+
+                  {/* Group Summary Row for Multi-card Stacks (Matching Image 1) */}
+                  {isStacked && (
+                    <View style={styles.groupSummaryRow} pointerEvents="none">
+                      <Ionicons
+                        name="layers"
+                        size={13}
+                        color={isDark ? "#F1F1F1" : "#555860"}
+                        style={styles.summaryLayersIcon}
+                      />
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.groupSummaryText,
+                          {
+                            fontSize: scaleFont(12),
+                            color: isDark ? "#F1F1F1" : "#4B5563",
+                          },
+                        ]}
+                      >
+                        {isExpanded
+                          ? `Tap to collapse ${stackCount} stacked alerts`
+                          : `+${stackCount - 1} more in ${categoryLabel} • Tap to unstack`}
+                      </Text>
+                      <Animated.View
+                        style={{
+                          marginLeft: 4,
+                          transform: [{ rotate: chevronRotate }],
+                        }}
+                      >
+                        <Ionicons
+                          name="chevron-down"
+                          size={13}
+                          color={isDark ? "#F1F1F1" : "#555860"}
+                        />
+                      </Animated.View>
+                      {isUnread && (
+                        <Text
+                          style={{
+                            marginLeft: 6,
+                            color: isDark ? "#FFFFFF" : "#11141A",
+                            fontWeight: "800",
+                            fontSize: scaleFont(13),
+                          }}
+                        >
+                          •
+                        </Text>
+                      )}
+                    </View>
+                  )}
+
+                  {/* Single Detail Notification Summary Row (Matching screenshot for Feedback/General/Accepted) */}
+                  {isDetailItem && (
+                    <View style={styles.groupSummaryRow} pointerEvents="none">
+                      <Animated.View
+                        style={{
+                          transform: [{ rotate: chevronRotate }],
+                          marginRight: 6,
+                        }}
+                      >
+                        <Ionicons
+                          name="chevron-down"
+                          size={13}
+                          color={isDark ? "#F1F1F1" : "#555860"}
+                          style={styles.summaryLayersIcon}
+                        />
+                      </Animated.View>
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.groupSummaryText,
+                          {
+                            fontSize: scaleFont(12),
+                            color: isDark ? "#F1F1F1" : "#4B5563",
+                          },
+                        ]}
+                      >
+                        {isExpanded ? "Tap to collapse" : "Tap to view full info"}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Dual Pill Action Buttons (inline for Friend Requests) */}
+                  {isPendingRequest && (
+                    <View style={styles.friendButtonsRow}>
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          onAccept();
+                        }}
+                        style={[
+                          styles.acceptButton,
+                          {
+                            backgroundColor: isDark ? "#FFFFFF" : "#000000",
+                            boxShadow: isDark
+                              ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                              : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                          },
+                        ]}
+                        activeOpacity={0.8}
+                      >
+                        <Text
+                          style={[
+                            styles.acceptButtonText,
+                            {
+                              fontSize: scaleFont(13),
+                              color: isDark ? "#000000" : "#FFFFFF",
+                            },
+                          ]}
+                        >
+                          Accept
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          onReject();
+                        }}
+                        style={[
+                          styles.declineButton,
+                          {
+                            backgroundColor: isDark ? "#242428" : "#E6E6E6",
+                            boxShadow: isDark
+                              ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                              : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                          },
+                        ]}
+                        activeOpacity={0.8}
+                      >
+                        <Text
+                          style={[
+                            styles.declineButtonText,
+                            {
+                              fontSize: scaleFont(13),
+                              color: isDark ? "#FFFFFF" : "#11141A",
+                            },
+                          ]}
+                        >
+                          Decline
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
+              </View>
+
+              {isSwipeOpen && (
+                <LinearGradient
+                  pointerEvents="none"
+                  colors={
+                    isDark
+                      ? [
+                        cardBgColor,
+                        "rgba(22, 22, 24, 0.92)",
+                        "rgba(22, 22, 24, 0.48)",
+                        "rgba(22, 22, 24, 0)",
+                      ]
+                      : [
+                        cardBgColor,
+                        "rgba(255, 255, 255, 0.92)",
+                        "rgba(255, 255, 255, 0.45)",
+                        "rgba(255, 255, 255, 0)",
+                      ]
+                  }
+                  locations={[0, 0.42, 0.74, 1]}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={[styles.swipeEdgeFade, { width: 88 }]}
+                />
               )}
-            </View>
-          </View>
-        </Animated.View>
-      </Animated.View>
-    </Pressable>
-    </Swipeable>
+            </Animated.View>
+          </Animated.View>
+        </Pressable>
+      </Swipeable>
+    </Animated.View>
   );
 });
 
@@ -2845,7 +3290,7 @@ const StackedChildCard = React.memo(function StackedChildCard({
 
   // Swipeable ref to close after slide action click
   const swipeableRef = useRef<any>(null);
-
+  const [isSwipeOpen, setIsSwipeOpen] = useState(false);
   // Tactile press animation (native driver)
   const pressScale = useRef(new Animated.Value(1)).current;
 
@@ -2886,12 +3331,41 @@ const StackedChildCard = React.memo(function StackedChildCard({
     }
   }
 
+  const isUnread = !item.isRead && !item.seen && !item.read;
+
+  // Deletion animation state
+  const deleteAnim = useRef(new Animated.Value(1)).current;
+  const isDeletingRef = useRef(false);
+
+  const handleDeletePress = () => {
+    if (isDeletingRef.current) return;
+    isDeletingRef.current = true;
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch { }
+    try {
+      swipeableRef.current?.close();
+    } catch { }
+    Animated.parallel([
+      Animated.timing(deleteAnim, {
+        toValue: 0,
+        duration: 240,
+        easing: Easing.bezier(0.25, 1, 0.36, 1),
+        useNativeDriver: false,
+      }),
+    ]).start(() => {
+      onDelete?.(item);
+    });
+  };
+
+  const showReadAction = isUnread && Boolean(onToggleRead);
+
   const renderRightActions = (
-    _progress?: any,
+    progress?: any,
     _translation?: any,
     swipeableMethods?: any,
   ) => {
-    if (!onDelete && !onToggleRead) return null;
+    if (!onDelete && !showReadAction) return null;
     const closeSwipe = () => {
       try {
         swipeableMethods?.close();
@@ -2900,256 +3374,237 @@ const StackedChildCard = React.memo(function StackedChildCard({
         swipeableRef.current?.close();
       } catch { }
     };
+
     return (
-      <View
-        style={[
-          styles.childSwipeActionsContainer,
-          { backgroundColor: isDark ? "#101012" : "#E2E8F0" },
-        ]}
-      >
-        {onToggleRead && (
-          <TouchableOpacity
-            style={styles.childSwipeActionButton}
-            onPress={() => {
-              closeSwipe();
-              onToggleRead(item);
-            }}
-            activeOpacity={0.85}
-            accessibilityLabel="Mark as read"
-          >
-            <LinearGradient
-              colors={
-                isDark
-                  ? [
-                      "rgba(16,16,16,0.05)",
-                      "rgba(21,53,38,0.72)",
-                      "rgba(21,53,38,0.96)",
-                    ]
-                  : [
-                      "rgba(241,245,249,0.05)",
-                      "rgba(220,252,231,0.72)",
-                      "rgba(187,247,208,0.96)",
-                    ]
-              }
-              locations={[0, 0.4, 1]}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={StyleSheet.absoluteFillObject}
-            />
-            <View
-              style={[
-                styles.swipeActionIconCircle,
-                { backgroundColor: isDark ? "#184726" : "#DCFCE7" },
-              ]}
-            >
-              <Ionicons
-                name="checkmark"
-                size={19}
-                color={isDark ? "#4ADE80" : "#16A34A"}
-              />
-            </View>
-          </TouchableOpacity>
-        )}
-        {onDelete && (
-          <TouchableOpacity
-            style={styles.childSwipeActionButton}
-            onPress={() => {
-              closeSwipe();
-              onDelete(item);
-            }}
-            activeOpacity={0.85}
-            accessibilityLabel="Delete notification"
-          >
-            <LinearGradient
-              colors={
-                isDark
-                  ? [
-                      onToggleRead
-                        ? "rgba(21,53,38,0.35)"
-                        : "rgba(16,16,16,0.05)",
-                      "rgba(53,25,27,0.82)",
-                      "rgba(53,25,27,0.98)",
-                    ]
-                  : [
-                      onToggleRead
-                        ? "rgba(187,247,208,0.35)"
-                        : "rgba(241,245,249,0.05)",
-                      "rgba(254,226,226,0.82)",
-                      "rgba(254,202,202,0.98)",
-                    ]
-              }
-              locations={[0, 0.35, 1]}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={StyleSheet.absoluteFillObject}
-            />
-            <View
-              style={[
-                styles.swipeActionIconCircle,
-                { backgroundColor: isDark ? "#4E201D" : "#FEE2E2" },
-              ]}
-            >
-              <Ionicons
-                name="trash"
-                size={17}
-                color={isDark ? "#FF5A5F" : "#DC2626"}
-              />
-            </View>
-          </TouchableOpacity>
-        )}
-      </View>
+      <SwipeActionsChildView
+        progress={progress}
+        showReadAction={showReadAction}
+        onDelete={onDelete ? handleDeletePress : undefined}
+        onToggleRead={onToggleRead ? () => onToggleRead(item) : undefined}
+        item={item}
+        isDark={isDark}
+        closeSwipe={closeSwipe}
+        handleDeletePress={handleDeletePress}
+      />
     );
   };
 
   return (
-    <Swipeable
-      ref={swipeableRef}
-      renderRightActions={renderRightActions}
-      overshootRight={false}
-      friction={2}
-      containerStyle={styles.childSwipeableContainer}
+    <Animated.View
+      pointerEvents={isDeletingRef.current ? "none" : "auto"}
+      style={{
+        opacity: deleteAnim,
+        maxHeight: deleteAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, 180],
+        }),
+        marginBottom: deleteAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, 8],
+        }),
+        transform: [
+          {
+            scale: deleteAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0.85, 1],
+            }),
+          },
+          {
+            translateX: deleteAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [-70, 0],
+            }),
+          },
+        ],
+        overflow: "hidden",
+      }}
     >
-      <Pressable
-        onPress={handleCardPress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
+      <Swipeable
+        ref={swipeableRef}
+        renderRightActions={renderRightActions}
+        onSwipeableWillOpen={() => setIsSwipeOpen(true)}
+        onSwipeableWillClose={() => setIsSwipeOpen(false)}
+        overshootRight={false}
+        rightThreshold={showReadAction ? 35 : 22}
+        friction={1.5}
+        childrenContainerStyle={{ width: "100%" }}
+        containerStyle={[
+          styles.childSwipeableContainer,
+          { backgroundColor: cardBgColor, width: "100%" },
+        ]}
       >
-        <Animated.View style={{ transform: [{ scale: pressScale }] }}>
-          <Animated.View
-            style={[
-              styles.stackedCardContainer,
-            isDetail && styles.stackedDetailCardContainer,
-            {
-              backgroundColor: cardBgColor,
-              boxShadow: isDark
-                ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
-                : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
-              borderWidth: 0,
-            },
-          ]}
+        <Pressable
+          style={{ width: "100%" }}
+          onPress={handleCardPress}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
         >
-          {/* Avatar with mini badge */}
-          <View style={styles.stackedAvatarWrapper}>
-            {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={styles.stackedAvatar} />
-            ) : (
-              <View
-                style={[
-                  styles.stackedAvatarFallback,
-                  { backgroundColor: fallbackBg },
-                ]}
-              >
-                {fallbackInitial ? (
-                  <Text
-                    style={[
-                      styles.stackedInitialText,
-                      {
-                        fontSize: scaleFont(16),
-                        color: isFeedbackItem
-                          ? (isDark ? "#000000" : "#11141A")
-                          : "#FFFFFF",
-                      },
-                    ]}
-                  >
-                    {fallbackInitial}
-                  </Text>
-                ) : null}
-              </View>
-            )}
-
-            <View
+          <Animated.View style={{ width: "100%", transform: [{ scale: pressScale }] }}>
+            <Animated.View
               style={[
-                styles.stackedMiniBadge,
+                styles.stackedCardContainer,
+                isDetail && styles.stackedDetailCardContainer,
                 {
-                  backgroundColor: typeConfig.bgColor,
-                  borderColor: isDark ? "#161618" : "#FFFFFF",
+                  width: "100%",
+                  backgroundColor: cardBgColor,
+                  boxShadow: isDark
+                    ? "inset 0 1px 1px rgba(255, 255, 255, 0.11), 0 1px 0px rgba(0, 0, 0, 0.1)"
+                    : "inset 0 1px 2px rgba(255, 255, 255, 0.86), 0 0px 0px rgba(0, 0, 0, 0.1)",
+                  borderWidth: 0,
                 },
               ]}
             >
-              <Ionicons
-                name={typeConfig.icon}
-                size={9}
-                color="#FFFFFF"
-                style={
-                  isMissedCall
-                    ? { transform: [{ rotate: "135deg" }] }
-                    : undefined
-                }
-              />
-            </View>
-          </View>
-
-          {/* Card Details */}
-          <View
-            style={[styles.stackedCardContent, isDetail && { paddingTop: 2 }]}
-          >
-            {isMissedCall ? (
-              <>
-                <View style={styles.missedCallHeaderRow}>
-                  <Ionicons
-                    name="call"
-                    size={12}
-                    color="#FF5A5F"
-                    style={{
-                      marginRight: 5,
-                      transform: [{ rotate: "135deg" }],
-                    }}
-                  />
-                  <Text
+              {/* Avatar with mini badge */}
+              <View style={styles.stackedAvatarWrapper}>
+                {avatarUrl ? (
+                  <Image source={{ uri: avatarUrl }} style={styles.stackedAvatar} />
+                ) : (
+                  <View
                     style={[
-                      styles.missedCallBadgeText,
-                      { fontSize: scaleFont(12) },
+                      styles.stackedAvatarFallback,
+                      { backgroundColor: fallbackBg },
                     ]}
                   >
-                    Missed Call
-                  </Text>
-                </View>
-                <Text
-                  numberOfLines={isDetail ? undefined : 1}
+                    {fallbackInitial ? (
+                      <Text
+                        style={[
+                          styles.stackedInitialText,
+                          {
+                            fontSize: scaleFont(16),
+                            color: isFeedbackItem
+                              ? (isDark ? "#000000" : "#11141A")
+                              : "#FFFFFF",
+                          },
+                        ]}
+                      >
+                        {fallbackInitial}
+                      </Text>
+                    ) : null}
+                  </View>
+                )}
+
+                <View
                   style={[
-                    styles.stackedMessageTitle,
-                    isDetail && styles.stackedMessageTitleMultiline,
+                    styles.stackedMiniBadge,
                     {
-                      fontSize: scaleFont(13.5),
-                      color: isDark ? "#FFFFFF" : "#11141A",
+                      backgroundColor: typeConfig.bgColor,
+                      borderColor: isDark ? "#161618" : "#FFFFFF",
                     },
                   ]}
                 >
-                  {callDisplayTitle}
-                </Text>
-              </>
-            ) : (
-              <Text
-                numberOfLines={isDetail ? undefined : 1}
-                style={[
-                  styles.stackedMessageTitle,
-                  isDetail && styles.stackedMessageTitleMultiline,
-                  {
-                    fontSize: scaleFont(13.5),
-                    color: isDark ? "#FFFFFF" : "#11141A",
-                  },
-                ]}
-              >
-                {callDisplayTitle}
-              </Text>
-            )}
+                  <Ionicons
+                    name={typeConfig.icon}
+                    size={9}
+                    color="#FFFFFF"
+                    style={
+                      isMissedCall
+                        ? { transform: [{ rotate: "135deg" }] }
+                        : undefined
+                    }
+                  />
+                </View>
+              </View>
 
-            <Text
-              style={[
-                styles.stackedTimestampText,
-                {
-                  fontSize: scaleFont(11.5),
-                  color: isDark ? "#7E8590" : "#8A909A",
-                },
-              ]}
-            >
-              {formatStackedTime(item.timestamp)}
-            </Text>
-          </View>
-        </Animated.View>
-      </Animated.View>
-    </Pressable>
-    </Swipeable>
+              {/* Card Details */}
+              <View
+                style={[styles.stackedCardContent, isDetail && { paddingTop: 2 }]}
+              >
+                {isMissedCall ? (
+                  <>
+                    <View style={styles.missedCallHeaderRow}>
+                      <Ionicons
+                        name="call"
+                        size={12}
+                        color="#FF5A5F"
+                        style={{
+                          marginRight: 5,
+                          transform: [{ rotate: "135deg" }],
+                        }}
+                      />
+                      <Text
+                        style={[
+                          styles.missedCallBadgeText,
+                          { fontSize: scaleFont(12) },
+                        ]}
+                      >
+                        Missed Call
+                      </Text>
+                    </View>
+                    <Text
+                      numberOfLines={isDetail ? undefined : 1}
+                      style={[
+                        styles.stackedMessageTitle,
+                        isDetail && styles.stackedMessageTitleMultiline,
+                        {
+                          fontSize: scaleFont(13.5),
+                          color: isDark ? "#FFFFFF" : "#11141A",
+                        },
+                      ]}
+                    >
+                      {callDisplayTitle}
+                      {isUnread && (
+                        <Text style={{ color: isDark ? "#FFFFFF" : "#11141A", fontWeight: "800" }}> •</Text>
+                      )}
+                    </Text>
+                  </>
+                ) : (
+                  <Text
+                    numberOfLines={isDetail ? undefined : 1}
+                    style={[
+                      styles.stackedMessageTitle,
+                      isDetail && styles.stackedMessageTitleMultiline,
+                      {
+                        fontSize: scaleFont(13.5),
+                        color: isDark ? "#FFFFFF" : "#11141A",
+                      },
+                    ]}
+                  >
+                    {callDisplayTitle}
+                  </Text>
+                )}
+
+                <Text
+                  style={[
+                    styles.stackedTimestampText,
+                    {
+                      fontSize: scaleFont(11.5),
+                      color: isDark ? "#7E8590" : "#8A909A",
+                    },
+                  ]}
+                >
+                  {formatStackedTime(item.timestamp)}
+                </Text>
+              </View>
+
+              {isSwipeOpen && (
+                <LinearGradient
+                  pointerEvents="none"
+                  colors={
+                    isDark
+                      ? [
+                          cardBgColor,
+                          "rgba(22, 22, 24, 0.92)",
+                          "rgba(22, 22, 24, 0.48)",
+                          "rgba(22, 22, 24, 0)",
+                        ]
+                      : [
+                          cardBgColor,
+                          "rgba(255, 255, 255, 0.92)",
+                          "rgba(255, 255, 255, 0.45)",
+                          "rgba(255, 255, 255, 0)",
+                        ]
+                  }
+                  locations={[0, 0.42, 0.74, 1]}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={[styles.swipeEdgeFade, { width: 88 }]}
+                />
+              )}
+            </Animated.View>
+          </Animated.View>
+        </Pressable>
+      </Swipeable>
+    </Animated.View>
   );
 });
 
@@ -3171,6 +3626,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     zIndex: 20,
     backgroundColor: "transparent",
+  },
+  swipeEdgeFade: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    width: 104,
+    zIndex: 10,
+    elevation: 10,
   },
   modernHeaderBtn: {
     width: 40,
@@ -3196,7 +3660,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginLeft: 12,
     letterSpacing: -0.4,
+    flex: 1,
   },
+
 
   /* 2. Filter Pills */
   filtersWrapper: {
@@ -3286,26 +3752,28 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   swipeActionsContainer: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    justifyContent: "flex-end",
+    width: 136,
     height: "100%",
-    backgroundColor: "#101010",
-    paddingHorizontal: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    
+    position: "relative",
     overflow: "hidden",
+    paddingRight: 16,
+    gap: 10,
+    backgroundColor: "transparent",
   },
   swipeActionButton: {
-    width: 54,
+    width: 44,
     height: "100%",
     justifyContent: "center",
     alignItems: "center",
-    overflow: "hidden",
-    position: "relative",
   },
   swipeActionIconCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -3316,6 +3784,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#4E201D",
   },
   cardContainer: {
+    width: "100%",
     borderRadius: 26,
     marginHorizontal: 0,
     paddingVertical: 14,
@@ -3426,6 +3895,42 @@ const styles = StyleSheet.create({
     letterSpacing: -0.1,
     flexShrink: 1,
   },
+  detailContentContainer: {
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  feedbackResponseBox: {
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  feedbackResponseHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  feedbackResponseTitle: {
+    fontWeight: "600",
+  },
+  feedbackResponseText: {
+    lineHeight: 18,
+  },
+  feedbackMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  feedbackMetaChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  feedbackMetaChipText: {
+    fontWeight: "600",
+  },
 
   /* Inline Friend Request Action Buttons */
   friendButtonsRow: {
@@ -3511,6 +4016,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   childSwipeableContainer: {
+    width: "100%",
     borderRadius: 22,
     overflow: "hidden",
     marginBottom: 8,
@@ -3532,7 +4038,15 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     position: "relative",
   },
+  childSwipeActionIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   stackedCardContainer: {
+    width: "100%",
     flexDirection: "row",
     alignItems: "center",
     borderRadius: 22,
@@ -3609,6 +4123,39 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+  },
+  skeletonContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    gap: 10,
+  },
+  skeletonCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 26,
+    minHeight: 74,
+  },
+  skeletonAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 14,
+  },
+  skeletonContent: {
+    flex: 1,
+    gap: 8,
+  },
+  skeletonLineTitle: {
+    width: "48%",
+    height: 14,
+    borderRadius: 7,
+  },
+  skeletonLineBody: {
+    width: "75%",
+    height: 12,
+    borderRadius: 6,
   },
   emptyContainer: {
     flex: 1,
